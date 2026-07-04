@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use thiserror::Error;
 
 pub trait Tmux {
@@ -30,7 +30,7 @@ pub enum TmuxError {
 pub struct Window {
     pub name: String,
     pub running_command: String,
-    pub running_time: Duration,
+    pub started_at: Option<Instant>,
     pub notification_pending: bool,
 }
 
@@ -46,19 +46,19 @@ impl Tmux for TmuxDriver {
             Window {
                 name: "agent-1".to_string(),
                 running_command: "cargo build".to_string(),
-                running_time: Duration::from_secs(125),
+                started_at: Some(Instant::now() - Duration::from_secs(125)),
                 notification_pending: false,
             },
             Window {
                 name: "agent-2".to_string(),
                 running_command: "npm test".to_string(),
-                running_time: Duration::from_secs(45),
+                started_at: Some(Instant::now() - Duration::from_secs(45)),
                 notification_pending: true,
             },
             Window {
                 name: "agent-3".to_string(),
                 running_command: "python main.py".to_string(),
-                running_time: Duration::from_secs(300),
+                started_at: Some(Instant::now() - Duration::from_secs(300)),
                 notification_pending: false,
             },
         ])
@@ -68,7 +68,7 @@ impl Tmux for TmuxDriver {
         Ok(Window {
             name: name.to_string(),
             running_command: String::new(),
-            running_time: Duration::ZERO,
+            started_at: None,
             notification_pending: false,
         })
     }
@@ -108,7 +108,7 @@ mod tests {
         assert_eq!(windows.len(), 3);
         assert_eq!(windows[0].name, "agent-1");
         assert_eq!(windows[0].running_command, "cargo build");
-        assert_eq!(windows[0].running_time, Duration::from_secs(125));
+        assert!(windows[0].started_at.is_some());
         assert!(!windows[0].notification_pending);
         assert!(windows[1].notification_pending);
     }
@@ -119,7 +119,7 @@ mod tests {
         let window = driver.create_window("new-window").unwrap();
         assert_eq!(window.name, "new-window");
         assert_eq!(window.running_command, "");
-        assert_eq!(window.running_time, Duration::ZERO);
+        assert!(window.started_at.is_none());
         assert!(!window.notification_pending);
     }
 
@@ -146,12 +146,12 @@ mod tests {
         let window = Window {
             name: "test".to_string(),
             running_command: "echo hello".to_string(),
-            running_time: Duration::from_secs(60),
+            started_at: Some(Instant::now() - Duration::from_secs(60)),
             notification_pending: true,
         };
         assert_eq!(window.name, "test");
         assert_eq!(window.running_command, "echo hello");
-        assert_eq!(window.running_time, Duration::from_secs(60));
+        assert!(window.started_at.is_some());
         assert!(window.notification_pending);
     }
 }
