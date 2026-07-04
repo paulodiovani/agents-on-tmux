@@ -14,7 +14,7 @@ struct Cli {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     use backends::Tmux;
     let cli = Cli::parse();
-    let driver = backends::TmuxDriver;
+    let driver = backends::TmuxDriver::new();
     driver.create_session_if_not_exists()?;
 
     if cli.tui {
