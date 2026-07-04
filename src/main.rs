@@ -26,7 +26,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let parent_session = backends::detect_parent_session()?;
         let parent_driver = backends::TmuxDriver::new(&parent_session);
 
-        parent_driver.split_window("aot --tui")?;
+        let exe = std::env::current_exe()?;
+        let command = format!("{} --tui", exe.to_string_lossy());
+        parent_driver.split_window(&command)?;
         nested_driver.attach_session()?;
     }
 
