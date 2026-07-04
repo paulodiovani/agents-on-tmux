@@ -8,3 +8,8 @@ name = "aot"
 path = "src/main.rs"
 
 [dependencies]
+thiserror = "2.0"
+ratatui = "0.29"
+crossterm = "0.28"
+clap = { version = "4", features = ["derive"] }
+ctrlc = "3"
