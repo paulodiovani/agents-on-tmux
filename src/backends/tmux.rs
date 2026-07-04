@@ -27,6 +27,8 @@ pub trait Tmux {
     #[allow(dead_code)]
     /// Sends keys to the specified window.
     fn send_keys(&self, window_id: u32, command: &str) -> Result<(), TmuxError>;
+    /// Splits the current window horizontally, creating a side pane.
+    fn split_window(&self, command: &str) -> Result<String, TmuxError>;
 }
 
 pub const SESSION_NAME: &str = "agents-on-tmux";
@@ -47,6 +49,8 @@ pub enum TmuxError {
     },
     #[error("tmux not available")]
     TmuxNotAvailable,
+    #[error("Not running inside a tmux session")]
+    NotInsideTmux,
 }
 
 /// Represents a tmux window and its runtime state.
@@ -57,6 +61,24 @@ pub struct Window {
     pub running_command: String,
     pub started_at: Option<Instant>,
     pub notification_pending: bool,
+}
+
+/// Detects the parent tmux session by querying tmux for the current session name.
+pub fn detect_parent_session() -> Result<String, TmuxError> {
+    let output = Command::new("tmux")
+        .args(["display-message", "-p", "#S"])
+        .output()
+        .map_err(|e| TmuxError::CommandFailed {
+            message: format!("Failed to execute tmux: {}", e),
+            stderr: String::new(),
+            code: None,
+        })?;
+
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    } else {
+        Err(TmuxError::NotInsideTmux)
+    }
 }
 
 /// Real tmux command executor that calls the tmux binary.
@@ -115,20 +137,22 @@ impl CommandExecutor for ShellCommandExecutor {
 /// tmux driver that communicates with the tmux server.
 pub struct TmuxDriver<E: CommandExecutor = ShellCommandExecutor> {
     executor: E,
+    session: String,
 }
 
 impl TmuxDriver<ShellCommandExecutor> {
     /// Creates a new TmuxDriver with the real command executor.
-    pub fn new() -> Self {
+    pub fn new(session: &str) -> Self {
         Self {
             executor: ShellCommandExecutor,
+            session: session.to_string(),
         }
     }
 }
 
 impl Default for TmuxDriver<ShellCommandExecutor> {
     fn default() -> Self {
-        Self::new()
+        Self::new(SESSION_NAME)
     }
 }
 
@@ -136,7 +160,10 @@ impl<E: CommandExecutor> TmuxDriver<E> {
     /// Creates a new TmuxDriver with a custom command executor.
     #[cfg(test)]
     pub fn with_executor(executor: E) -> Self {
-        Self { executor }
+        Self {
+            executor,
+            session: SESSION_NAME.to_string(),
+        }
     }
 }
 
@@ -163,13 +190,13 @@ fn parse_window_line(line: &str) -> Option<Window> {
 impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
     /// Ensures the tmux session exists, creating it if necessary.
     fn create_session_if_not_exists(&self) -> Result<(), TmuxError> {
-        let has_session = self.executor.execute(&["has-session", "-t", SESSION_NAME]);
+        let has_session = self.executor.execute(&["has-session", "-t", &self.session]);
 
         if has_session.is_err() {
             self.executor
-                .execute(&["new-session", "-d", "-s", SESSION_NAME])?;
+                .execute(&["new-session", "-d", "-s", &self.session])?;
             self.executor
-                .execute(&["set-option", "-t", SESSION_NAME, "status", "off"])?;
+                .execute(&["set-option", "-t", &self.session, "status", "off"])?;
         }
 
         Ok(())
@@ -178,7 +205,7 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
     /// Attaches to the tmux session, inheriting stdio. Blocks until detached.
     fn attach_session(&self) -> Result<(), TmuxError> {
         self.executor
-            .execute_inherit_stdio(&["attach-session", "-t", SESSION_NAME])
+            .execute_inherit_stdio(&["attach-session", "-t", &self.session])
     }
 
     /// Lists all windows in the session.
@@ -186,7 +213,7 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
         let output = self.executor.execute(&[
             "list-windows",
             "-t",
-            SESSION_NAME,
+            &self.session,
             "-F",
             "#{window_index}\t#{window_name}\t#{window_activity_flag}\t#{pane_current_command}",
         ])?;
@@ -199,7 +226,7 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
     /// Creates a new window with the given name.
     fn create_window(&self, name: &str) -> Result<Window, TmuxError> {
         self.executor
-            .execute(&["new-window", "-t", SESSION_NAME, "-n", name])?;
+            .execute(&["new-window", "-t", &self.session, "-n", name])?;
 
         let windows = self.list_windows()?;
         windows
@@ -210,26 +237,46 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
 
     /// Kills the window with the given id.
     fn kill_window(&self, id: u32) -> Result<(), TmuxError> {
-        self.executor
-            .execute(&["kill-window", "-t", &format!("{}:{}", SESSION_NAME, id)])?;
+        let target = format!("{}:{}", self.session, id);
+        self.executor.execute(&["kill-window", "-t", &target])?;
         Ok(())
     }
 
     /// Selects (focuses) the window with the given id.
     fn select_window(&self, id: u32) -> Result<(), TmuxError> {
-        self.executor
-            .execute(&["select-window", "-t", &format!("{}:{}", SESSION_NAME, id)])?;
+        let target = format!("{}:{}", self.session, id);
+        self.executor.execute(&["select-window", "-t", &target])?;
         Ok(())
     }
 
     /// Sends keys to the specified window.
     fn send_keys(&self, window_id: u32, command: &str) -> Result<(), TmuxError> {
-        let target = format!("{}:{}", SESSION_NAME, window_id);
+        let target = format!("{}:{}", self.session, window_id);
         self.executor
             .execute(&["send-keys", "-t", &target, "-l", command])?;
         self.executor
             .execute(&["send-keys", "-t", &target, "Enter"])?;
         Ok(())
+    }
+
+    /// Splits the current window horizontally, creating a side pane.
+    fn split_window(&self, command: &str) -> Result<String, TmuxError> {
+        self.executor
+            .execute(&[
+                "split-window",
+                "-h",
+                "-b",
+                "-l",
+                "30",
+                "-d",
+                "-P",
+                "-F",
+                "#{pane_id}",
+                "-t",
+                &self.session,
+                command,
+            ])
+            .map(|s| s.trim().to_string())
     }
 }
 
@@ -247,6 +294,8 @@ mod tests {
         session_exists: RefCell<bool>,
         /// Simulated windows.
         windows: RefCell<Vec<Window>>,
+        /// Simulated pane ID returned by split-window.
+        pane_id: RefCell<String>,
     }
 
     impl MockCommandExecutor {
@@ -255,6 +304,7 @@ mod tests {
                 commands: RefCell::new(Vec::new()),
                 session_exists: RefCell::new(false),
                 windows: RefCell::new(Vec::new()),
+                pane_id: RefCell::new("%99".to_string()),
             }
         }
 
@@ -334,6 +384,7 @@ mod tests {
                 }
                 Some(&"select-window") => Ok(String::new()),
                 Some(&"send-keys") => Ok(String::new()),
+                Some(&"split-window") => Ok(self.pane_id.borrow().clone()),
                 _ => Err(TmuxError::CommandFailed {
                     message: format!("unknown command: {:?}", args),
                     stderr: String::new(),
@@ -485,5 +536,35 @@ mod tests {
         assert_eq!(window.running_command, "echo hello");
         assert!(window.started_at.is_some());
         assert!(window.notification_pending);
+    }
+
+    #[test]
+    fn test_split_window() {
+        let executor = MockCommandExecutor::with_session();
+        let driver = TmuxDriver::with_executor(executor);
+        let pane_id = driver.split_window("aot --tui").unwrap();
+        assert_eq!(pane_id, "%99");
+    }
+
+    #[test]
+    fn test_split_window_command_args() {
+        let executor = MockCommandExecutor::with_session();
+        let driver = TmuxDriver::with_executor(executor);
+        let _ = driver.split_window("aot --tui");
+
+        let commands = driver.executor.commands.borrow();
+        let split_cmd = commands
+            .iter()
+            .find(|cmd| cmd.first().map(|s| s.as_str()) == Some("split-window"))
+            .unwrap();
+
+        assert!(split_cmd.contains(&"-h".to_string()));
+        assert!(split_cmd.contains(&"-b".to_string()));
+        assert!(split_cmd.contains(&"-l".to_string()));
+        assert!(split_cmd.contains(&"30".to_string()));
+        assert!(split_cmd.contains(&"-d".to_string()));
+        assert!(split_cmd.contains(&"-t".to_string()));
+        assert!(split_cmd.contains(&SESSION_NAME.to_string()));
+        assert!(split_cmd.contains(&"aot --tui".to_string()));
     }
 }

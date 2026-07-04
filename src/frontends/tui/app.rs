@@ -262,6 +262,10 @@ mod tests {
         fn send_keys(&self, _window_id: u32, _command: &str) -> Result<(), TmuxError> {
             Ok(())
         }
+
+        fn split_window(&self, _command: &str) -> Result<String, TmuxError> {
+            Ok("%99".to_string())
+        }
     }
 
     #[test]

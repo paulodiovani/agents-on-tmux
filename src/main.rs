@@ -14,16 +14,20 @@ struct Cli {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     use backends::Tmux;
     let cli = Cli::parse();
-    let driver = backends::TmuxDriver::new();
-    driver.create_session_if_not_exists()?;
+    let nested_driver = backends::TmuxDriver::new(backends::SESSION_NAME);
+    nested_driver.create_session_if_not_exists()?;
 
     if cli.tui {
         let terminal = ratatui::init();
-        let mut app = frontends::App::new(&driver)?;
-        app.run(terminal, &driver)?;
+        let mut app = frontends::App::new(&nested_driver)?;
+        app.run(terminal, &nested_driver)?;
         ratatui::restore();
     } else {
-        driver.attach_session()?;
+        let parent_session = backends::detect_parent_session()?;
+        let parent_driver = backends::TmuxDriver::new(&parent_session);
+
+        parent_driver.split_window("aot --tui")?;
+        nested_driver.attach_session()?;
     }
 
     Ok(())
