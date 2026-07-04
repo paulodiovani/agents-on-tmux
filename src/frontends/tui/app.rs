@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crossterm::event;
 use ratatui::DefaultTerminal;
@@ -30,13 +30,20 @@ impl App {
         driver: &T,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let theme = Theme::default();
+        let tick_rate = Duration::from_secs(60);
+        let mut last_draw = Instant::now() - tick_rate;
         while self.running {
+            let should_redraw = last_draw.elapsed() >= tick_rate;
+            if should_redraw {
+                last_draw = Instant::now();
+            }
             terminal.draw(|frame| ui::draw(frame, self, &theme))?;
             if event::poll(Duration::from_millis(100))?
                 && let event::Event::Key(key) = event::read()?
                 && key.kind == event::KeyEventKind::Press
             {
                 self.handle_action(key_to_action(key), driver);
+                last_draw = Instant::now();
             }
         }
         Ok(())

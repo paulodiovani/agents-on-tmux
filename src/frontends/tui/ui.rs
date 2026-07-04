@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::time::Instant;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout};
@@ -11,10 +11,11 @@ use crate::frontends::tui::app::App;
 use crate::frontends::tui::theme::Theme;
 
 pub fn draw(frame: &mut Frame, app: &App, theme: &Theme) {
+    let footer_height = calculate_footer_height(frame.area().width);
     let chunks = Layout::vertical([
         Constraint::Length(1),
         Constraint::Min(0),
-        Constraint::Length(2),
+        Constraint::Length(footer_height),
     ])
     .split(frame.area());
 
@@ -36,25 +37,36 @@ fn draw_cards(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, theme: 
         return;
     }
 
-    let constraints: Vec<Constraint> = windows.iter().map(|_| Constraint::Length(3)).collect();
+    let constraints: Vec<Constraint> = windows.iter().map(|_| Constraint::Length(4)).collect();
     let card_areas = Layout::vertical(constraints).split(area);
 
     for (i, window) in windows.iter().enumerate() {
         let is_selected = i == app.selected();
-        let border_style = if window.notification_pending {
-            theme.card_border_notification
-        } else if is_selected {
-            theme.card_border_selected
-        } else {
-            theme.card_border
+        let is_notification = window.notification_pending;
+
+        let (border_style, border_set) = match (is_selected, is_notification) {
+            (true, true) => (
+                theme
+                    .card_border_selected
+                    .patch(theme.card_border_notification),
+                theme.selected_border_set,
+            ),
+            (true, false) => (theme.card_border_selected, theme.selected_border_set),
+            (false, true) => (
+                theme.card_border_notification,
+                ratatui::symbols::border::PLAIN,
+            ),
+            (false, false) => (theme.card_border, ratatui::symbols::border::PLAIN),
         };
 
-        let block = Block::bordered().border_style(border_style);
+        let block = Block::bordered()
+            .border_style(border_style)
+            .border_set(border_set);
         let inner = block.inner(card_areas[i]);
         frame.render_widget(block, card_areas[i]);
 
         let title = Line::from(Span::styled(&window.name, theme.card_title));
-        let time_str = format_duration(window.running_time);
+        let time_str = format_elapsed(window.started_at);
         let detail = if window.running_command.is_empty() {
             Line::from(Span::styled(time_str, theme.card_detail))
         } else {
@@ -72,6 +84,13 @@ fn draw_cards(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, theme: 
 }
 
 fn draw_footer(frame: &mut Frame, area: ratatui::layout::Rect, theme: &Theme) {
+    let entries = build_footer_entries(theme);
+    let lines = wrap_entries(&entries, area.width as usize);
+    let footer = Paragraph::new(lines);
+    frame.render_widget(footer, area);
+}
+
+fn build_footer_entries(theme: &Theme) -> Vec<(Vec<Span<'static>>, usize)> {
     let keys = [
         ("↑↓", "navigate"),
         ("⏎", "focus"),
@@ -80,57 +99,142 @@ fn draw_footer(frame: &mut Frame, area: ratatui::layout::Rect, theme: &Theme) {
         ("q", "quit"),
     ];
 
-    let spans: Vec<Span> = keys
-        .iter()
-        .enumerate()
-        .flat_map(|(i, (key, desc))| {
-            let mut items = vec![
-                Span::styled(*key, theme.footer_key_style),
+    keys.iter()
+        .map(|(key, desc)| {
+            let spans = vec![
+                Span::styled(key.to_string(), theme.footer_key_style),
                 Span::styled(format!(" {}", desc), theme.footer_style),
             ];
-            if i < keys.len() - 1 {
-                items.push(Span::styled("  ", theme.footer_style));
-            }
-            items
+            let width = key.chars().count() + 1 + desc.chars().count();
+            (spans, width)
         })
-        .collect();
-
-    let footer = Paragraph::new(Line::from(spans));
-    frame.render_widget(footer, area);
+        .collect()
 }
 
-fn format_duration(duration: Duration) -> String {
-    let total_secs = duration.as_secs();
-    let minutes = total_secs / 60;
-    let seconds = total_secs % 60;
-    if minutes > 0 {
-        format!("{}m {}s", minutes, seconds)
-    } else {
-        format!("{}s", seconds)
+fn wrap_entries(entries: &[(Vec<Span<'static>>, usize)], width: usize) -> Vec<Line<'static>> {
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    let mut current_spans: Vec<Span<'static>> = Vec::new();
+    let mut current_width: usize = 0;
+
+    for (spans, entry_width) in entries.iter() {
+        let separator_width = if current_width > 0 { 2 } else { 0 };
+        let needed = current_width + separator_width + entry_width;
+
+        if needed > width && current_width > 0 {
+            lines.push(Line::from(current_spans));
+            current_spans = Vec::new();
+            current_width = 0;
+        }
+
+        if !current_spans.is_empty() {
+            current_spans.push(Span::raw("  "));
+            current_width += 2;
+        }
+
+        current_spans.extend(spans.iter().cloned());
+        current_width += entry_width;
     }
+
+    if !current_spans.is_empty() {
+        lines.push(Line::from(current_spans));
+    }
+
+    if lines.is_empty() {
+        lines.push(Line::from(Vec::<Span<'static>>::new()));
+    }
+
+    lines
+}
+
+fn format_elapsed(started_at: Option<Instant>) -> String {
+    match started_at {
+        Some(start) => {
+            let duration = Instant::now().duration_since(start);
+            let total_secs = duration.as_secs();
+            let minutes = total_secs / 60;
+            let seconds = total_secs % 60;
+            if minutes > 0 {
+                format!("{}m {}s", minutes, seconds)
+            } else {
+                format!("{}s", seconds)
+            }
+        }
+        None => String::new(),
+    }
+}
+
+fn calculate_footer_height(width: u16) -> u16 {
+    let keys = [
+        ("↑↓", "navigate"),
+        ("⏎", "focus"),
+        ("n", "new"),
+        ("d", "kill"),
+        ("q", "quit"),
+    ];
+
+    let widths: Vec<usize> = keys
+        .iter()
+        .map(|(key, desc)| key.chars().count() + 1 + desc.chars().count())
+        .collect();
+
+    let mut lines = 1;
+    let mut current_width = 0;
+
+    for (i, &entry_width) in widths.iter().enumerate() {
+        let separator_width = if current_width > 0 { 2 } else { 0 };
+        let needed = current_width + separator_width + entry_width;
+
+        if needed > width as usize && current_width > 0 {
+            lines += 1;
+            current_width = 0;
+        }
+
+        if current_width > 0 {
+            current_width += 2;
+        }
+        current_width += entry_width;
+
+        let _ = i;
+    }
+
+    lines
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     #[test]
-    fn test_format_duration_seconds_only() {
-        assert_eq!(format_duration(Duration::from_secs(45)), "45s");
+    fn test_format_elapsed_seconds_only() {
+        let start = Instant::now() - Duration::from_secs(45);
+        assert_eq!(format_elapsed(Some(start)), "45s");
     }
 
     #[test]
-    fn test_format_duration_minutes_and_seconds() {
-        assert_eq!(format_duration(Duration::from_secs(125)), "2m 5s");
+    fn test_format_elapsed_minutes_and_seconds() {
+        let start = Instant::now() - Duration::from_secs(125);
+        assert_eq!(format_elapsed(Some(start)), "2m 5s");
     }
 
     #[test]
-    fn test_format_duration_zero() {
-        assert_eq!(format_duration(Duration::ZERO), "0s");
+    fn test_format_elapsed_none() {
+        assert_eq!(format_elapsed(None), "");
     }
 
     #[test]
-    fn test_format_duration_exact_minute() {
-        assert_eq!(format_duration(Duration::from_secs(60)), "1m 0s");
+    fn test_format_elapsed_exact_minute() {
+        let start = Instant::now() - Duration::from_secs(60);
+        assert_eq!(format_elapsed(Some(start)), "1m 0s");
+    }
+
+    #[test]
+    fn test_calculate_footer_height_wide() {
+        assert_eq!(calculate_footer_height(120), 1);
+    }
+
+    #[test]
+    fn test_calculate_footer_height_narrow() {
+        assert_eq!(calculate_footer_height(30), 2);
     }
 }
