@@ -9,6 +9,8 @@ use crate::frontends::tui::event::{Action, key_to_action};
 use crate::frontends::tui::theme::Theme;
 use crate::frontends::tui::ui;
 
+const REFRESH_INTERVAL_SECS: u64 = 5;
+
 /// Main application state for the TUI frontend.
 pub struct App {
     running: bool,
@@ -39,7 +41,7 @@ impl App {
         driver: &T,
     ) -> Result<(), Box<dyn std::error::Error>> {
         let theme = Theme::default();
-        let tick_rate = Duration::from_secs(60);
+        let tick_rate = Duration::from_secs(REFRESH_INTERVAL_SECS);
         let mut last_draw = Instant::now() - tick_rate;
         while self.running {
             let should_redraw = last_draw.elapsed() >= tick_rate;
