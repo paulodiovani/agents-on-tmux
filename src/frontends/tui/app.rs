@@ -87,7 +87,7 @@ impl App {
     /// Focuses the currently selected tmux window.
     pub fn focus_window<T: Tmux>(&self, driver: &T) {
         if let Some(window) = self.windows.get(self.selected) {
-            let _ = driver.select_window(&window.name);
+            let _ = driver.select_window(window.id);
         }
     }
 
@@ -102,7 +102,7 @@ impl App {
     /// Kills the currently selected tmux window.
     pub fn kill_window<T: Tmux>(&mut self, driver: &T) {
         if let Some(window) = self.windows.get(self.selected) {
-            let _ = driver.kill_window(&window.name);
+            let _ = driver.kill_window(window.id);
             self.windows.remove(self.selected);
             if self.selected >= self.windows.len() && self.selected > 0 {
                 self.selected -= 1;
