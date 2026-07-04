@@ -1,3 +1,4 @@
+use std::process::Command;
 use std::time::{Duration, Instant};
 use thiserror::Error;
 
@@ -28,8 +29,12 @@ pub enum TmuxError {
     SessionCreationFailed,
     #[error("Window not found")]
     WindowNotFound,
-    #[error("Command failed")]
-    CommandFailed,
+    #[error("Command failed: {message}")]
+    CommandFailed {
+        message: String,
+        stderr: String,
+        code: Option<i32>,
+    },
     #[error("tmux not available")]
     TmuxNotAvailable,
 }
@@ -46,6 +51,29 @@ pub struct Window {
 
 /// tmux driver that communicates with the tmux server.
 pub struct TmuxDriver;
+
+#[allow(dead_code)]
+fn run_tmux_cmd(args: &[&str]) -> Result<String, TmuxError> {
+    let output =
+        Command::new("tmux")
+            .args(args)
+            .output()
+            .map_err(|e| TmuxError::CommandFailed {
+                message: format!("Failed to execute tmux: {}", e),
+                stderr: String::new(),
+                code: None,
+            })?;
+
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    } else {
+        Err(TmuxError::CommandFailed {
+            message: format!("tmux {} failed", args.join(" ")),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            code: output.status.code(),
+        })
+    }
+}
 
 impl Tmux for TmuxDriver {
     /// Ensures the tmux session exists, creating it if necessary.
@@ -116,6 +144,29 @@ mod tests {
     #[test]
     fn test_session_name() {
         assert_eq!(SESSION_NAME, "agents-on-tmux");
+    }
+
+    #[test]
+    fn test_run_tmux_cmd_success() {
+        let result = run_tmux_cmd(&["-V"]);
+        assert!(result.is_ok());
+        let output = result.unwrap();
+        assert!(output.contains("tmux"));
+    }
+
+    #[test]
+    fn test_run_tmux_cmd_failure() {
+        let result = run_tmux_cmd(&["invalid-command-that-does-not-exist"]);
+        assert!(result.is_err());
+        if let Err(TmuxError::CommandFailed {
+            message,
+            stderr,
+            code,
+        }) = result
+        {
+            assert!(message.contains("failed"));
+            assert!(!stderr.is_empty() || code.is_some());
+        }
     }
 
     #[test]
