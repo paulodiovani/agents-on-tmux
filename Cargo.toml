@@ -8,3 +8,4 @@ name = "aot"
 path = "src/main.rs"
 
 [dependencies]
+thiserror = "2.0"
