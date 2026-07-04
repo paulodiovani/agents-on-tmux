@@ -6,6 +6,8 @@ use thiserror::Error;
 pub trait Tmux {
     /// Ensures the tmux session exists, creating it if necessary.
     fn create_session_if_not_exists(&self) -> Result<(), TmuxError>;
+    /// Attaches to the tmux session, inheriting stdio. Blocks until detached.
+    fn attach_session(&self) -> Result<(), TmuxError>;
     /// Lists all windows in the session.
     fn list_windows(&self) -> Result<Vec<Window>, TmuxError>;
     /// Creates a new window with the given name.
@@ -75,10 +77,48 @@ fn run_tmux_cmd(args: &[&str]) -> Result<String, TmuxError> {
     }
 }
 
+fn run_tmux_cmd_inherit_stdio(args: &[&str]) -> Result<(), TmuxError> {
+    let status = Command::new("tmux")
+        .args(args)
+        .env_remove("TMUX")
+        .env_remove("TMUX_TMPDIR")
+        .stdin(std::process::Stdio::inherit())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .status()
+        .map_err(|e| TmuxError::CommandFailed {
+            message: format!("Failed to execute tmux: {}", e),
+            stderr: String::new(),
+            code: None,
+        })?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(TmuxError::CommandFailed {
+            message: format!("tmux {} failed", args.join(" ")),
+            stderr: String::new(),
+            code: status.code(),
+        })
+    }
+}
+
 impl Tmux for TmuxDriver {
     /// Ensures the tmux session exists, creating it if necessary.
     fn create_session_if_not_exists(&self) -> Result<(), TmuxError> {
+        let has_session = run_tmux_cmd(&["has-session", "-t", SESSION_NAME]);
+
+        if has_session.is_err() {
+            run_tmux_cmd(&["new-session", "-d", "-s", SESSION_NAME])?;
+            run_tmux_cmd(&["set-option", "-t", SESSION_NAME, "status", "off"])?;
+        }
+
         Ok(())
+    }
+
+    /// Attaches to the tmux session, inheriting stdio. Blocks until detached.
+    fn attach_session(&self) -> Result<(), TmuxError> {
+        run_tmux_cmd_inherit_stdio(&["attach-session", "-t", SESSION_NAME])
     }
 
     /// Lists all windows in the session.
@@ -172,7 +212,14 @@ mod tests {
     #[test]
     fn test_create_session_if_not_exists() {
         let driver = TmuxDriver;
-        assert!(driver.create_session_if_not_exists().is_ok());
+        let result = driver.create_session_if_not_exists();
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_has_session_check() {
+        let result = run_tmux_cmd(&["has-session", "-t", "nonexistent-session-12345"]);
+        assert!(result.is_err());
     }
 
     #[test]
