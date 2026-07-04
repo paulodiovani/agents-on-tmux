@@ -6,12 +6,15 @@ pub trait Tmux {
     fn list_windows(&self) -> Result<Vec<Window>, TmuxError>;
     fn create_window(&self, name: &str) -> Result<Window, TmuxError>;
     fn kill_window(&self, name: &str) -> Result<(), TmuxError>;
+    fn select_window(&self, name: &str) -> Result<(), TmuxError>;
+    #[allow(dead_code)]
     fn send_keys(&self, window: &str, command: &str) -> Result<(), TmuxError>;
 }
 
 pub const SESSION_NAME: &str = "agents-on-tmux";
 
 #[derive(Debug, Error)]
+#[allow(dead_code)]
 pub enum TmuxError {
     #[error("Failed to create session")]
     SessionCreationFailed,
@@ -74,6 +77,10 @@ impl Tmux for TmuxDriver {
         Ok(())
     }
 
+    fn select_window(&self, _name: &str) -> Result<(), TmuxError> {
+        Ok(())
+    }
+
     fn send_keys(&self, _window: &str, _command: &str) -> Result<(), TmuxError> {
         Ok(())
     }
@@ -120,6 +127,12 @@ mod tests {
     fn test_kill_window() {
         let driver = TmuxDriver;
         assert!(driver.kill_window("agent-1").is_ok());
+    }
+
+    #[test]
+    fn test_select_window() {
+        let driver = TmuxDriver;
+        assert!(driver.select_window("agent-1").is_ok());
     }
 
     #[test]
