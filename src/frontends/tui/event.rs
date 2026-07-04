@@ -1,5 +1,6 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
+/// User actions that can be triggered by keyboard input.
 pub enum Action {
     Quit,
     NavigateUp,
@@ -10,6 +11,7 @@ pub enum Action {
     None,
 }
 
+/// Maps a key event to the corresponding application action.
 pub fn key_to_action(key: KeyEvent) -> Action {
     match key.code {
         KeyCode::Char('q') | KeyCode::Esc => Action::Quit,

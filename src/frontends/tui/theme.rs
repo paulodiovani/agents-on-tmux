@@ -1,6 +1,7 @@
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::symbols;
 
+/// Visual theme configuration for the TUI.
 pub struct Theme {
     pub header_style: Style,
     pub footer_style: Style,

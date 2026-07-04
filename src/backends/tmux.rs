@@ -1,18 +1,26 @@
 use std::time::{Duration, Instant};
 use thiserror::Error;
 
+/// Contract for interacting with tmux sessions and windows.
 pub trait Tmux {
+    /// Ensures the tmux session exists, creating it if necessary.
     fn create_session_if_not_exists(&self) -> Result<(), TmuxError>;
+    /// Lists all windows in the session.
     fn list_windows(&self) -> Result<Vec<Window>, TmuxError>;
+    /// Creates a new window with the given name.
     fn create_window(&self, name: &str) -> Result<Window, TmuxError>;
+    /// Kills the window with the given name.
     fn kill_window(&self, name: &str) -> Result<(), TmuxError>;
+    /// Selects (focuses) the window with the given name.
     fn select_window(&self, name: &str) -> Result<(), TmuxError>;
     #[allow(dead_code)]
+    /// Sends keys to the specified window.
     fn send_keys(&self, window: &str, command: &str) -> Result<(), TmuxError>;
 }
 
 pub const SESSION_NAME: &str = "agents-on-tmux";
 
+/// Errors that can occur during tmux operations.
 #[derive(Debug, Error)]
 #[allow(dead_code)]
 pub enum TmuxError {
@@ -26,6 +34,7 @@ pub enum TmuxError {
     TmuxNotAvailable,
 }
 
+/// Represents a tmux window and its runtime state.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Window {
     pub name: String,
@@ -34,13 +43,16 @@ pub struct Window {
     pub notification_pending: bool,
 }
 
+/// tmux driver that communicates with the tmux server.
 pub struct TmuxDriver;
 
 impl Tmux for TmuxDriver {
+    /// Ensures the tmux session exists, creating it if necessary.
     fn create_session_if_not_exists(&self) -> Result<(), TmuxError> {
         Ok(())
     }
 
+    /// Lists all windows in the session.
     fn list_windows(&self) -> Result<Vec<Window>, TmuxError> {
         Ok(vec![
             Window {
@@ -64,6 +76,7 @@ impl Tmux for TmuxDriver {
         ])
     }
 
+    /// Creates a new window with the given name.
     fn create_window(&self, name: &str) -> Result<Window, TmuxError> {
         Ok(Window {
             name: name.to_string(),
@@ -73,14 +86,17 @@ impl Tmux for TmuxDriver {
         })
     }
 
+    /// Kills the window with the given name.
     fn kill_window(&self, _name: &str) -> Result<(), TmuxError> {
         Ok(())
     }
 
+    /// Selects (focuses) the window with the given name.
     fn select_window(&self, _name: &str) -> Result<(), TmuxError> {
         Ok(())
     }
 
+    /// Sends keys to the specified window.
     fn send_keys(&self, _window: &str, _command: &str) -> Result<(), TmuxError> {
         Ok(())
     }

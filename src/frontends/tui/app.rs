@@ -8,6 +8,7 @@ use crate::frontends::tui::event::{Action, key_to_action};
 use crate::frontends::tui::theme::Theme;
 use crate::frontends::tui::ui;
 
+/// Main application state for the TUI frontend.
 pub struct App {
     running: bool,
     selected: usize,
@@ -15,6 +16,7 @@ pub struct App {
 }
 
 impl App {
+    /// Creates a new App, loading windows from the tmux driver.
     pub fn new<T: Tmux>(driver: &T) -> Result<Self, Box<dyn std::error::Error>> {
         let windows = driver.list_windows()?;
         Ok(Self {
@@ -24,6 +26,7 @@ impl App {
         })
     }
 
+    /// Runs the main event loop, drawing the UI and handling input.
     pub fn run<T: Tmux>(
         &mut self,
         mut terminal: DefaultTerminal,
@@ -49,6 +52,7 @@ impl App {
         Ok(())
     }
 
+    /// Dispatches a user action to the appropriate handler.
     pub fn handle_action<T: Tmux>(&mut self, action: Action, driver: &T) {
         match action {
             Action::Quit => self.quit(),
@@ -61,28 +65,33 @@ impl App {
         }
     }
 
+    /// Signals the application to stop running.
     pub fn quit(&mut self) {
         self.running = false;
     }
 
+    /// Moves the selection up by one window.
     pub fn navigate_up(&mut self) {
         if self.selected > 0 {
             self.selected -= 1;
         }
     }
 
+    /// Moves the selection down by one window.
     pub fn navigate_down(&mut self) {
         if self.selected + 1 < self.windows.len() {
             self.selected += 1;
         }
     }
 
+    /// Focuses the currently selected tmux window.
     pub fn focus_window<T: Tmux>(&self, driver: &T) {
         if let Some(window) = self.windows.get(self.selected) {
             let _ = driver.select_window(&window.name);
         }
     }
 
+    /// Creates a new tmux window and adds it to the list.
     pub fn create_window<T: Tmux>(&mut self, driver: &T) {
         let name = format!("agent-{}", self.windows.len() + 1);
         if let Ok(window) = driver.create_window(&name) {
@@ -90,6 +99,7 @@ impl App {
         }
     }
 
+    /// Kills the currently selected tmux window.
     pub fn kill_window<T: Tmux>(&mut self, driver: &T) {
         if let Some(window) = self.windows.get(self.selected) {
             let _ = driver.kill_window(&window.name);
@@ -100,6 +110,7 @@ impl App {
         }
     }
 
+    /// Reloads the window list from the tmux driver.
     #[allow(dead_code)]
     pub fn refresh<T: Tmux>(&mut self, driver: &T) {
         if let Ok(windows) = driver.list_windows() {
@@ -110,15 +121,18 @@ impl App {
         }
     }
 
+    /// Returns whether the application is still running.
     #[allow(dead_code)]
     pub fn is_running(&self) -> bool {
         self.running
     }
 
+    /// Returns the index of the currently selected window.
     pub fn selected(&self) -> usize {
         self.selected
     }
 
+    /// Returns a slice of the current window list.
     pub fn windows(&self) -> &[Window] {
         &self.windows
     }

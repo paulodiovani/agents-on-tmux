@@ -10,6 +10,7 @@ use crate::backends::SESSION_NAME;
 use crate::frontends::tui::app::App;
 use crate::frontends::tui::theme::Theme;
 
+/// Renders the complete TUI layout: header, cards, and footer.
 pub fn draw(frame: &mut Frame, app: &App, theme: &Theme) {
     let footer_height = calculate_footer_height(frame.area().width);
     let chunks = Layout::vertical([
@@ -24,11 +25,13 @@ pub fn draw(frame: &mut Frame, app: &App, theme: &Theme) {
     draw_footer(frame, chunks[2], theme);
 }
 
+/// Renders the header bar with the session name.
 fn draw_header(frame: &mut Frame, area: ratatui::layout::Rect, theme: &Theme) {
     let header = Paragraph::new(Span::styled(SESSION_NAME, theme.header_style));
     frame.render_widget(header, area);
 }
 
+/// Renders the window cards in the main content area.
 fn draw_cards(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, theme: &Theme) {
     let windows = app.windows();
     if windows.is_empty() {
@@ -65,7 +68,18 @@ fn draw_cards(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, theme: 
         let inner = block.inner(card_areas[i]);
         frame.render_widget(block, card_areas[i]);
 
-        let title = Line::from(Span::styled(&window.name, theme.card_title));
+        let title = if is_notification {
+            let name_width = window.name.chars().count();
+            let inner_width = inner.width as usize;
+            let padding = inner_width.saturating_sub(name_width + 1);
+            Line::from(vec![
+                Span::styled(&window.name, theme.card_title),
+                Span::raw(" ".repeat(padding)),
+                Span::styled("!", theme.card_title),
+            ])
+        } else {
+            Line::from(Span::styled(&window.name, theme.card_title))
+        };
         let time_str = format_elapsed(window.started_at);
         let detail = if window.running_command.is_empty() {
             Line::from(Span::styled(time_str, theme.card_detail))
@@ -83,6 +97,7 @@ fn draw_cards(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, theme: 
     }
 }
 
+/// Renders the footer with keybinding hints.
 fn draw_footer(frame: &mut Frame, area: ratatui::layout::Rect, theme: &Theme) {
     let entries = build_footer_entries(theme);
     let lines = wrap_entries(&entries, area.width as usize);
@@ -90,6 +105,7 @@ fn draw_footer(frame: &mut Frame, area: ratatui::layout::Rect, theme: &Theme) {
     frame.render_widget(footer, area);
 }
 
+/// Builds styled footer keybinding entries.
 fn build_footer_entries(theme: &Theme) -> Vec<(Vec<Span<'static>>, usize)> {
     let keys = [
         ("↑↓", "navigate"),
@@ -111,6 +127,7 @@ fn build_footer_entries(theme: &Theme) -> Vec<(Vec<Span<'static>>, usize)> {
         .collect()
 }
 
+/// Wraps footer entries into lines that fit the available width.
 fn wrap_entries(entries: &[(Vec<Span<'static>>, usize)], width: usize) -> Vec<Line<'static>> {
     let mut lines: Vec<Line<'static>> = Vec::new();
     let mut current_spans: Vec<Span<'static>> = Vec::new();
@@ -146,6 +163,7 @@ fn wrap_entries(entries: &[(Vec<Span<'static>>, usize)], width: usize) -> Vec<Li
     lines
 }
 
+/// Formats an elapsed duration as a human-readable string.
 fn format_elapsed(started_at: Option<Instant>) -> String {
     match started_at {
         Some(start) => {
@@ -163,6 +181,7 @@ fn format_elapsed(started_at: Option<Instant>) -> String {
     }
 }
 
+/// Calculates how many lines the footer needs for the given width.
 fn calculate_footer_height(width: u16) -> u16 {
     let keys = [
         ("↑↓", "navigate"),
