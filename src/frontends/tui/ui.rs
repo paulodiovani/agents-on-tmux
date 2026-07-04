@@ -22,7 +22,7 @@ pub fn draw(frame: &mut Frame, app: &App, theme: &Theme) {
 
     draw_header(frame, chunks[0], theme);
     draw_cards(frame, app, chunks[1], theme);
-    draw_footer(frame, chunks[2], theme);
+    draw_footer(frame, app, chunks[2], theme);
 }
 
 /// Renders the header bar with the session name.
@@ -97,11 +97,19 @@ fn draw_cards(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, theme: 
     }
 }
 
-/// Renders the footer with keybinding hints.
-fn draw_footer(frame: &mut Frame, area: ratatui::layout::Rect, theme: &Theme) {
-    let entries = build_footer_entries(theme);
-    let lines = wrap_entries(&entries, area.width as usize);
-    let footer = Paragraph::new(lines);
+/// Renders the footer with keybinding hints or confirmation message.
+fn draw_footer(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, theme: &Theme) {
+    let footer = if app.pending_kill() {
+        let msg = Line::from(vec![
+            Span::styled("d", theme.footer_key_style),
+            Span::styled(" kill this window", theme.footer_style),
+        ]);
+        Paragraph::new(msg)
+    } else {
+        let entries = build_footer_entries(theme);
+        let lines = wrap_entries(&entries, area.width as usize);
+        Paragraph::new(lines)
+    };
     frame.render_widget(footer, area);
 }
 

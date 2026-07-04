@@ -13,6 +13,7 @@ pub struct App {
     running: bool,
     selected: usize,
     windows: Vec<Window>,
+    pending_kill: bool,
 }
 
 impl App {
@@ -23,6 +24,7 @@ impl App {
             running: true,
             selected: 0,
             windows,
+            pending_kill: false,
         })
     }
 
@@ -55,13 +57,26 @@ impl App {
     /// Dispatches a user action to the appropriate handler.
     pub fn handle_action<T: Tmux>(&mut self, action: Action, driver: &T) {
         match action {
-            Action::Quit => self.quit(),
-            Action::NavigateUp => self.navigate_up(),
-            Action::NavigateDown => self.navigate_down(),
-            Action::FocusWindow => self.focus_window(driver),
-            Action::CreateWindow => self.create_window(driver),
-            Action::KillWindow => self.kill_window(driver),
+            Action::KillWindow => {
+                if self.pending_kill {
+                    self.kill_window(driver);
+                    self.pending_kill = false;
+                } else {
+                    self.pending_kill = true;
+                }
+            }
             Action::None => {}
+            _ => {
+                self.pending_kill = false;
+                match action {
+                    Action::Quit => self.quit(),
+                    Action::NavigateUp => self.navigate_up(),
+                    Action::NavigateDown => self.navigate_down(),
+                    Action::FocusWindow => self.focus_window(driver),
+                    Action::CreateWindow => self.create_window(driver),
+                    _ => {}
+                }
+            }
         }
     }
 
@@ -135,6 +150,12 @@ impl App {
     /// Returns a slice of the current window list.
     pub fn windows(&self) -> &[Window] {
         &self.windows
+    }
+
+    /// Returns whether a kill action is pending confirmation.
+    #[allow(dead_code)]
+    pub fn pending_kill(&self) -> bool {
+        self.pending_kill
     }
 }
 
@@ -241,5 +262,29 @@ mod tests {
         assert_eq!(app.selected(), 1);
         app.handle_action(Action::NavigateUp, &driver);
         assert_eq!(app.selected(), 0);
+    }
+
+    #[test]
+    fn test_kill_window_requires_double_press() {
+        let driver = TmuxDriver;
+        let mut app = App::new(&driver).unwrap();
+        let initial_len = app.windows().len();
+        assert!(!app.pending_kill());
+        app.handle_action(Action::KillWindow, &driver);
+        assert!(app.pending_kill());
+        assert_eq!(app.windows().len(), initial_len);
+        app.handle_action(Action::KillWindow, &driver);
+        assert!(!app.pending_kill());
+        assert_eq!(app.windows().len(), initial_len - 1);
+    }
+
+    #[test]
+    fn test_other_action_cancels_pending_kill() {
+        let driver = TmuxDriver;
+        let mut app = App::new(&driver).unwrap();
+        app.handle_action(Action::KillWindow, &driver);
+        assert!(app.pending_kill());
+        app.handle_action(Action::NavigateDown, &driver);
+        assert!(!app.pending_kill());
     }
 }
