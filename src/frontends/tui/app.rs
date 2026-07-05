@@ -215,6 +215,7 @@ mod tests {
                         started_at: Some(Instant::now() - Duration::from_secs(125)),
                         notification_pending: false,
                         is_active: false,
+                        current_dir: "/home/user/project1".to_string(),
                     },
                     Window {
                         id: 2,
@@ -223,6 +224,7 @@ mod tests {
                         started_at: Some(Instant::now() - Duration::from_secs(45)),
                         notification_pending: true,
                         is_active: false,
+                        current_dir: "/home/user/project2".to_string(),
                     },
                     Window {
                         id: 3,
@@ -231,6 +233,7 @@ mod tests {
                         started_at: Some(Instant::now() - Duration::from_secs(300)),
                         notification_pending: false,
                         is_active: false,
+                        current_dir: "/home/user/project3".to_string(),
                     },
                 ]),
                 next_id: std::cell::RefCell::new(4),
@@ -260,6 +263,7 @@ mod tests {
                 started_at: None,
                 notification_pending: false,
                 is_active: false,
+                current_dir: "/home/user".to_string(),
             };
             *next_id += 1;
             self.windows.borrow_mut().push(window.clone());

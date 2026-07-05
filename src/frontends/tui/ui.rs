@@ -81,15 +81,20 @@ fn draw_cards(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, theme: 
             Line::from(Span::styled(&window.name, theme.card_title))
         };
         let time_str = format_elapsed(window.started_at);
-        let detail = if window.running_command.is_empty() {
-            Line::from(Span::styled(time_str, theme.card_detail))
-        } else {
-            Line::from(vec![
-                Span::styled(&window.running_command, theme.card_detail),
-                Span::styled(" · ", theme.card_detail),
-                Span::styled(time_str, theme.card_detail),
-            ])
-        };
+        let dirname = std::path::Path::new(&window.current_dir)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .map(|s| format!("../{}", s))
+            .unwrap_or_else(|| "n/a".to_string());
+
+        let mut parts = vec![dirname, window.running_command.clone()];
+        if !time_str.is_empty() {
+            parts.push(time_str);
+        }
+
+        let detail_text = parts.join(" · ");
+        let display_text = truncate_left(&detail_text, inner.width as usize);
+        let detail = Line::from(Span::styled(display_text, theme.card_detail));
 
         let content = Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).split(inner);
         frame.render_widget(Paragraph::new(title), content[0]);
@@ -189,6 +194,20 @@ fn format_elapsed(started_at: Option<Instant>) -> String {
     }
 }
 
+/// Truncates text from the left, prepending ".." if needed.
+fn truncate_left(text: &str, max_width: usize) -> String {
+    let char_count = text.chars().count();
+    if char_count <= max_width {
+        text.to_string()
+    } else if max_width <= 2 {
+        "..".to_string()
+    } else {
+        let take = max_width - 2;
+        let truncated: String = text.chars().skip(char_count - take).collect();
+        format!("..{}", truncated)
+    }
+}
+
 /// Calculates how many lines the footer needs for the given width.
 fn calculate_footer_height(width: u16) -> u16 {
     let keys = [
@@ -263,5 +282,30 @@ mod tests {
     #[test]
     fn test_calculate_footer_height_narrow() {
         assert_eq!(calculate_footer_height(30), 2);
+    }
+
+    #[test]
+    fn test_truncate_left_fits() {
+        assert_eq!(truncate_left("hello", 10), "hello");
+    }
+
+    #[test]
+    fn test_truncate_left_exact_fit() {
+        assert_eq!(truncate_left("hello", 5), "hello");
+    }
+
+    #[test]
+    fn test_truncate_left_needs_truncation() {
+        assert_eq!(truncate_left("/home/user/project", 10), "../project");
+    }
+
+    #[test]
+    fn test_truncate_left_very_narrow() {
+        assert_eq!(truncate_left("hello", 2), "..");
+    }
+
+    #[test]
+    fn test_truncate_left_empty() {
+        assert_eq!(truncate_left("", 5), "");
     }
 }
