@@ -175,7 +175,6 @@ impl App {
     }
 
     /// Returns whether a kill action is pending confirmation.
-    #[allow(dead_code)]
     pub fn pending_kill(&self) -> bool {
         self.pending_kill
     }
@@ -256,10 +255,6 @@ mod tests {
         }
 
         fn select_window(&self, _id: u32) -> Result<(), TmuxError> {
-            Ok(())
-        }
-
-        fn send_keys(&self, _window_id: u32, _command: &str) -> Result<(), TmuxError> {
             Ok(())
         }
 
