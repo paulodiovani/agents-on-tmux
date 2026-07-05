@@ -18,6 +18,7 @@ pub struct App {
     windows: Vec<Window>,
     pending_kill: bool,
     window_starts: HashMap<u32, Instant>,
+    last_focused_id: Option<u32>,
 }
 
 impl App {
@@ -29,6 +30,7 @@ impl App {
             windows: Vec::new(),
             pending_kill: false,
             window_starts: HashMap::new(),
+            last_focused_id: None,
         };
         app.refresh_windows(driver)?;
         Ok(app)
@@ -96,6 +98,9 @@ impl App {
     pub fn navigate_up(&mut self) {
         if self.selected > 0 {
             self.selected -= 1;
+            if let Some(window) = self.windows.get(self.selected) {
+                self.last_focused_id = Some(window.id);
+            }
         }
     }
 
@@ -103,6 +108,9 @@ impl App {
     pub fn navigate_down(&mut self) {
         if self.selected + 1 < self.windows.len() {
             self.selected += 1;
+            if let Some(window) = self.windows.get(self.selected) {
+                self.last_focused_id = Some(window.id);
+            }
         }
     }
 
@@ -155,7 +163,14 @@ impl App {
 
         self.windows = enriched_windows;
 
-        if self.selected >= self.windows.len() && self.selected > 0 {
+        if let Some(active_window) = self.windows.iter().find(|w| w.is_active) {
+            if self.last_focused_id != Some(active_window.id)
+                && let Some(index) = self.windows.iter().position(|w| w.id == active_window.id)
+            {
+                self.selected = index;
+                self.last_focused_id = Some(active_window.id);
+            }
+        } else if self.selected >= self.windows.len() && self.selected > 0 {
             self.selected -= 1;
         }
 
@@ -199,6 +214,7 @@ mod tests {
                         running_command: "cargo build".to_string(),
                         started_at: Some(Instant::now() - Duration::from_secs(125)),
                         notification_pending: false,
+                        is_active: false,
                     },
                     Window {
                         id: 2,
@@ -206,6 +222,7 @@ mod tests {
                         running_command: "npm test".to_string(),
                         started_at: Some(Instant::now() - Duration::from_secs(45)),
                         notification_pending: true,
+                        is_active: false,
                     },
                     Window {
                         id: 3,
@@ -213,6 +230,7 @@ mod tests {
                         running_command: "python main.py".to_string(),
                         started_at: Some(Instant::now() - Duration::from_secs(300)),
                         notification_pending: false,
+                        is_active: false,
                     },
                 ]),
                 next_id: std::cell::RefCell::new(4),
@@ -241,6 +259,7 @@ mod tests {
                 running_command: String::new(),
                 started_at: None,
                 notification_pending: false,
+                is_active: false,
             };
             *next_id += 1;
             self.windows.borrow_mut().push(window.clone());
@@ -429,5 +448,32 @@ mod tests {
         app.refresh_windows(&driver).unwrap();
         assert_eq!(app.window_starts.len(), 2);
         assert!(!app.window_starts.contains_key(&window_id));
+    }
+
+    #[test]
+    fn test_external_tmux_change_syncs_selection() {
+        let driver = MockTmux::new();
+        let mut app = App::new(&driver).unwrap();
+        assert_eq!(app.selected(), 0);
+
+        driver.windows.borrow_mut()[1].is_active = true;
+        app.refresh_windows(&driver).unwrap();
+        assert_eq!(app.selected(), 1);
+    }
+
+    #[test]
+    fn test_external_tmux_change_syncs_after_navigation() {
+        let driver = MockTmux::new();
+        let mut app = App::new(&driver).unwrap();
+        assert_eq!(app.selected(), 0);
+
+        app.navigate_down();
+        assert_eq!(app.selected(), 1);
+        assert_eq!(app.last_focused_id, Some(2));
+
+        driver.windows.borrow_mut()[0].is_active = true;
+        app.refresh_windows(&driver).unwrap();
+        assert_eq!(app.selected(), 0);
+        assert_eq!(app.last_focused_id, Some(1));
     }
 }

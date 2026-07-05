@@ -53,6 +53,7 @@ pub struct Window {
     pub running_command: String,
     pub started_at: Option<Instant>,
     pub notification_pending: bool,
+    pub is_active: bool,
 }
 
 pub fn check_inside_tmux() -> Result<(), TmuxError> {
@@ -171,7 +172,7 @@ impl<E: CommandExecutor> TmuxDriver<E> {
 
 fn parse_window_line(line: &str) -> Option<Window> {
     let parts: Vec<&str> = line.split('\t').collect();
-    if parts.len() != 4 {
+    if parts.len() != 5 {
         return None;
     }
 
@@ -179,6 +180,7 @@ fn parse_window_line(line: &str) -> Option<Window> {
     let name = parts[1].to_string();
     let notification_pending = parts[2] == "1";
     let running_command = parts[3].to_string();
+    let is_active = parts[4] == "1";
 
     Some(Window {
         id,
@@ -186,6 +188,7 @@ fn parse_window_line(line: &str) -> Option<Window> {
         running_command,
         started_at: None,
         notification_pending,
+        is_active,
     })
 }
 
@@ -217,7 +220,7 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
             "-t",
             &self.session,
             "-F",
-            "#{window_index}\t#{window_name}\t#{window_activity_flag}\t#{pane_current_command}",
+            "#{window_index}\t#{window_name}\t#{window_activity_flag}\t#{pane_current_command}\t#{window_active}",
         ])?;
 
         let windows: Vec<Window> = output.lines().filter_map(parse_window_line).collect();
@@ -336,11 +339,12 @@ mod tests {
                         .iter()
                         .map(|w| {
                             format!(
-                                "{}\t{}\t{}\t{}",
+                                "{}\t{}\t{}\t{}\t{}",
                                 w.id,
                                 w.name,
                                 if w.notification_pending { "1" } else { "0" },
-                                w.running_command
+                                w.running_command,
+                                if w.is_active { "1" } else { "0" }
                             )
                         })
                         .collect();
@@ -360,6 +364,7 @@ mod tests {
                         running_command: "bash".to_string(),
                         started_at: None,
                         notification_pending: false,
+                        is_active: false,
                     };
                     windows.push(window.clone());
                     Ok(String::new())
@@ -416,23 +421,33 @@ mod tests {
 
     #[test]
     fn test_parse_window_line_valid() {
-        let line = "1\tagent-1\t0\tbash";
+        let line = "1\tagent-1\t0\tbash\t0";
         let window = parse_window_line(line).unwrap();
         assert_eq!(window.id, 1);
         assert_eq!(window.name, "agent-1");
         assert!(!window.notification_pending);
         assert_eq!(window.running_command, "bash");
         assert!(window.started_at.is_none());
+        assert!(!window.is_active);
     }
 
     #[test]
     fn test_parse_window_line_with_notification() {
-        let line = "2\tagent-2\t1\tzsh";
+        let line = "2\tagent-2\t1\tzsh\t0";
         let window = parse_window_line(line).unwrap();
         assert_eq!(window.id, 2);
         assert_eq!(window.name, "agent-2");
         assert!(window.notification_pending);
         assert_eq!(window.running_command, "zsh");
+        assert!(!window.is_active);
+    }
+
+    #[test]
+    fn test_parse_window_line_active() {
+        let line = "3\tagent-3\t0\tbash\t1";
+        let window = parse_window_line(line).unwrap();
+        assert_eq!(window.id, 3);
+        assert!(window.is_active);
     }
 
     #[test]
@@ -440,7 +455,8 @@ mod tests {
         assert!(parse_window_line("invalid").is_none());
         assert!(parse_window_line("1\tname").is_none());
         assert!(parse_window_line("1\tname\t0").is_none());
-        assert!(parse_window_line("notanumber\tname\t0\tbash").is_none());
+        assert!(parse_window_line("1\tname\t0\tbash").is_none());
+        assert!(parse_window_line("notanumber\tname\t0\tbash\t0").is_none());
     }
 
     #[test]
@@ -460,6 +476,7 @@ mod tests {
             running_command: "bash".to_string(),
             started_at: None,
             notification_pending: false,
+            is_active: false,
         });
         let driver = TmuxDriver::with_executor(executor);
         let windows = driver.list_windows().unwrap();
@@ -486,6 +503,7 @@ mod tests {
             running_command: "bash".to_string(),
             started_at: None,
             notification_pending: false,
+            is_active: false,
         });
         let driver = TmuxDriver::with_executor(executor);
         assert!(driver.kill_window(1).is_ok());
@@ -515,12 +533,14 @@ mod tests {
             running_command: "echo hello".to_string(),
             started_at: Some(Instant::now() - Duration::from_secs(60)),
             notification_pending: true,
+            is_active: true,
         };
         assert_eq!(window.id, 42);
         assert_eq!(window.name, "test");
         assert_eq!(window.running_command, "echo hello");
         assert!(window.started_at.is_some());
         assert!(window.notification_pending);
+        assert!(window.is_active);
     }
 
     #[test]
