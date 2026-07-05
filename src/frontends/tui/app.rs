@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 
 use crossterm::event;
 use ratatui::DefaultTerminal;
+use ratatui::widgets::ListState;
 
 use crate::backends::{Tmux, Window};
 use crate::frontends::tui::event::{Action, key_to_action};
@@ -19,6 +20,7 @@ pub struct App {
     pending_kill: bool,
     window_starts: HashMap<u32, Instant>,
     last_focused_id: Option<u32>,
+    list_state: ListState,
 }
 
 impl App {
@@ -31,6 +33,7 @@ impl App {
             pending_kill: false,
             window_starts: HashMap::new(),
             last_focused_id: None,
+            list_state: ListState::default(),
         };
         app.refresh_windows(driver)?;
         Ok(app)
@@ -101,6 +104,7 @@ impl App {
             if let Some(window) = self.windows.get(self.selected) {
                 self.last_focused_id = Some(window.id);
             }
+            self.list_state.select(Some(self.selected));
         }
     }
 
@@ -111,6 +115,7 @@ impl App {
             if let Some(window) = self.windows.get(self.selected) {
                 self.last_focused_id = Some(window.id);
             }
+            self.list_state.select(Some(self.selected));
         }
     }
 
@@ -128,6 +133,7 @@ impl App {
             let _ = self.refresh_windows(driver);
             if let Some(index) = self.windows.iter().position(|w| w.id == new_window.id) {
                 self.selected = index;
+                self.list_state.select(Some(self.selected));
             }
         }
     }
@@ -169,9 +175,11 @@ impl App {
             {
                 self.selected = index;
                 self.last_focused_id = Some(active_window.id);
+                self.list_state.select(Some(self.selected));
             }
         } else if self.selected >= self.windows.len() && self.selected > 0 {
             self.selected -= 1;
+            self.list_state.select(Some(self.selected));
         }
 
         Ok(())
@@ -190,6 +198,29 @@ impl App {
     /// Returns whether a kill action is pending confirmation.
     pub fn pending_kill(&self) -> bool {
         self.pending_kill
+    }
+
+    /// Returns a reference to the list state.
+    pub fn list_state(&self) -> &ListState {
+        &self.list_state
+    }
+
+    /// Adjusts the scroll offset to ensure the selected window is visible.
+    pub fn ensure_visible(&mut self, visible_count: usize) {
+        if visible_count == 0 {
+            return;
+        }
+
+        let current_offset = self.list_state.offset();
+        let new_offset = if self.selected < current_offset {
+            self.selected
+        } else if self.selected >= current_offset + visible_count {
+            self.selected - visible_count + 1
+        } else {
+            current_offset
+        };
+
+        *self.list_state.offset_mut() = new_offset;
     }
 }
 
@@ -479,5 +510,54 @@ mod tests {
         app.refresh_windows(&driver).unwrap();
         assert_eq!(app.selected(), 0);
         assert_eq!(app.last_focused_id, Some(1));
+    }
+
+    #[test]
+    fn test_ensure_visible_no_change_when_already_visible() {
+        let driver = MockTmux::new();
+        let mut app = App::new(&driver).unwrap();
+        assert_eq!(app.list_state().offset(), 0);
+
+        app.ensure_visible(3);
+        assert_eq!(app.list_state().offset(), 0);
+    }
+
+    #[test]
+    fn test_ensure_visible_scrolls_down_when_selected_below_visible() {
+        let driver = MockTmux::new();
+        let mut app = App::new(&driver).unwrap();
+        app.navigate_down();
+        app.navigate_down();
+        assert_eq!(app.selected(), 2);
+
+        app.ensure_visible(2);
+        assert_eq!(app.list_state().offset(), 1);
+    }
+
+    #[test]
+    fn test_ensure_visible_scrolls_up_when_selected_above_visible() {
+        let driver = MockTmux::new();
+        let mut app = App::new(&driver).unwrap();
+        app.navigate_down();
+        app.navigate_down();
+        *app.list_state.offset_mut() = 2;
+
+        app.navigate_up();
+        app.navigate_up();
+        assert_eq!(app.selected(), 0);
+
+        app.ensure_visible(2);
+        assert_eq!(app.list_state().offset(), 0);
+    }
+
+    #[test]
+    fn test_ensure_visible_no_scroll_when_zero_visible_count() {
+        let driver = MockTmux::new();
+        let mut app = App::new(&driver).unwrap();
+        app.navigate_down();
+        app.navigate_down();
+
+        app.ensure_visible(0);
+        assert_eq!(app.list_state().offset(), 0);
     }
 }

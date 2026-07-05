@@ -6,12 +6,12 @@ use ratatui::style::Styled;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
 
-use crate::backends::SESSION_NAME;
+use crate::backends::{SESSION_NAME, Window};
 use crate::frontends::tui::app::App;
 use crate::frontends::tui::theme::Theme;
 
 /// Renders the complete TUI layout: header, cards, and footer.
-pub fn draw(frame: &mut Frame, app: &App, theme: &Theme) {
+pub fn draw(frame: &mut Frame, app: &mut App, theme: &Theme) {
     let footer_height = calculate_footer_height(frame.area().width);
     let chunks = Layout::vertical([
         Constraint::Length(1),
@@ -32,19 +32,35 @@ fn draw_header(frame: &mut Frame, area: ratatui::layout::Rect, theme: &Theme) {
 }
 
 /// Renders the window cards in the main content area.
-fn draw_cards(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, theme: &Theme) {
-    let windows = app.windows();
+fn draw_cards(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect, theme: &Theme) {
+    let windows: Vec<Window> = app.windows().to_vec();
     if windows.is_empty() {
         let empty = Paragraph::new("No windows").set_style(theme.card_detail);
         frame.render_widget(empty, area);
         return;
     }
 
-    let constraints: Vec<Constraint> = windows.iter().map(|_| Constraint::Length(4)).collect();
+    let card_height = 4u16;
+    let visible_count = (area.height / card_height) as usize;
+
+    app.ensure_visible(visible_count);
+
+    let offset = app.list_state().offset();
+    let visible_windows: Vec<(usize, &Window)> = windows
+        .iter()
+        .enumerate()
+        .skip(offset)
+        .take(visible_count)
+        .collect();
+
+    let constraints: Vec<Constraint> = visible_windows
+        .iter()
+        .map(|_| Constraint::Length(card_height))
+        .collect();
     let card_areas = Layout::vertical(constraints).split(area);
 
-    for (i, window) in windows.iter().enumerate() {
-        let is_selected = i == app.selected();
+    for (idx, (i, window)) in visible_windows.iter().enumerate() {
+        let is_selected = *i == app.selected();
         let is_notification = window.notification_pending;
 
         let (border_style, border_set) = match (is_selected, is_notification) {
@@ -65,8 +81,8 @@ fn draw_cards(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, theme: 
         let block = Block::bordered()
             .border_style(border_style)
             .border_set(border_set);
-        let inner = block.inner(card_areas[i]);
-        frame.render_widget(block, card_areas[i]);
+        let inner = block.inner(card_areas[idx]);
+        frame.render_widget(block, card_areas[idx]);
 
         let title = if is_notification {
             let name_width = window.name.chars().count();
@@ -103,7 +119,7 @@ fn draw_cards(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, theme: 
 }
 
 /// Renders the footer with keybinding hints or confirmation message.
-fn draw_footer(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, theme: &Theme) {
+fn draw_footer(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect, theme: &Theme) {
     let footer = if app.pending_kill() {
         let msg = Line::from(vec![
             Span::styled("d", theme.footer_key_style),
