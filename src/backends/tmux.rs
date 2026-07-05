@@ -55,8 +55,18 @@ pub struct Window {
     pub notification_pending: bool,
 }
 
+pub fn check_inside_tmux() -> Result<(), TmuxError> {
+    if let Err(_err) = std::env::var("TMUX") {
+        Err(TmuxError::NotInsideTmux)
+    } else {
+        Ok(())
+    }
+}
+
 /// Detects the parent tmux session by querying tmux for the current session name.
 pub fn detect_parent_session() -> Result<String, TmuxError> {
+    check_inside_tmux()?;
+
     let output = Command::new("tmux")
         .args(["display-message", "-p", "#S"])
         .output()
@@ -541,5 +551,20 @@ mod tests {
         assert!(split_cmd.contains(&"-t".to_string()));
         assert!(split_cmd.contains(&SESSION_NAME.to_string()));
         assert!(split_cmd.contains(&"aot --tui".to_string()));
+    }
+
+    #[test]
+    fn test_check_inside_tmux_set() {
+        unsafe { std::env::set_var("TMUX", "/tmp/tmux-1000/default,1234,0") };
+        assert!(check_inside_tmux().is_ok());
+        unsafe { std::env::remove_var("TMUX") };
+    }
+
+    #[test]
+    fn test_check_inside_tmux_unset() {
+        unsafe { std::env::remove_var("TMUX") };
+        let result = check_inside_tmux();
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), TmuxError::NotInsideTmux));
     }
 }
