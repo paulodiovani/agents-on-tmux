@@ -158,12 +158,6 @@ impl App {
         Ok(())
     }
 
-    /// Returns whether the application is still running.
-    #[allow(dead_code)]
-    pub fn is_running(&self) -> bool {
-        self.running
-    }
-
     /// Returns the index of the currently selected window.
     pub fn selected(&self) -> usize {
         self.selected
@@ -267,7 +261,7 @@ mod tests {
     fn test_new() {
         let driver = MockTmux::new();
         let app = App::new(&driver).unwrap();
-        assert!(app.is_running());
+        assert!(app.running);
         assert_eq!(app.selected(), 0);
         assert_eq!(app.windows().len(), 3);
     }
@@ -277,7 +271,7 @@ mod tests {
         let driver = MockTmux::new();
         let mut app = App::new(&driver).unwrap();
         app.quit();
-        assert!(!app.is_running());
+        assert!(!app.running);
     }
 
     #[test]
@@ -350,7 +344,7 @@ mod tests {
         let driver = MockTmux::new();
         let mut app = App::new(&driver).unwrap();
         app.handle_action(Action::Quit, &driver);
-        assert!(!app.is_running());
+        assert!(!app.running);
     }
 
     #[test]
