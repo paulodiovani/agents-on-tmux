@@ -116,8 +116,12 @@ impl App {
     /// Creates a new tmux window and adds it to the list.
     pub fn create_window<T: Tmux>(&mut self, driver: &T) {
         let name = format!("agent-{}", self.windows.len() + 1);
-        let _ = driver.create_window(&name);
-        let _ = self.refresh_windows(driver);
+        if let Ok(new_window) = driver.create_window(&name) {
+            let _ = self.refresh_windows(driver);
+            if let Some(index) = self.windows.iter().position(|w| w.id == new_window.id) {
+                self.selected = index;
+            }
+        }
     }
 
     /// Kills the currently selected tmux window.
@@ -317,6 +321,20 @@ mod tests {
         let initial_len = app.windows().len();
         app.create_window(&driver);
         assert_eq!(app.windows().len(), initial_len + 1);
+    }
+
+    #[test]
+    fn test_create_window_selects_new_window() {
+        let driver = MockTmux::new();
+        let mut app = App::new(&driver).unwrap();
+        app.navigate_down();
+        assert_eq!(app.selected(), 1);
+
+        let initial_len = app.windows().len();
+        app.create_window(&driver);
+
+        assert_eq!(app.windows().len(), initial_len + 1);
+        assert_eq!(app.selected(), initial_len);
     }
 
     #[test]
