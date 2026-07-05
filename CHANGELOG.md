@@ -1,0 +1,54 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [0.1.0-alpha.6] - 2026-07-05
+
+### Fixed
+- Parent session detection now checks `TMUX` environment variable to correctly determine if running inside tmux
+
+## [0.1.0-alpha.5] - 2026-07-05
+
+### Changed
+- Cleaned up `is_running` function and removed unused `send_keys` method
+
+### Added
+- Screenshot to README
+
+## [0.1.0-alpha.4] - 2026-07-05
+
+### Added
+- GitHub Actions workflows for lint and test
+- Dependabot configuration
+- Pull request template
+
+## [0.1.0-alpha.3] - 2026-07-04
+
+### Changed
+- Startup now launches both TUI and tmux session together
+- Uses current app name and path for session management
+
+## [0.1.0-alpha.2] - 2026-07-04
+
+### Added
+- `CommandExecutor` trait for testable tmux command execution
+- Session auto-start/attach on application startup
+- TUI auto-refresh every 5 seconds
+
+### Changed
+- Removed `ctrlc` dependency
+
+## [0.1.0-alpha.1] - 2026-07-04
+
+### Added
+- Terminal UI with ratatui/crossterm
+- Tmux backend with trait-based contract
+- CLI argument parsing with clap (`--tui` flag)
+- Window management: list, select, kill with confirmation
+- Window display with ID, name, running command, and start time
+- Full module documentation
