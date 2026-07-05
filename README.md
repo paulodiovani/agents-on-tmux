@@ -25,7 +25,7 @@ A TMUX-based AI Agents orchestrator.
 
 ## Screenshots
 
-TBD
+![screenshot](assets/media/screenshot.png)
 
 ## Supported Agents
 
