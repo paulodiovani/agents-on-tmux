@@ -14,6 +14,10 @@ struct Cli {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     use backends::Tmux;
     let cli = Cli::parse();
+
+    let parent_session = backends::detect_parent_session()?;
+    let parent_driver = backends::TmuxDriver::new(&parent_session);
+
     let nested_driver = backends::TmuxDriver::new(backends::SESSION_NAME);
     nested_driver.create_session_if_not_exists()?;
 
@@ -23,9 +27,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         app.run(terminal, &nested_driver)?;
         ratatui::restore();
     } else {
-        let parent_session = backends::detect_parent_session()?;
-        let parent_driver = backends::TmuxDriver::new(&parent_session);
-
         let exe = std::env::current_exe()?;
         let command = format!("{} --tui", exe.to_string_lossy());
         parent_driver.split_window(&command)?;
