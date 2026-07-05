@@ -120,6 +120,8 @@ fn draw_cards(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect, the
 
 /// Renders the footer with keybinding hints or confirmation message.
 fn draw_footer(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect, theme: &Theme) {
+    let chunks = Layout::horizontal([Constraint::Fill(1), Constraint::Length(10)]).split(area);
+
     let footer = if app.pending_kill() {
         let msg = Line::from(vec![
             Span::styled("d", theme.footer_key_style),
@@ -128,10 +130,14 @@ fn draw_footer(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect, th
         Paragraph::new(msg)
     } else {
         let entries = build_footer_entries(theme);
-        let lines = wrap_entries(&entries, area.width as usize);
+        let lines = wrap_entries(&entries, chunks[0].width as usize);
         Paragraph::new(lines)
     };
-    frame.render_widget(footer, area);
+    frame.render_widget(footer, chunks[0]);
+
+    let counter_text = format!(" {}/{}", app.selected() + 1, app.windows().len());
+    let counter = Paragraph::new(Span::styled(counter_text, theme.footer_style));
+    frame.render_widget(counter, chunks[1]);
 }
 
 /// Builds styled footer keybinding entries.
