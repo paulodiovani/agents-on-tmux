@@ -24,10 +24,7 @@ pub trait Tmux {
     fn kill_window(&self, id: u32) -> Result<(), TmuxError>;
     /// Selects (focuses) the window with the given id.
     fn select_window(&self, id: u32) -> Result<(), TmuxError>;
-    #[allow(dead_code)]
     /// Sends keys to the specified window.
-    fn send_keys(&self, window_id: u32, command: &str) -> Result<(), TmuxError>;
-    /// Splits the current window horizontally, creating a side pane.
     fn split_window(&self, command: &str) -> Result<String, TmuxError>;
 }
 
@@ -35,10 +32,7 @@ pub const SESSION_NAME: &str = "agents-on-tmux";
 
 /// Errors that can occur during tmux operations.
 #[derive(Debug, Error)]
-#[allow(dead_code)]
 pub enum TmuxError {
-    #[error("Failed to create session")]
-    SessionCreationFailed,
     #[error("Window not found")]
     WindowNotFound,
     #[error("Command failed: {message}")]
@@ -47,8 +41,6 @@ pub enum TmuxError {
         stderr: String,
         code: Option<i32>,
     },
-    #[error("tmux not available")]
-    TmuxNotAvailable,
     #[error("Not running inside a tmux session")]
     NotInsideTmux,
 }
@@ -246,16 +238,6 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
     fn select_window(&self, id: u32) -> Result<(), TmuxError> {
         let target = format!("{}:{}", self.session, id);
         self.executor.execute(&["select-window", "-t", &target])?;
-        Ok(())
-    }
-
-    /// Sends keys to the specified window.
-    fn send_keys(&self, window_id: u32, command: &str) -> Result<(), TmuxError> {
-        let target = format!("{}:{}", self.session, window_id);
-        self.executor
-            .execute(&["send-keys", "-t", &target, "-l", command])?;
-        self.executor
-            .execute(&["send-keys", "-t", &target, "Enter"])?;
         Ok(())
     }
 
@@ -506,13 +488,6 @@ mod tests {
         let executor = MockCommandExecutor::with_session();
         let driver = TmuxDriver::with_executor(executor);
         assert!(driver.select_window(1).is_ok());
-    }
-
-    #[test]
-    fn test_send_keys() {
-        let executor = MockCommandExecutor::with_session();
-        let driver = TmuxDriver::with_executor(executor);
-        assert!(driver.send_keys(1, "echo test").is_ok());
     }
 
     #[test]
