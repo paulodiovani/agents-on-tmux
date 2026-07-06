@@ -6,7 +6,7 @@ use ratatui::style::Styled;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
 
-use crate::backends::{SESSION_NAME, Window};
+use crate::backends::{Agents, SESSION_NAME, Window};
 use crate::frontends::tui::app::App;
 use crate::frontends::tui::theme::Theme;
 
@@ -103,7 +103,13 @@ fn draw_cards(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect, the
             .map(|s| format!("../{}", s))
             .unwrap_or_else(|| "n/a".to_string());
 
-        let mut parts = vec![dirname, window.running_command.clone()];
+        let command_display = if Agents::is_agent(&window.running_command) {
+            format!("🤖 {}", window.running_command)
+        } else {
+            window.running_command.clone()
+        };
+
+        let mut parts = vec![dirname, command_display];
         if !time_str.is_empty() {
             parts.push(time_str);
         }
