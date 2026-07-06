@@ -15,6 +15,8 @@ A TMUX-based AI Agents orchestrator.
 
 - [TMUX](https://tmux.app/)
 
+Also check the [Recommended TMUX Config settings](./docs/recommended-tmux-config.md).
+
 ## How does it work
 
 1. Start the application with `aot`.
