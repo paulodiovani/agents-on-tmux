@@ -23,10 +23,10 @@ Binary crate (`aot`, package name `agents-on-tmux`).
 Two top-level modules under `src/`:
 
 - `backends/` — tmux communication interface
-  - `Tmux` trait defines the contract (session management, window CRUD, send_keys)
+  - `Tmux` trait defines the contract (session management, window CRUD, split_window)
   - `TmuxDriver<E: CommandExecutor>` implements `Tmux` with dependency injection
   - `CommandExecutor` trait abstracts tmux command execution (real `ShellCommandExecutor` + mock for tests)
-  - `Window` struct represents tmux window state (id, name, running_command, started_at, notification_pending)
+  - `Window` struct represents tmux window state (id, name, running_command, started_at, notification_pending, is_active, current_dir)
   - `TmuxError` enum for error handling
   - Backend is fully wired and tested
 
@@ -38,7 +38,7 @@ Two top-level modules under `src/`:
 
 The `agents` module is planned but not yet implemented.
 
-Entry point: `main.rs` parses CLI args with clap, creates a `TmuxDriver`, ensures the session exists, and either launches the TUI (`--tui`) or attaches to the session.
+Entry point: `main.rs` parses CLI args with clap, detects the parent tmux session, creates a nested `TmuxDriver` for the `agents-on-tmux` session, ensures it exists. Without `--tui`, it splits a pane in the parent session to launch the TUI and attaches to the nested session. With `--tui`, it runs the TUI directly.
 
 ## Rust conventions (non-default — follow strictly)
 
