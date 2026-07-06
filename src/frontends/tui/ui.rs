@@ -177,20 +177,30 @@ fn draw_footer(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect, th
 
 /// Builds styled footer keybinding entries based on the active tab.
 fn build_footer_entries(app: &App, theme: &Theme) -> Vec<(Vec<Span<'static>>, usize)> {
-    let mut keys: Vec<(&str, &str)> = vec![("↑↓", "navigate")];
+    let mut keys: Vec<(&str, &str, bool)> = vec![("↑↓", "navigate", true)];
 
     match app.active_tab() {
-        Tab::Agents => keys.push(("→", "windows")),
-        Tab::Windows => keys.push(("←", "agents")),
+        Tab::Agents => keys.push(("→", "windows", !app.is_tab_empty(Tab::Windows))),
+        Tab::Windows => keys.push(("←", "agents", !app.is_tab_empty(Tab::Agents))),
     }
 
-    keys.extend([("⏎", "focus"), ("n", "new"), ("d", "kill"), ("q", "quit")]);
+    keys.extend([
+        ("⏎", "focus", true),
+        ("n", "new", true),
+        ("d", "kill", true),
+        ("q", "quit", true),
+    ]);
 
     keys.iter()
-        .map(|(key, desc)| {
+        .map(|(key, desc, enabled)| {
+            let (key_style, desc_style) = if *enabled {
+                (theme.footer_key_style, theme.footer_style)
+            } else {
+                (theme.footer_style, theme.footer_style)
+            };
             let spans = vec![
-                Span::styled(key.to_string(), theme.footer_key_style),
-                Span::styled(format!(" {}", desc), theme.footer_style),
+                Span::styled(key.to_string(), key_style),
+                Span::styled(format!(" {}", desc), desc_style),
             ];
             let width = key.chars().count() + 1 + desc.chars().count();
             (spans, width)
