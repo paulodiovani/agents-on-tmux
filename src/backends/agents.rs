@@ -41,14 +41,14 @@ impl Agent for GenericAgent {
 
 static AGENTS: LazyLock<Vec<GenericAgent>> = LazyLock::new(|| {
     vec![
-        GenericAgent::new("Claude Code", "claude", "🤖"),
-        GenericAgent::new("OpenCode", "opencode", "🤖"),
-        GenericAgent::new("Pi", "pi", "🤖"),
-        GenericAgent::new("Codex", "codex", "🤖"),
-        GenericAgent::new("Devin", "devin", "🤖"),
-        GenericAgent::new("Hermes", "hermes", "🤖"),
-        GenericAgent::new("Aider", "aider", "🤖"),
-        GenericAgent::new("Cursor", "cursor", "🤖"),
+        GenericAgent::new("Claude Code", "claude", "𜷷"),
+        GenericAgent::new("OpenCode", "opencode", "𜷷"),
+        GenericAgent::new("Pi", "pi", "𜷷"),
+        GenericAgent::new("Codex", "codex", "𜷷"),
+        GenericAgent::new("Devin", "devin", "𜷷"),
+        GenericAgent::new("Hermes", "hermes", "𜷷"),
+        GenericAgent::new("Aider", "aider", "𜷷"),
+        GenericAgent::new("Cursor", "cursor", "𜷷"),
     ]
 });
 
@@ -85,7 +85,7 @@ mod tests {
         let agent = is_agent("claude").unwrap();
         assert_eq!(agent.name(), "Claude Code");
         assert_eq!(agent.command(), "claude");
-        assert_eq!(agent.icon(), "🤖");
+        assert_eq!(agent.icon(), "𜷷");
     }
 
     #[test]
