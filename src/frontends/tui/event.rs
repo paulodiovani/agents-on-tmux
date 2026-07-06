@@ -53,7 +53,7 @@ pub enum Action {
 /// Maps a key event to the corresponding application action.
 pub fn key_to_action(key: KeyEvent) -> Action {
     match key.code {
-        KeyCode::Char('q') | KeyCode::Esc => Action::Quit,
+        KeyCode::Char('q') => Action::Quit,
         KeyCode::Up | KeyCode::Char('k') => Action::NavigateUp,
         KeyCode::Down | KeyCode::Char('j') => Action::NavigateDown,
         KeyCode::Enter => Action::FocusWindow,
@@ -78,10 +78,6 @@ mod tests {
     fn test_quit_keys() {
         assert!(matches!(
             key_to_action(key_event(KeyCode::Char('q'))),
-            Action::Quit
-        ));
-        assert!(matches!(
-            key_to_action(key_event(KeyCode::Esc)),
             Action::Quit
         ));
     }

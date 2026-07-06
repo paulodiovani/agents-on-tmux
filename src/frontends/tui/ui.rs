@@ -7,7 +7,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph, Tabs};
 
 use crate::backends::{Agent, SESSION_NAME, Window, is_agent};
-use crate::frontends::tui::app::App;
+use crate::frontends::tui::app::{App, PendingAction};
 use crate::frontends::tui::event::Tab;
 use crate::frontends::tui::theme::Theme;
 
@@ -155,16 +155,26 @@ fn draw_cards(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect, the
 
 /// Renders the footer with keybinding hints or confirmation message.
 fn draw_footer(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect, theme: &Theme) {
-    let footer = if app.pending_kill() {
-        let msg = Line::from(vec![
-            Span::styled("d", theme.footer_key_style),
-            Span::styled(" kill this window", theme.footer_style),
-        ]);
-        Paragraph::new(msg)
-    } else {
-        let entries = build_footer_entries(app, theme);
-        let lines = wrap_entries(&entries, area.width as usize);
-        Paragraph::new(lines)
+    let footer = match app.pending_action() {
+        Some(PendingAction::KillWindow) => {
+            let msg = Line::from(vec![
+                Span::styled("d", theme.footer_key_style),
+                Span::styled(" kill this window", theme.footer_style),
+            ]);
+            Paragraph::new(msg)
+        }
+        Some(PendingAction::Quit) => {
+            let msg = Line::from(vec![
+                Span::styled("q", theme.footer_key_style),
+                Span::styled(" quit", theme.footer_style),
+            ]);
+            Paragraph::new(msg)
+        }
+        None => {
+            let entries = build_footer_entries(app, theme);
+            let lines = wrap_entries(&entries, area.width as usize);
+            Paragraph::new(lines)
+        }
     };
     frame.render_widget(footer, area);
 }

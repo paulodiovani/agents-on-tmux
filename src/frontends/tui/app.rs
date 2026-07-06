@@ -12,6 +12,13 @@ use crate::frontends::tui::ui;
 
 const REFRESH_INTERVAL_SECS: u64 = 5;
 
+/// Actions that require double-press confirmation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PendingAction {
+    KillWindow,
+    Quit,
+}
+
 /// Main application state for the TUI frontend.
 pub struct App {
     running: bool,
@@ -19,7 +26,7 @@ pub struct App {
     agents_selected: usize,
     windows_selected: usize,
     windows: Vec<Window>,
-    pending_kill: bool,
+    pending_action: Option<PendingAction>,
     window_starts: HashMap<u32, Instant>,
     last_focused_id: Option<u32>,
     list_state: ListState,
@@ -34,7 +41,7 @@ impl App {
             agents_selected: 0,
             windows_selected: 0,
             windows: Vec::new(),
-            pending_kill: false,
+            pending_action: None,
             window_starts: HashMap::new(),
             last_focused_id: None,
             list_state: ListState::default(),
@@ -76,19 +83,20 @@ impl App {
     /// Dispatches a user action to the appropriate handler.
     pub fn handle_action<T: Tmux>(&mut self, action: Action, driver: &T) {
         match action {
-            Action::KillWindow => {
-                if self.pending_kill {
-                    self.kill_window(driver);
-                    self.pending_kill = false;
-                } else {
-                    self.pending_kill = true;
-                }
+            Action::KillWindow if self.pending_action == Some(PendingAction::KillWindow) => {
+                self.kill_window(driver);
+                self.pending_action = None;
             }
-            Action::None => {}
+            Action::KillWindow => self.pending_action = Some(PendingAction::KillWindow),
+            Action::Quit if self.pending_action == Some(PendingAction::Quit) => {
+                self.quit();
+                self.pending_action = None;
+            }
+            Action::Quit => self.pending_action = Some(PendingAction::Quit),
+            Action::None => self.pending_action = None,
             _ => {
-                self.pending_kill = false;
+                self.pending_action = None;
                 match action {
-                    Action::Quit => self.quit(),
                     Action::NavigateUp => self.navigate_up(),
                     Action::NavigateDown => self.navigate_down(),
                     Action::FocusWindow => self.focus_window(driver),
@@ -290,9 +298,9 @@ impl App {
         &self.windows
     }
 
-    /// Returns whether a kill action is pending confirmation.
-    pub fn pending_kill(&self) -> bool {
-        self.pending_kill
+    /// Returns the pending action awaiting confirmation, if any.
+    pub fn pending_action(&self) -> Option<PendingAction> {
+        self.pending_action
     }
 
     /// Returns a reference to the list state.
@@ -578,6 +586,8 @@ mod tests {
         let driver = MockTmux::new();
         let mut app = App::new(&driver).unwrap();
         app.handle_action(Action::Quit, &driver);
+        assert!(app.running);
+        app.handle_action(Action::Quit, &driver);
         assert!(!app.running);
     }
 
@@ -596,13 +606,27 @@ mod tests {
         let driver = MockTmux::new();
         let mut app = App::new(&driver).unwrap();
         let initial_agents = app.current_tab_len();
-        assert!(!app.pending_kill());
+        assert_eq!(app.pending_action(), None);
         app.handle_action(Action::KillWindow, &driver);
-        assert!(app.pending_kill());
+        assert_eq!(app.pending_action(), Some(PendingAction::KillWindow));
         assert_eq!(app.current_tab_len(), initial_agents);
         app.handle_action(Action::KillWindow, &driver);
-        assert!(!app.pending_kill());
+        assert_eq!(app.pending_action(), None);
         assert_eq!(app.current_tab_len(), initial_agents - 1);
+    }
+
+    #[test]
+    fn test_quit_requires_double_press() {
+        let driver = MockTmux::new();
+        let mut app = App::new(&driver).unwrap();
+        assert!(app.running);
+        assert_eq!(app.pending_action(), None);
+        app.handle_action(Action::Quit, &driver);
+        assert_eq!(app.pending_action(), Some(PendingAction::Quit));
+        assert!(app.running);
+        app.handle_action(Action::Quit, &driver);
+        assert_eq!(app.pending_action(), None);
+        assert!(!app.running);
     }
 
     #[test]
@@ -610,9 +634,20 @@ mod tests {
         let driver = MockTmux::new();
         let mut app = App::new(&driver).unwrap();
         app.handle_action(Action::KillWindow, &driver);
-        assert!(app.pending_kill());
+        assert_eq!(app.pending_action(), Some(PendingAction::KillWindow));
         app.handle_action(Action::NavigateDown, &driver);
-        assert!(!app.pending_kill());
+        assert_eq!(app.pending_action(), None);
+    }
+
+    #[test]
+    fn test_other_action_cancels_pending_quit() {
+        let driver = MockTmux::new();
+        let mut app = App::new(&driver).unwrap();
+        app.handle_action(Action::Quit, &driver);
+        assert_eq!(app.pending_action(), Some(PendingAction::Quit));
+        app.handle_action(Action::NavigateDown, &driver);
+        assert_eq!(app.pending_action(), None);
+        assert!(app.running);
     }
 
     #[test]
