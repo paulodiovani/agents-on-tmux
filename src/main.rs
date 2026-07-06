@@ -11,11 +11,14 @@ struct Cli {
     tui: bool,
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> anyhow::Result<()> {
     use backends::Tmux;
     let cli = Cli::parse();
 
     let parent_session = backends::detect_parent_session()?;
+    if parent_session == backends::SESSION_NAME {
+        return Err(backends::TmuxError::InsideOwnSession(parent_session).into());
+    }
     let parent_driver = backends::TmuxDriver::new(&parent_session);
 
     let nested_driver = backends::TmuxDriver::new(backends::SESSION_NAME);

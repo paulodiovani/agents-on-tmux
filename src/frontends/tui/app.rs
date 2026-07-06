@@ -25,7 +25,7 @@ pub struct App {
 
 impl App {
     /// Creates a new App, loading windows from the tmux driver.
-    pub fn new<T: Tmux>(driver: &T) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn new<T: Tmux>(driver: &T) -> anyhow::Result<Self> {
         let mut app = Self {
             running: true,
             selected: 0,
@@ -44,7 +44,7 @@ impl App {
         &mut self,
         mut terminal: DefaultTerminal,
         driver: &T,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> anyhow::Result<()> {
         let theme = Theme::default();
         let tick_rate = Duration::from_secs(REFRESH_INTERVAL_SECS);
         let mut last_draw = Instant::now() - tick_rate;
@@ -147,10 +147,7 @@ impl App {
     }
 
     /// Reloads the window list from the tmux driver and tracks start times.
-    pub fn refresh_windows<T: Tmux>(
-        &mut self,
-        driver: &T,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn refresh_windows<T: Tmux>(&mut self, driver: &T) -> anyhow::Result<()> {
         let windows = driver.list_windows()?;
         let now = Instant::now();
 
