@@ -6,12 +6,12 @@ use ratatui::style::Styled;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
 
-use crate::backends::SESSION_NAME;
+use crate::backends::{SESSION_NAME, Window};
 use crate::frontends::tui::app::App;
 use crate::frontends::tui::theme::Theme;
 
 /// Renders the complete TUI layout: header, cards, and footer.
-pub fn draw(frame: &mut Frame, app: &App, theme: &Theme) {
+pub fn draw(frame: &mut Frame, app: &mut App, theme: &Theme) {
     let footer_height = calculate_footer_height(frame.area().width);
     let chunks = Layout::vertical([
         Constraint::Length(1),
@@ -32,19 +32,35 @@ fn draw_header(frame: &mut Frame, area: ratatui::layout::Rect, theme: &Theme) {
 }
 
 /// Renders the window cards in the main content area.
-fn draw_cards(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, theme: &Theme) {
-    let windows = app.windows();
+fn draw_cards(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect, theme: &Theme) {
+    let windows: Vec<Window> = app.windows().to_vec();
     if windows.is_empty() {
         let empty = Paragraph::new("No windows").set_style(theme.card_detail);
         frame.render_widget(empty, area);
         return;
     }
 
-    let constraints: Vec<Constraint> = windows.iter().map(|_| Constraint::Length(4)).collect();
+    let card_height = 4u16;
+    let visible_count = (area.height / card_height) as usize;
+
+    app.ensure_visible(visible_count);
+
+    let offset = app.list_state().offset();
+    let visible_windows: Vec<(usize, &Window)> = windows
+        .iter()
+        .enumerate()
+        .skip(offset)
+        .take(visible_count)
+        .collect();
+
+    let constraints: Vec<Constraint> = visible_windows
+        .iter()
+        .map(|_| Constraint::Length(card_height))
+        .collect();
     let card_areas = Layout::vertical(constraints).split(area);
 
-    for (i, window) in windows.iter().enumerate() {
-        let is_selected = i == app.selected();
+    for (idx, (i, window)) in visible_windows.iter().enumerate() {
+        let is_selected = *i == app.selected();
         let is_notification = window.notification_pending;
 
         let (border_style, border_set) = match (is_selected, is_notification) {
@@ -65,8 +81,8 @@ fn draw_cards(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, theme: 
         let block = Block::bordered()
             .border_style(border_style)
             .border_set(border_set);
-        let inner = block.inner(card_areas[i]);
-        frame.render_widget(block, card_areas[i]);
+        let inner = block.inner(card_areas[idx]);
+        frame.render_widget(block, card_areas[idx]);
 
         let title = if is_notification {
             let name_width = window.name.chars().count();
@@ -81,15 +97,20 @@ fn draw_cards(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, theme: 
             Line::from(Span::styled(&window.name, theme.card_title))
         };
         let time_str = format_elapsed(window.started_at);
-        let detail = if window.running_command.is_empty() {
-            Line::from(Span::styled(time_str, theme.card_detail))
-        } else {
-            Line::from(vec![
-                Span::styled(&window.running_command, theme.card_detail),
-                Span::styled(" · ", theme.card_detail),
-                Span::styled(time_str, theme.card_detail),
-            ])
-        };
+        let dirname = std::path::Path::new(&window.current_dir)
+            .file_name()
+            .and_then(|s| s.to_str())
+            .map(|s| format!("../{}", s))
+            .unwrap_or_else(|| "n/a".to_string());
+
+        let mut parts = vec![dirname, window.running_command.clone()];
+        if !time_str.is_empty() {
+            parts.push(time_str);
+        }
+
+        let detail_text = parts.join(" · ");
+        let display_text = truncate_left(&detail_text, inner.width as usize);
+        let detail = Line::from(Span::styled(display_text, theme.card_detail));
 
         let content = Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).split(inner);
         frame.render_widget(Paragraph::new(title), content[0]);
@@ -98,7 +119,9 @@ fn draw_cards(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, theme: 
 }
 
 /// Renders the footer with keybinding hints or confirmation message.
-fn draw_footer(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, theme: &Theme) {
+fn draw_footer(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect, theme: &Theme) {
+    let chunks = Layout::horizontal([Constraint::Fill(1), Constraint::Length(10)]).split(area);
+
     let footer = if app.pending_kill() {
         let msg = Line::from(vec![
             Span::styled("d", theme.footer_key_style),
@@ -107,10 +130,14 @@ fn draw_footer(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, theme:
         Paragraph::new(msg)
     } else {
         let entries = build_footer_entries(theme);
-        let lines = wrap_entries(&entries, area.width as usize);
+        let lines = wrap_entries(&entries, chunks[0].width as usize);
         Paragraph::new(lines)
     };
-    frame.render_widget(footer, area);
+    frame.render_widget(footer, chunks[0]);
+
+    let counter_text = format!(" {}/{}", app.selected() + 1, app.windows().len());
+    let counter = Paragraph::new(Span::styled(counter_text, theme.footer_style));
+    frame.render_widget(counter, chunks[1]);
 }
 
 /// Builds styled footer keybinding entries.
@@ -189,6 +216,20 @@ fn format_elapsed(started_at: Option<Instant>) -> String {
     }
 }
 
+/// Truncates text from the left, prepending ".." if needed.
+fn truncate_left(text: &str, max_width: usize) -> String {
+    let char_count = text.chars().count();
+    if char_count <= max_width {
+        text.to_string()
+    } else if max_width <= 2 {
+        "..".to_string()
+    } else {
+        let take = max_width - 2;
+        let truncated: String = text.chars().skip(char_count - take).collect();
+        format!("..{}", truncated)
+    }
+}
+
 /// Calculates how many lines the footer needs for the given width.
 fn calculate_footer_height(width: u16) -> u16 {
     let keys = [
@@ -263,5 +304,30 @@ mod tests {
     #[test]
     fn test_calculate_footer_height_narrow() {
         assert_eq!(calculate_footer_height(30), 2);
+    }
+
+    #[test]
+    fn test_truncate_left_fits() {
+        assert_eq!(truncate_left("hello", 10), "hello");
+    }
+
+    #[test]
+    fn test_truncate_left_exact_fit() {
+        assert_eq!(truncate_left("hello", 5), "hello");
+    }
+
+    #[test]
+    fn test_truncate_left_needs_truncation() {
+        assert_eq!(truncate_left("/home/user/project", 10), "../project");
+    }
+
+    #[test]
+    fn test_truncate_left_very_narrow() {
+        assert_eq!(truncate_left("hello", 2), "..");
+    }
+
+    #[test]
+    fn test_truncate_left_empty() {
+        assert_eq!(truncate_left("", 5), "");
     }
 }

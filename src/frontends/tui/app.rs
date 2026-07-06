@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 
 use crossterm::event;
 use ratatui::DefaultTerminal;
+use ratatui::widgets::ListState;
 
 use crate::backends::{Tmux, Window};
 use crate::frontends::tui::event::{Action, key_to_action};
@@ -18,6 +19,8 @@ pub struct App {
     windows: Vec<Window>,
     pending_kill: bool,
     window_starts: HashMap<u32, Instant>,
+    last_focused_id: Option<u32>,
+    list_state: ListState,
 }
 
 impl App {
@@ -29,6 +32,8 @@ impl App {
             windows: Vec::new(),
             pending_kill: false,
             window_starts: HashMap::new(),
+            last_focused_id: None,
+            list_state: ListState::default(),
         };
         app.refresh_windows(driver)?;
         Ok(app)
@@ -96,6 +101,10 @@ impl App {
     pub fn navigate_up(&mut self) {
         if self.selected > 0 {
             self.selected -= 1;
+            if let Some(window) = self.windows.get(self.selected) {
+                self.last_focused_id = Some(window.id);
+            }
+            self.list_state.select(Some(self.selected));
         }
     }
 
@@ -103,6 +112,10 @@ impl App {
     pub fn navigate_down(&mut self) {
         if self.selected + 1 < self.windows.len() {
             self.selected += 1;
+            if let Some(window) = self.windows.get(self.selected) {
+                self.last_focused_id = Some(window.id);
+            }
+            self.list_state.select(Some(self.selected));
         }
     }
 
@@ -116,8 +129,13 @@ impl App {
     /// Creates a new tmux window and adds it to the list.
     pub fn create_window<T: Tmux>(&mut self, driver: &T) {
         let name = format!("agent-{}", self.windows.len() + 1);
-        let _ = driver.create_window(&name);
-        let _ = self.refresh_windows(driver);
+        if let Ok(new_window) = driver.create_window(&name) {
+            let _ = self.refresh_windows(driver);
+            if let Some(index) = self.windows.iter().position(|w| w.id == new_window.id) {
+                self.selected = index;
+                self.list_state.select(Some(self.selected));
+            }
+        }
     }
 
     /// Kills the currently selected tmux window.
@@ -151,8 +169,17 @@ impl App {
 
         self.windows = enriched_windows;
 
-        if self.selected >= self.windows.len() && self.selected > 0 {
+        if let Some(active_window) = self.windows.iter().find(|w| w.is_active) {
+            if self.last_focused_id != Some(active_window.id)
+                && let Some(index) = self.windows.iter().position(|w| w.id == active_window.id)
+            {
+                self.selected = index;
+                self.last_focused_id = Some(active_window.id);
+                self.list_state.select(Some(self.selected));
+            }
+        } else if self.selected >= self.windows.len() && self.selected > 0 {
             self.selected -= 1;
+            self.list_state.select(Some(self.selected));
         }
 
         Ok(())
@@ -171,6 +198,29 @@ impl App {
     /// Returns whether a kill action is pending confirmation.
     pub fn pending_kill(&self) -> bool {
         self.pending_kill
+    }
+
+    /// Returns a reference to the list state.
+    pub fn list_state(&self) -> &ListState {
+        &self.list_state
+    }
+
+    /// Adjusts the scroll offset to ensure the selected window is visible.
+    pub fn ensure_visible(&mut self, visible_count: usize) {
+        if visible_count == 0 {
+            return;
+        }
+
+        let current_offset = self.list_state.offset();
+        let new_offset = if self.selected < current_offset {
+            self.selected
+        } else if self.selected >= current_offset + visible_count {
+            self.selected - visible_count + 1
+        } else {
+            current_offset
+        };
+
+        *self.list_state.offset_mut() = new_offset;
     }
 }
 
@@ -195,6 +245,8 @@ mod tests {
                         running_command: "cargo build".to_string(),
                         started_at: Some(Instant::now() - Duration::from_secs(125)),
                         notification_pending: false,
+                        is_active: false,
+                        current_dir: "/home/user/project1".to_string(),
                     },
                     Window {
                         id: 2,
@@ -202,6 +254,8 @@ mod tests {
                         running_command: "npm test".to_string(),
                         started_at: Some(Instant::now() - Duration::from_secs(45)),
                         notification_pending: true,
+                        is_active: false,
+                        current_dir: "/home/user/project2".to_string(),
                     },
                     Window {
                         id: 3,
@@ -209,6 +263,8 @@ mod tests {
                         running_command: "python main.py".to_string(),
                         started_at: Some(Instant::now() - Duration::from_secs(300)),
                         notification_pending: false,
+                        is_active: false,
+                        current_dir: "/home/user/project3".to_string(),
                     },
                 ]),
                 next_id: std::cell::RefCell::new(4),
@@ -237,6 +293,8 @@ mod tests {
                 running_command: String::new(),
                 started_at: None,
                 notification_pending: false,
+                is_active: false,
+                current_dir: "/home/user".to_string(),
             };
             *next_id += 1;
             self.windows.borrow_mut().push(window.clone());
@@ -317,6 +375,20 @@ mod tests {
         let initial_len = app.windows().len();
         app.create_window(&driver);
         assert_eq!(app.windows().len(), initial_len + 1);
+    }
+
+    #[test]
+    fn test_create_window_selects_new_window() {
+        let driver = MockTmux::new();
+        let mut app = App::new(&driver).unwrap();
+        app.navigate_down();
+        assert_eq!(app.selected(), 1);
+
+        let initial_len = app.windows().len();
+        app.create_window(&driver);
+
+        assert_eq!(app.windows().len(), initial_len + 1);
+        assert_eq!(app.selected(), initial_len);
     }
 
     #[test]
@@ -411,5 +483,81 @@ mod tests {
         app.refresh_windows(&driver).unwrap();
         assert_eq!(app.window_starts.len(), 2);
         assert!(!app.window_starts.contains_key(&window_id));
+    }
+
+    #[test]
+    fn test_external_tmux_change_syncs_selection() {
+        let driver = MockTmux::new();
+        let mut app = App::new(&driver).unwrap();
+        assert_eq!(app.selected(), 0);
+
+        driver.windows.borrow_mut()[1].is_active = true;
+        app.refresh_windows(&driver).unwrap();
+        assert_eq!(app.selected(), 1);
+    }
+
+    #[test]
+    fn test_external_tmux_change_syncs_after_navigation() {
+        let driver = MockTmux::new();
+        let mut app = App::new(&driver).unwrap();
+        assert_eq!(app.selected(), 0);
+
+        app.navigate_down();
+        assert_eq!(app.selected(), 1);
+        assert_eq!(app.last_focused_id, Some(2));
+
+        driver.windows.borrow_mut()[0].is_active = true;
+        app.refresh_windows(&driver).unwrap();
+        assert_eq!(app.selected(), 0);
+        assert_eq!(app.last_focused_id, Some(1));
+    }
+
+    #[test]
+    fn test_ensure_visible_no_change_when_already_visible() {
+        let driver = MockTmux::new();
+        let mut app = App::new(&driver).unwrap();
+        assert_eq!(app.list_state().offset(), 0);
+
+        app.ensure_visible(3);
+        assert_eq!(app.list_state().offset(), 0);
+    }
+
+    #[test]
+    fn test_ensure_visible_scrolls_down_when_selected_below_visible() {
+        let driver = MockTmux::new();
+        let mut app = App::new(&driver).unwrap();
+        app.navigate_down();
+        app.navigate_down();
+        assert_eq!(app.selected(), 2);
+
+        app.ensure_visible(2);
+        assert_eq!(app.list_state().offset(), 1);
+    }
+
+    #[test]
+    fn test_ensure_visible_scrolls_up_when_selected_above_visible() {
+        let driver = MockTmux::new();
+        let mut app = App::new(&driver).unwrap();
+        app.navigate_down();
+        app.navigate_down();
+        *app.list_state.offset_mut() = 2;
+
+        app.navigate_up();
+        app.navigate_up();
+        assert_eq!(app.selected(), 0);
+
+        app.ensure_visible(2);
+        assert_eq!(app.list_state().offset(), 0);
+    }
+
+    #[test]
+    fn test_ensure_visible_no_scroll_when_zero_visible_count() {
+        let driver = MockTmux::new();
+        let mut app = App::new(&driver).unwrap();
+        app.navigate_down();
+        app.navigate_down();
+
+        app.ensure_visible(0);
+        assert_eq!(app.list_state().offset(), 0);
     }
 }
