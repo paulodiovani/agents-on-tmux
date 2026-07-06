@@ -4,16 +4,18 @@ use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout};
 use ratatui::style::Styled;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Paragraph};
+use ratatui::widgets::{Block, Paragraph, Tabs};
 
 use crate::backends::{Agent, SESSION_NAME, Window, is_agent};
 use crate::frontends::tui::app::App;
+use crate::frontends::tui::event::Tab;
 use crate::frontends::tui::theme::Theme;
 
-/// Renders the complete TUI layout: header, cards, and footer.
+/// Renders the complete TUI layout: header, tabs, cards, and footer.
 pub fn draw(frame: &mut Frame, app: &mut App, theme: &Theme) {
-    let footer_height = calculate_footer_height(frame.area().width);
+    let footer_height = calculate_footer_height(frame.area().width, app);
     let chunks = Layout::vertical([
+        Constraint::Length(1),
         Constraint::Length(1),
         Constraint::Min(0),
         Constraint::Length(footer_height),
@@ -21,8 +23,9 @@ pub fn draw(frame: &mut Frame, app: &mut App, theme: &Theme) {
     .split(frame.area());
 
     draw_header(frame, chunks[0], theme);
-    draw_cards(frame, app, chunks[1], theme);
-    draw_footer(frame, app, chunks[2], theme);
+    draw_tab_bar(frame, app, chunks[1], theme);
+    draw_cards(frame, app, chunks[2], theme);
+    draw_footer(frame, app, chunks[3], theme);
 }
 
 /// Renders the header bar with the session name.
@@ -31,10 +34,34 @@ fn draw_header(frame: &mut Frame, area: ratatui::layout::Rect, theme: &Theme) {
     frame.render_widget(header, area);
 }
 
+/// Renders the tab bar showing Agents and Windows tabs.
+fn draw_tab_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, theme: &Theme) {
+    let titles: Vec<Line<'static>> = [Tab::Agents, Tab::Windows]
+        .iter()
+        .map(|tab| {
+            let title = if app.is_tab_empty(*tab) {
+                format!("{} (0)", tab.title())
+            } else {
+                let count = count_windows_for_tab(app, *tab);
+                format!("{} ({})", tab.title(), count)
+            };
+            Line::from(Span::raw(title))
+        })
+        .collect();
+
+    let tabs = Tabs::new(titles)
+        .style(theme.tab_style)
+        .highlight_style(theme.tab_highlight_style)
+        .select(app.active_tab().index())
+        .divider(" ")
+        .padding("", "");
+    frame.render_widget(tabs, area);
+}
+
 /// Renders the window cards in the main content area.
 fn draw_cards(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect, theme: &Theme) {
-    let windows: Vec<Window> = app.windows().to_vec();
-    if windows.is_empty() {
+    let tab_len = app.current_tab_len();
+    if tab_len == 0 {
         let empty = Paragraph::new("No windows").set_style(theme.card_detail);
         frame.render_widget(empty, area);
         return;
@@ -45,12 +72,14 @@ fn draw_cards(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect, the
 
     app.ensure_visible(visible_count);
 
+    let windows = app.current_tab_windows();
     let offset = app.list_state().offset();
     let visible_windows: Vec<(usize, &Window)> = windows
         .iter()
         .enumerate()
         .skip(offset)
         .take(visible_count)
+        .map(|(i, w)| (i, *w))
         .collect();
 
     let constraints: Vec<Constraint> = visible_windows
@@ -60,7 +89,7 @@ fn draw_cards(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect, the
     let card_areas = Layout::vertical(constraints).split(area);
 
     for (idx, (i, window)) in visible_windows.iter().enumerate() {
-        let is_selected = *i == app.selected();
+        let is_selected = *i == app.current_selected();
         let is_notification = window.notification_pending;
 
         let (border_style, border_set) = match (is_selected, is_notification) {
@@ -135,26 +164,27 @@ fn draw_footer(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect, th
         ]);
         Paragraph::new(msg)
     } else {
-        let entries = build_footer_entries(theme);
+        let entries = build_footer_entries(app, theme);
         let lines = wrap_entries(&entries, chunks[0].width as usize);
         Paragraph::new(lines)
     };
     frame.render_widget(footer, chunks[0]);
 
-    let counter_text = format!(" {}/{}", app.selected() + 1, app.windows().len());
+    let counter_text = format!(" {}/{}", app.current_selected() + 1, app.current_tab_len());
     let counter = Paragraph::new(Span::styled(counter_text, theme.footer_style));
     frame.render_widget(counter, chunks[1]);
 }
 
-/// Builds styled footer keybinding entries.
-fn build_footer_entries(theme: &Theme) -> Vec<(Vec<Span<'static>>, usize)> {
-    let keys = [
-        ("↑↓", "navigate"),
-        ("⏎", "focus"),
-        ("n", "new"),
-        ("d", "kill"),
-        ("q", "quit"),
-    ];
+/// Builds styled footer keybinding entries based on the active tab.
+fn build_footer_entries(app: &App, theme: &Theme) -> Vec<(Vec<Span<'static>>, usize)> {
+    let mut keys: Vec<(&str, &str)> = vec![("↑↓", "navigate")];
+
+    match app.active_tab() {
+        Tab::Agents => keys.push(("→", "windows")),
+        Tab::Windows => keys.push(("←", "agents")),
+    }
+
+    keys.extend([("⏎", "focus"), ("n", "new"), ("d", "kill"), ("q", "quit")]);
 
     keys.iter()
         .map(|(key, desc)| {
@@ -237,14 +267,15 @@ fn truncate_left(text: &str, max_width: usize) -> String {
 }
 
 /// Calculates how many lines the footer needs for the given width.
-fn calculate_footer_height(width: u16) -> u16 {
-    let keys = [
-        ("↑↓", "navigate"),
-        ("⏎", "focus"),
-        ("n", "new"),
-        ("d", "kill"),
-        ("q", "quit"),
-    ];
+fn calculate_footer_height(width: u16, app: &App) -> u16 {
+    let mut keys: Vec<(&str, &str)> = vec![("↑↓", "navigate")];
+
+    match app.active_tab() {
+        Tab::Agents => keys.push(("→", "windows")),
+        Tab::Windows => keys.push(("←", "agents")),
+    }
+
+    keys.extend([("⏎", "focus"), ("n", "new"), ("d", "kill"), ("q", "quit")]);
 
     let widths: Vec<usize> = keys
         .iter()
@@ -254,7 +285,7 @@ fn calculate_footer_height(width: u16) -> u16 {
     let mut lines = 1;
     let mut current_width = 0;
 
-    for (i, &entry_width) in widths.iter().enumerate() {
+    for &entry_width in widths.iter() {
         let separator_width = if current_width > 0 { 2 } else { 0 };
         let needed = current_width + separator_width + entry_width;
 
@@ -267,17 +298,101 @@ fn calculate_footer_height(width: u16) -> u16 {
             current_width += 2;
         }
         current_width += entry_width;
-
-        let _ = i;
     }
 
     lines
 }
 
+fn count_windows_for_tab(app: &App, tab: Tab) -> usize {
+    app.windows()
+        .iter()
+        .filter(|w| match tab {
+            Tab::Agents => is_agent(&w.running_command).is_some(),
+            Tab::Windows => is_agent(&w.running_command).is_none(),
+        })
+        .count()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backends::{Tmux, TmuxError};
     use std::time::Duration;
+
+    struct MockTmux {
+        windows: std::cell::RefCell<Vec<Window>>,
+        next_id: std::cell::RefCell<u32>,
+    }
+
+    impl MockTmux {
+        fn new() -> Self {
+            Self {
+                windows: std::cell::RefCell::new(vec![
+                    Window {
+                        id: 1,
+                        name: "w1".to_string(),
+                        running_command: "bash".to_string(),
+                        started_at: Some(Instant::now() - Duration::from_secs(125)),
+                        notification_pending: false,
+                        is_active: false,
+                        current_dir: "/home/user".to_string(),
+                    },
+                    Window {
+                        id: 2,
+                        name: "w2".to_string(),
+                        running_command: "claude".to_string(),
+                        started_at: Some(Instant::now() - Duration::from_secs(45)),
+                        notification_pending: false,
+                        is_active: false,
+                        current_dir: "/home/user".to_string(),
+                    },
+                ]),
+                next_id: std::cell::RefCell::new(3),
+            }
+        }
+    }
+
+    impl Tmux for MockTmux {
+        fn create_session_if_not_exists(&self) -> Result<(), TmuxError> {
+            Ok(())
+        }
+        fn attach_session(&self) -> Result<(), TmuxError> {
+            Ok(())
+        }
+        fn list_windows(&self) -> Result<Vec<Window>, TmuxError> {
+            Ok(self.windows.borrow().clone())
+        }
+        fn create_window(&self, name: &str) -> Result<Window, TmuxError> {
+            let mut next_id = self.next_id.borrow_mut();
+            let window = Window {
+                id: *next_id,
+                name: name.to_string(),
+                running_command: String::new(),
+                started_at: None,
+                notification_pending: false,
+                is_active: false,
+                current_dir: "/home/user".to_string(),
+            };
+            *next_id += 1;
+            self.windows.borrow_mut().push(window.clone());
+            Ok(window)
+        }
+        fn kill_window(&self, id: u32) -> Result<(), TmuxError> {
+            self.windows.borrow_mut().retain(|w| w.id != id);
+            Ok(())
+        }
+        fn select_window(&self, _id: u32) -> Result<(), TmuxError> {
+            Ok(())
+        }
+        fn split_window(&self, _command: &str) -> Result<String, TmuxError> {
+            Ok("%99".to_string())
+        }
+    }
+
+    fn test_app() -> App {
+        let driver = MockTmux::new();
+        App::new(&driver).unwrap()
+    }
 
     #[test]
     fn test_format_elapsed_seconds_only() {
@@ -304,12 +419,14 @@ mod tests {
 
     #[test]
     fn test_calculate_footer_height_wide() {
-        assert_eq!(calculate_footer_height(120), 1);
+        let app = test_app();
+        assert_eq!(calculate_footer_height(120, &app), 1);
     }
 
     #[test]
     fn test_calculate_footer_height_narrow() {
-        assert_eq!(calculate_footer_height(30), 2);
+        let app = test_app();
+        assert_eq!(calculate_footer_height(30, &app), 2);
     }
 
     #[test]
@@ -335,5 +452,12 @@ mod tests {
     #[test]
     fn test_truncate_left_empty() {
         assert_eq!(truncate_left("", 5), "");
+    }
+
+    #[test]
+    fn test_count_windows_for_tab() {
+        let app = test_app();
+        assert_eq!(count_windows_for_tab(&app, Tab::Agents), 1);
+        assert_eq!(count_windows_for_tab(&app, Tab::Windows), 1);
     }
 }
