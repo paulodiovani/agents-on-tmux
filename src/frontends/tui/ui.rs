@@ -6,7 +6,7 @@ use ratatui::style::Styled;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph};
 
-use crate::backends::{Agents, SESSION_NAME, Window};
+use crate::backends::{Agent, SESSION_NAME, Window, is_agent};
 use crate::frontends::tui::app::App;
 use crate::frontends::tui::theme::Theme;
 
@@ -103,8 +103,8 @@ fn draw_cards(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect, the
             .map(|s| format!("../{}", s))
             .unwrap_or_else(|| "n/a".to_string());
 
-        let command_display = if Agents::is_agent(&window.running_command) {
-            format!("🤖 {}", window.running_command)
+        let command_display = if let Some(agent) = is_agent(&window.running_command) {
+            format!("{} {}", agent.icon(), agent.name())
         } else {
             window.running_command.clone()
         };
