@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-alpha.7] - 2026-07-06
+
+### Added
+- Auto-select new windows when added through the TUI
+- Window/agent counter display
+- Current directory display for each window
+- Scrollable TUI for handling many windows
+- Live sync with external tmux session changes
+
+### Changed
+- Bump crossterm from 0.28.1 to 0.29.0
+
 ## [0.1.0-alpha.6] - 2026-07-05
 
 ### Fixed
