@@ -11,7 +11,7 @@ struct Cli {
     tui: bool,
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> anyhow::Result<()> {
     use backends::Tmux;
     let cli = Cli::parse();
 
