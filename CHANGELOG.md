@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-beta.1] - 2026-07-06
+
+### Fixed
+- Prevent startup infinite loop by detecting and rejecting nested `aot` runs inside its own dedicated session
+- Switch error handling from `Box<dyn Error>` to `anyhow` for cleaner error propagation
+
 ## [0.1.0-alpha.7] - 2026-07-06
 
 ### Added
