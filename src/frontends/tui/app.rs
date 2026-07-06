@@ -165,7 +165,8 @@ impl App {
     pub fn switch_tab(&mut self, tab: Tab) {
         if !self.is_tab_empty(tab) {
             self.active_tab = tab;
-            self.list_state.select(Some(self.current_selected()));
+            self.set_selected_for_tab(tab, 0);
+            self.list_state.select(Some(0));
         }
     }
 
@@ -173,6 +174,8 @@ impl App {
     pub fn refresh_windows<T: Tmux>(&mut self, driver: &T) -> anyhow::Result<()> {
         let windows = driver.list_windows()?;
         let now = Instant::now();
+
+        let selected_window_id = self.current_tab_window().map(|w| w.id);
 
         let current_ids: std::collections::HashSet<u32> = windows.iter().map(|w| w.id).collect();
 
@@ -188,6 +191,28 @@ impl App {
         }
 
         self.windows = enriched_windows;
+
+        if let Some(selected_id) = selected_window_id
+            && let Some(window) = self.windows.iter().find(|w| w.id == selected_id)
+        {
+            let new_tab = if is_agent(&window.running_command).is_some() {
+                Tab::Agents
+            } else {
+                Tab::Windows
+            };
+
+            if new_tab != self.active_tab {
+                let indices = self.indices_for_tab(new_tab);
+                if let Some(pos) = indices
+                    .iter()
+                    .position(|&i| self.windows[i].id == selected_id)
+                {
+                    self.active_tab = new_tab;
+                    self.set_selected_for_tab(new_tab, pos);
+                    self.list_state.select(Some(self.current_selected()));
+                }
+            }
+        }
 
         let active_window_info = self
             .windows
@@ -662,6 +687,23 @@ mod tests {
     }
 
     #[test]
+    fn test_selected_window_moving_to_other_tab_switches_tab() {
+        let driver = MockTmux::new();
+        let mut app = App::new(&driver).unwrap();
+        assert_eq!(app.active_tab(), Tab::Agents);
+        assert_eq!(app.current_tab_len(), 2);
+
+        let selected_id = app.current_tab_window().unwrap().id;
+        assert_eq!(selected_id, 2);
+
+        driver.windows.borrow_mut()[1].running_command = "bash".to_string();
+        app.refresh_windows(&driver).unwrap();
+
+        assert_eq!(app.active_tab(), Tab::Windows);
+        assert_eq!(app.current_tab_window().unwrap().id, selected_id);
+    }
+
+    #[test]
     fn test_switch_tab() {
         let driver = MockTmux::new();
         let mut app = App::new(&driver).unwrap();
@@ -685,7 +727,7 @@ mod tests {
     }
 
     #[test]
-    fn test_per_tab_selection_independent() {
+    fn test_switch_tab_resets_selection_to_first() {
         let driver = MockTmux::new();
         let mut app = App::new(&driver).unwrap();
 
@@ -699,7 +741,7 @@ mod tests {
         assert_eq!(app.current_selected(), 1);
 
         app.switch_tab(Tab::Agents);
-        assert_eq!(app.current_selected(), 1);
+        assert_eq!(app.current_selected(), 0);
     }
 
     #[test]

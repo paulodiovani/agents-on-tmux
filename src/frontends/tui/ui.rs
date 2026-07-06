@@ -53,7 +53,7 @@ fn draw_tab_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, theme
         .style(theme.tab_style)
         .highlight_style(theme.tab_highlight_style)
         .select(app.active_tab().index())
-        .divider(" ")
+        .divider(" | ")
         .padding("", "");
     frame.render_widget(tabs, area);
 }
