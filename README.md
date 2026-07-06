@@ -11,6 +11,34 @@ A TMUX-based AI Agents orchestrator.
 - `tmux` The TMUX communication interface, allowing to start and control a dedicated TMUX session.
 - `agents` The `agents` interface, supporting popular terminal-based AI Agents and interact with them.
 
+### Architecture
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                          aot (main.rs)                           │
+├──────────────────────────────┬───────────────────────────────────┤
+│         frontends/           │            backends/              │
+│                              │                                   │
+│       ┌────────────┐         │         ┌────────────┐            │
+│       │    tui     │         │         │    tmux    │            │
+│       └────────────┘         │         └────────────┘            │
+│                              │         ┌────────────┐            │
+│                              │         │   agents   │            │
+│                              │         └────────────┘            │
+└──────────────────────────────┴───────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────────┐
+│                      Parent TMUX Session                         │
+│  ┌────────────┐   ┌──────────────────────────────────────────┐   │
+│  │  TUI Pane  │   │  Nested: agents-on-tmux Session          │   │
+│  │            │   │   ┌──────────┐ ┌──────────┐ ┌──────────┐ │   │
+│  │            │   │   │  Agent   │ │  Agent   │ │  Agent   │ │   │
+│  │            │   │   │  Window  │ │  Window  │ │  Window  │ │   │
+│  │            │   │   └──────────┘ └──────────┘ └──────────┘ │   │
+│  └────────────┘   └──────────────────────────────────────────┘   │
+└──────────────────────────────────────────────────────────────────┘
+```
+
 ## Requirements
 
 - [TMUX](https://tmux.app/)
