@@ -6,18 +6,11 @@ use ratatui::DefaultTerminal;
 use ratatui::widgets::ListState;
 
 use crate::backends::{Tmux, Window, is_agent};
-use crate::frontends::tui::event::{Action, Tab, key_to_action};
+use crate::frontends::tui::event::{Action, PendingAction, Tab, key_to_action};
 use crate::frontends::tui::theme::Theme;
 use crate::frontends::tui::ui;
 
 const REFRESH_INTERVAL_SECS: u64 = 5;
-
-/// Actions that require double-press confirmation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PendingAction {
-    KillWindow,
-    Quit,
-}
 
 /// Main application state for the TUI frontend.
 pub struct App {
@@ -648,6 +641,21 @@ mod tests {
         app.handle_action(Action::NavigateDown, &driver);
         assert_eq!(app.pending_action(), None);
         assert!(app.running);
+    }
+
+    #[test]
+    fn test_none_action_clears_pending() {
+        let driver = MockTmux::new();
+        let mut app = App::new(&driver).unwrap();
+        app.handle_action(Action::KillWindow, &driver);
+        assert_eq!(app.pending_action(), Some(PendingAction::KillWindow));
+        app.handle_action(Action::None, &driver);
+        assert_eq!(app.pending_action(), None);
+
+        app.handle_action(Action::Quit, &driver);
+        assert_eq!(app.pending_action(), Some(PendingAction::Quit));
+        app.handle_action(Action::None, &driver);
+        assert_eq!(app.pending_action(), None);
     }
 
     #[test]

@@ -50,6 +50,13 @@ pub enum Action {
     None,
 }
 
+/// Actions that require double-press confirmation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PendingAction {
+    KillWindow,
+    Quit,
+}
+
 /// Maps a key event to the corresponding application action.
 pub fn key_to_action(key: KeyEvent) -> Action {
     match key.code {

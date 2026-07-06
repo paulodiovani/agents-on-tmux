@@ -7,8 +7,8 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph, Tabs};
 
 use crate::backends::{Agent, SESSION_NAME, Window, is_agent};
-use crate::frontends::tui::app::{App, PendingAction};
-use crate::frontends::tui::event::Tab;
+use crate::frontends::tui::app::App;
+use crate::frontends::tui::event::{PendingAction, Tab};
 use crate::frontends::tui::theme::Theme;
 
 /// Renders the complete TUI layout: header, tabs, cards, and footer.
