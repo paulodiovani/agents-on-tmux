@@ -43,6 +43,8 @@ pub enum TmuxError {
     },
     #[error("Not running inside a tmux session")]
     NotInsideTmux,
+    #[error("Cannot run aot inside its own dedicated session '{0}'.")]
+    InsideOwnSession(String),
 }
 
 /// Represents a tmux window and its runtime state.
@@ -599,5 +601,15 @@ mod tests {
         let result = check_inside_tmux();
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), TmuxError::NotInsideTmux));
+    }
+
+    #[test]
+    fn test_inside_own_session_error_message() {
+        let error = TmuxError::InsideOwnSession("agents-on-tmux".to_string());
+        let message = error.to_string();
+        assert_eq!(
+            message,
+            "Cannot run aot inside its own dedicated session 'agents-on-tmux'."
+        );
     }
 }
