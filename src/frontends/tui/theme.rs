@@ -4,6 +4,8 @@ use ratatui::symbols;
 /// Visual theme configuration for the TUI.
 pub struct Theme {
     pub header_style: Style,
+    pub tab_style: Style,
+    pub tab_highlight_style: Style,
     pub footer_style: Style,
     pub footer_key_style: Style,
     pub card_border: Style,
@@ -18,6 +20,10 @@ impl Default for Theme {
     fn default() -> Self {
         Self {
             header_style: Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+            tab_style: Style::default().fg(Color::DarkGray),
+            tab_highlight_style: Style::default()
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
             footer_style: Style::default().fg(Color::DarkGray),
@@ -48,6 +54,8 @@ mod tests {
     fn test_default_theme() {
         let theme = Theme::default();
         assert_eq!(theme.header_style.fg, Some(Color::White));
+        assert_eq!(theme.tab_style.fg, Some(Color::DarkGray));
+        assert_eq!(theme.tab_highlight_style.fg, Some(Color::White));
         assert_eq!(theme.footer_style.fg, Some(Color::DarkGray));
         assert_eq!(theme.footer_key_style.fg, Some(Color::White));
         assert_eq!(theme.card_border.fg, Some(Color::DarkGray));
