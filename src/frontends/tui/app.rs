@@ -15,30 +15,30 @@ const REFRESH_INTERVAL_SECS: u64 = 5;
 
 /// Main application state for the TUI frontend.
 pub struct App {
-    running: bool,
     active_tab: Tab,
     agents_selected: usize,
-    windows_selected: usize,
-    windows: Vec<Window>,
-    pending_action: Option<PendingAction>,
-    window_starts: HashMap<u32, Instant>,
     last_focused_id: Option<u32>,
     list_state: ListState,
+    pending_action: Option<PendingAction>,
+    running: bool,
+    window_starts: HashMap<u32, Instant>,
+    windows: Vec<Window>,
+    windows_selected: usize,
 }
 
 impl App {
     /// Creates a new App, loading windows from the tmux driver.
     pub fn new<T: Tmux>(driver: &T) -> anyhow::Result<Self> {
         let mut app = Self {
-            running: true,
             active_tab: Tab::Windows,
             agents_selected: 0,
-            windows_selected: 0,
-            windows: Vec::new(),
-            pending_action: None,
-            window_starts: HashMap::new(),
             last_focused_id: None,
             list_state: ListState::default(),
+            pending_action: None,
+            running: true,
+            window_starts: HashMap::new(),
+            windows: Vec::new(),
+            windows_selected: 0,
         };
         app.refresh_windows(driver)?;
         if !app.is_tab_empty(Tab::Agents) {
@@ -376,52 +376,52 @@ mod tests {
     use std::time::{Duration, Instant};
 
     struct MockTmux {
-        windows: std::cell::RefCell<Vec<Window>>,
         next_id: std::cell::RefCell<u32>,
+        windows: std::cell::RefCell<Vec<Window>>,
     }
 
     impl MockTmux {
         fn new() -> Self {
             Self {
+                next_id: std::cell::RefCell::new(5),
                 windows: std::cell::RefCell::new(vec![
                     Window {
+                        current_dir: "/home/user/project1".to_string(),
                         id: 1,
+                        is_active: false,
                         name: "agent-1".to_string(),
+                        notification_pending: false,
                         running_command: "cargo build".to_string(),
                         started_at: Some(Instant::now() - Duration::from_secs(125)),
-                        notification_pending: false,
-                        is_active: false,
-                        current_dir: "/home/user/project1".to_string(),
                     },
                     Window {
+                        current_dir: "/home/user/project2".to_string(),
                         id: 2,
+                        is_active: false,
                         name: "agent-2".to_string(),
+                        notification_pending: true,
                         running_command: "claude".to_string(),
                         started_at: Some(Instant::now() - Duration::from_secs(45)),
-                        notification_pending: true,
-                        is_active: false,
-                        current_dir: "/home/user/project2".to_string(),
                     },
                     Window {
+                        current_dir: "/home/user/project3".to_string(),
                         id: 3,
+                        is_active: false,
                         name: "agent-3".to_string(),
+                        notification_pending: false,
                         running_command: "python main.py".to_string(),
                         started_at: Some(Instant::now() - Duration::from_secs(300)),
-                        notification_pending: false,
-                        is_active: false,
-                        current_dir: "/home/user/project3".to_string(),
                     },
                     Window {
+                        current_dir: "/home/user/project4".to_string(),
                         id: 4,
+                        is_active: false,
                         name: "agent-4".to_string(),
+                        notification_pending: false,
                         running_command: "opencode".to_string(),
                         started_at: Some(Instant::now() - Duration::from_secs(10)),
-                        notification_pending: false,
-                        is_active: false,
-                        current_dir: "/home/user/project4".to_string(),
                     },
                 ]),
-                next_id: std::cell::RefCell::new(5),
             }
         }
     }
@@ -442,13 +442,13 @@ mod tests {
         fn create_window(&self, name: &str) -> Result<Window, TmuxError> {
             let mut next_id = self.next_id.borrow_mut();
             let window = Window {
+                current_dir: "/home/user".to_string(),
                 id: *next_id,
+                is_active: false,
                 name: name.to_string(),
+                notification_pending: false,
                 running_command: String::new(),
                 started_at: None,
-                notification_pending: false,
-                is_active: false,
-                current_dir: "/home/user".to_string(),
             };
             *next_id += 1;
             self.windows.borrow_mut().push(window.clone());

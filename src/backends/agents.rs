@@ -10,17 +10,17 @@ pub trait Agent {
 /// Generic agent implementation with stored properties.
 #[derive(Debug, Clone)]
 pub struct GenericAgent {
-    name: String,
     command: String,
     icon: String,
+    name: String,
 }
 
 impl GenericAgent {
     fn new(name: &str, command: &str, icon: &str) -> Self {
         Self {
-            name: name.to_string(),
             command: command.to_string(),
             icon: icon.to_string(),
+            name: name.to_string(),
         }
     }
 }

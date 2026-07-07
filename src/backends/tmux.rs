@@ -50,13 +50,13 @@ pub enum TmuxError {
 /// Represents a tmux window and its runtime state.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Window {
+    pub current_dir: String,
     pub id: u32,
+    pub is_active: bool,
     pub name: String,
+    pub notification_pending: bool,
     pub running_command: String,
     pub started_at: Option<Instant>,
-    pub notification_pending: bool,
-    pub is_active: bool,
-    pub current_dir: String,
 }
 
 pub fn check_inside_tmux() -> Result<(), TmuxError> {
@@ -187,13 +187,13 @@ fn parse_window_line(line: &str) -> Option<Window> {
     let current_dir = parts[5].to_string();
 
     Some(Window {
+        current_dir,
         id,
+        is_active,
         name,
+        notification_pending,
         running_command,
         started_at: None,
-        notification_pending,
-        is_active,
-        current_dir,
     })
 }
 
@@ -288,23 +288,19 @@ mod tests {
 
     /// Mock command executor for testing.
     struct MockCommandExecutor {
-        /// Tracks all commands executed.
         commands: RefCell<Vec<Vec<String>>>,
-        /// Simulates whether session exists.
-        session_exists: RefCell<bool>,
-        /// Simulated windows.
-        windows: RefCell<Vec<Window>>,
-        /// Simulated pane ID returned by split-window.
         pane_id: RefCell<String>,
+        session_exists: RefCell<bool>,
+        windows: RefCell<Vec<Window>>,
     }
 
     impl MockCommandExecutor {
         fn new() -> Self {
             Self {
                 commands: RefCell::new(Vec::new()),
+                pane_id: RefCell::new("%99".to_string()),
                 session_exists: RefCell::new(false),
                 windows: RefCell::new(Vec::new()),
-                pane_id: RefCell::new("%99".to_string()),
             }
         }
 
@@ -365,13 +361,13 @@ mod tests {
                     let mut windows = self.windows.borrow_mut();
                     let id = windows.iter().map(|w| w.id).max().unwrap_or(0) + 1;
                     let window = Window {
+                        current_dir: "/home/user".to_string(),
                         id,
+                        is_active: false,
                         name,
+                        notification_pending: false,
                         running_command: "bash".to_string(),
                         started_at: None,
-                        notification_pending: false,
-                        is_active: false,
-                        current_dir: "/home/user".to_string(),
                     };
                     windows.push(window.clone());
                     Ok(String::new())
@@ -482,13 +478,13 @@ mod tests {
     fn test_list_windows_with_windows() {
         let executor = MockCommandExecutor::with_session();
         executor.windows.borrow_mut().push(Window {
+            current_dir: "/home/user".to_string(),
             id: 1,
+            is_active: false,
             name: "test-window".to_string(),
+            notification_pending: false,
             running_command: "bash".to_string(),
             started_at: None,
-            notification_pending: false,
-            is_active: false,
-            current_dir: "/home/user".to_string(),
         });
         let driver = TmuxDriver::with_executor(executor);
         let windows = driver.list_windows().unwrap();
@@ -510,13 +506,13 @@ mod tests {
     fn test_kill_window() {
         let executor = MockCommandExecutor::with_session();
         executor.windows.borrow_mut().push(Window {
+            current_dir: "/home/user".to_string(),
             id: 1,
+            is_active: false,
             name: "to-kill".to_string(),
+            notification_pending: false,
             running_command: "bash".to_string(),
             started_at: None,
-            notification_pending: false,
-            is_active: false,
-            current_dir: "/home/user".to_string(),
         });
         let driver = TmuxDriver::with_executor(executor);
         assert!(driver.kill_window(1).is_ok());
@@ -541,13 +537,13 @@ mod tests {
     #[test]
     fn test_window_struct_fields() {
         let window = Window {
+            current_dir: "/home/user/project".to_string(),
             id: 42,
+            is_active: true,
             name: "test".to_string(),
+            notification_pending: true,
             running_command: "echo hello".to_string(),
             started_at: Some(Instant::now() - Duration::from_secs(60)),
-            notification_pending: true,
-            is_active: true,
-            current_dir: "/home/user/project".to_string(),
         };
         assert_eq!(window.id, 42);
         assert_eq!(window.name, "test");

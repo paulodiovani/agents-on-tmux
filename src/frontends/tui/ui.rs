@@ -335,34 +335,34 @@ mod tests {
     use std::time::Duration;
 
     struct MockTmux {
-        windows: std::cell::RefCell<Vec<Window>>,
         next_id: std::cell::RefCell<u32>,
+        windows: std::cell::RefCell<Vec<Window>>,
     }
 
     impl MockTmux {
         fn new() -> Self {
             Self {
+                next_id: std::cell::RefCell::new(3),
                 windows: std::cell::RefCell::new(vec![
                     Window {
+                        current_dir: "/home/user".to_string(),
                         id: 1,
+                        is_active: false,
                         name: "w1".to_string(),
+                        notification_pending: false,
                         running_command: "bash".to_string(),
                         started_at: Some(Instant::now() - Duration::from_secs(125)),
-                        notification_pending: false,
-                        is_active: false,
-                        current_dir: "/home/user".to_string(),
                     },
                     Window {
+                        current_dir: "/home/user".to_string(),
                         id: 2,
+                        is_active: false,
                         name: "w2".to_string(),
+                        notification_pending: false,
                         running_command: "claude".to_string(),
                         started_at: Some(Instant::now() - Duration::from_secs(45)),
-                        notification_pending: false,
-                        is_active: false,
-                        current_dir: "/home/user".to_string(),
                     },
                 ]),
-                next_id: std::cell::RefCell::new(3),
             }
         }
     }
@@ -380,13 +380,13 @@ mod tests {
         fn create_window(&self, name: &str) -> Result<Window, TmuxError> {
             let mut next_id = self.next_id.borrow_mut();
             let window = Window {
+                current_dir: "/home/user".to_string(),
                 id: *next_id,
+                is_active: false,
                 name: name.to_string(),
+                notification_pending: false,
                 running_command: String::new(),
                 started_at: None,
-                notification_pending: false,
-                is_active: false,
-                current_dir: "/home/user".to_string(),
             };
             *next_id += 1;
             self.windows.borrow_mut().push(window.clone());
