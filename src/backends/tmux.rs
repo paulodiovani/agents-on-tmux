@@ -33,18 +33,18 @@ pub const SESSION_NAME: &str = "agents-on-tmux";
 /// Errors that can occur during tmux operations.
 #[derive(Debug, Error)]
 pub enum TmuxError {
-    #[error("Window not found")]
-    WindowNotFound,
     #[error("Command failed: {message}")]
     CommandFailed {
         message: String,
         stderr: String,
         code: Option<i32>,
     },
-    #[error("Not running inside a tmux session")]
-    NotInsideTmux,
     #[error("Cannot run aot inside its own dedicated session '{0}'.")]
     InsideOwnSession(String),
+    #[error("Not running inside a tmux session")]
+    NotInsideTmux,
+    #[error("Window not found")]
+    WindowNotFound,
 }
 
 /// Represents a tmux window and its runtime state.

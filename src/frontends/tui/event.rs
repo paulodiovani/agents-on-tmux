@@ -39,15 +39,15 @@ impl Tab {
 
 /// User actions that can be triggered by keyboard input.
 pub enum Action {
-    Quit,
-    NavigateUp,
-    NavigateDown,
-    FocusWindow,
     CreateWindow,
+    FocusWindow,
     KillWindow,
+    NavigateDown,
+    NavigateUp,
+    None,
+    Quit,
     SwitchTabLeft,
     SwitchTabRight,
-    None,
 }
 
 /// Actions that require double-press confirmation.
