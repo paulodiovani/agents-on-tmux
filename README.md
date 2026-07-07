@@ -4,6 +4,9 @@ A TMUX-based AI Agents orchestrator.
 
 ![screenshot](assets/media/screenshot.png)
 
+> [!NOTE]
+> The project is in early development and subject to change or evolve. Expect new features soon.
+
 ## Design
 
 `agents-on-tmux`, or just `aot`, works as a thin wrapper over tmux and a TUI control panel. Its features are divided into three primary modules:
