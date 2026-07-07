@@ -6,7 +6,8 @@ use ratatui::style::Styled;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Paragraph, Tabs};
 
-use crate::backends::{Agent, SESSION_NAME, Window, is_agent};
+use crate::backends::agents::{Agent, is_agent};
+use crate::backends::tmux::{SESSION_NAME, Window};
 use crate::frontends::tui::app::App;
 use crate::frontends::tui::event::{PendingAction, Tab};
 use crate::frontends::tui::theme::Theme;
@@ -330,7 +331,7 @@ fn count_windows_for_tab(app: &App, tab: Tab) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backends::{Tmux, TmuxError};
+    use crate::backends::tmux::{Tmux, TmuxError};
     use std::time::Duration;
 
     struct MockTmux {

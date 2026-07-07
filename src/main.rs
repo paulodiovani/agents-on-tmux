@@ -12,21 +12,21 @@ struct Cli {
 }
 
 fn main() -> anyhow::Result<()> {
-    use backends::Tmux;
+    use backends::tmux::{SESSION_NAME, Tmux, TmuxDriver, TmuxError, detect_parent_session};
     let cli = Cli::parse();
 
-    let parent_session = backends::detect_parent_session()?;
-    if parent_session == backends::SESSION_NAME {
-        return Err(backends::TmuxError::InsideOwnSession(parent_session).into());
+    let parent_session = detect_parent_session()?;
+    if parent_session == SESSION_NAME {
+        return Err(TmuxError::InsideOwnSession(parent_session).into());
     }
-    let parent_driver = backends::TmuxDriver::new(&parent_session);
+    let parent_driver = TmuxDriver::new(&parent_session);
 
-    let nested_driver = backends::TmuxDriver::new(backends::SESSION_NAME);
+    let nested_driver = TmuxDriver::new(SESSION_NAME);
     nested_driver.create_session_if_not_exists()?;
 
     if cli.tui {
         let terminal = ratatui::init();
-        let mut app = frontends::App::new(&nested_driver)?;
+        let mut app = frontends::tui::app::App::new(&nested_driver)?;
         app.run(terminal, &nested_driver)?;
         ratatui::restore();
     } else {

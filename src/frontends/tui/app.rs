@@ -5,7 +5,8 @@ use crossterm::event;
 use ratatui::DefaultTerminal;
 use ratatui::widgets::ListState;
 
-use crate::backends::{Tmux, Window, is_agent};
+use crate::backends::agents::is_agent;
+use crate::backends::tmux::{Tmux, Window};
 use crate::frontends::tui::event::{Action, PendingAction, Tab, key_to_action};
 use crate::frontends::tui::theme::Theme;
 use crate::frontends::tui::ui;
@@ -371,7 +372,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backends::{Tmux, TmuxError, Window};
+    use crate::backends::tmux::{Tmux, TmuxError, Window};
     use std::time::{Duration, Instant};
 
     struct MockTmux {
