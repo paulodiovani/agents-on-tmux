@@ -3,45 +3,45 @@ use ratatui::symbols;
 
 /// Visual theme configuration for the TUI.
 pub struct Theme {
-    pub header_style: Style,
-    pub tab_style: Style,
-    pub tab_highlight_style: Style,
-    pub footer_style: Style,
-    pub footer_key_style: Style,
     pub card_border: Style,
-    pub card_border_selected: Style,
     pub card_border_notification: Style,
-    pub selected_border_set: symbols::border::Set,
-    pub card_title: Style,
+    pub card_border_selected: Style,
     pub card_detail: Style,
+    pub card_title: Style,
+    pub footer_key_style: Style,
+    pub footer_style: Style,
+    pub header_style: Style,
+    pub selected_border_set: symbols::border::Set,
+    pub tab_highlight_style: Style,
+    pub tab_style: Style,
 }
 
 impl Default for Theme {
     fn default() -> Self {
         Self {
-            header_style: Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-            tab_style: Style::default().fg(Color::DarkGray),
-            tab_highlight_style: Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-            footer_style: Style::default().fg(Color::DarkGray),
-            footer_key_style: Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
             card_border: Style::default().fg(Color::DarkGray),
-            card_border_selected: Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
             card_border_notification: Style::default()
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
-            selected_border_set: symbols::border::DOUBLE,
-            card_title: Style::default()
+            card_border_selected: Style::default()
                 .fg(Color::White)
                 .add_modifier(Modifier::BOLD),
             card_detail: Style::default().fg(Color::DarkGray),
+            card_title: Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+            footer_key_style: Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+            footer_style: Style::default().fg(Color::DarkGray),
+            header_style: Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+            selected_border_set: symbols::border::DOUBLE,
+            tab_highlight_style: Style::default()
+                .fg(Color::White)
+                .add_modifier(Modifier::BOLD),
+            tab_style: Style::default().fg(Color::DarkGray),
         }
     }
 }

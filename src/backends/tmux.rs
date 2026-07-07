@@ -33,30 +33,30 @@ pub const SESSION_NAME: &str = "agents-on-tmux";
 /// Errors that can occur during tmux operations.
 #[derive(Debug, Error)]
 pub enum TmuxError {
-    #[error("Window not found")]
-    WindowNotFound,
     #[error("Command failed: {message}")]
     CommandFailed {
         message: String,
         stderr: String,
         code: Option<i32>,
     },
-    #[error("Not running inside a tmux session")]
-    NotInsideTmux,
     #[error("Cannot run aot inside its own dedicated session '{0}'.")]
     InsideOwnSession(String),
+    #[error("Not running inside a tmux session")]
+    NotInsideTmux,
+    #[error("Window not found")]
+    WindowNotFound,
 }
 
 /// Represents a tmux window and its runtime state.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Window {
+    pub current_dir: String,
     pub id: u32,
+    pub is_active: bool,
     pub name: String,
+    pub notification_pending: bool,
     pub running_command: String,
     pub started_at: Option<Instant>,
-    pub notification_pending: bool,
-    pub is_active: bool,
-    pub current_dir: String,
 }
 
 pub fn check_inside_tmux() -> Result<(), TmuxError> {
@@ -179,21 +179,21 @@ fn parse_window_line(line: &str) -> Option<Window> {
         return None;
     }
 
-    let id = parts[0].parse::<u32>().ok()?;
-    let name = parts[1].to_string();
+    let running_command = parts[0].to_string();
+    let current_dir = parts[1].to_string();
     let notification_pending = parts[2] == "1";
-    let running_command = parts[3].to_string();
-    let is_active = parts[4] == "1";
-    let current_dir = parts[5].to_string();
+    let is_active = parts[3] == "1";
+    let id = parts[4].parse::<u32>().ok()?;
+    let name = parts[5].to_string();
 
     Some(Window {
+        current_dir,
         id,
+        is_active,
         name,
+        notification_pending,
         running_command,
         started_at: None,
-        notification_pending,
-        is_active,
-        current_dir,
     })
 }
 
@@ -225,7 +225,7 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
             "-t",
             &self.session,
             "-F",
-            "#{window_index}\t#{window_name}\t#{window_activity_flag}\t#{pane_current_command}\t#{window_active}\t#{pane_current_path}",
+            "#{pane_current_command}\t#{pane_current_path}\t#{window_activity_flag}\t#{window_active}\t#{window_index}\t#{window_name}",
         ])?;
 
         let windows: Vec<Window> = output.lines().filter_map(parse_window_line).collect();
@@ -288,23 +288,19 @@ mod tests {
 
     /// Mock command executor for testing.
     struct MockCommandExecutor {
-        /// Tracks all commands executed.
         commands: RefCell<Vec<Vec<String>>>,
-        /// Simulates whether session exists.
-        session_exists: RefCell<bool>,
-        /// Simulated windows.
-        windows: RefCell<Vec<Window>>,
-        /// Simulated pane ID returned by split-window.
         pane_id: RefCell<String>,
+        session_exists: RefCell<bool>,
+        windows: RefCell<Vec<Window>>,
     }
 
     impl MockCommandExecutor {
         fn new() -> Self {
             Self {
                 commands: RefCell::new(Vec::new()),
+                pane_id: RefCell::new("%99".to_string()),
                 session_exists: RefCell::new(false),
                 windows: RefCell::new(Vec::new()),
-                pane_id: RefCell::new("%99".to_string()),
             }
         }
 
@@ -333,49 +329,6 @@ mod tests {
                         })
                     }
                 }
-                Some(&"new-session") => {
-                    *self.session_exists.borrow_mut() = true;
-                    Ok(String::new())
-                }
-                Some(&"set-option") => Ok(String::new()),
-                Some(&"list-windows") => {
-                    let windows = self.windows.borrow();
-                    let output: Vec<String> = windows
-                        .iter()
-                        .map(|w| {
-                            format!(
-                                "{}\t{}\t{}\t{}\t{}\t{}",
-                                w.id,
-                                w.name,
-                                if w.notification_pending { "1" } else { "0" },
-                                w.running_command,
-                                if w.is_active { "1" } else { "0" },
-                                w.current_dir
-                            )
-                        })
-                        .collect();
-                    Ok(output.join("\n"))
-                }
-                Some(&"new-window") => {
-                    let name = args
-                        .windows(2)
-                        .find(|w| w[0] == "-n")
-                        .map(|w| w[1].to_string())
-                        .unwrap_or_else(|| "unnamed".to_string());
-                    let mut windows = self.windows.borrow_mut();
-                    let id = windows.iter().map(|w| w.id).max().unwrap_or(0) + 1;
-                    let window = Window {
-                        id,
-                        name,
-                        running_command: "bash".to_string(),
-                        started_at: None,
-                        notification_pending: false,
-                        is_active: false,
-                        current_dir: "/home/user".to_string(),
-                    };
-                    windows.push(window.clone());
-                    Ok(String::new())
-                }
                 Some(&"kill-window") => {
                     let id_str = args
                         .windows(2)
@@ -386,8 +339,51 @@ mod tests {
                     self.windows.borrow_mut().retain(|w| w.id != id);
                     Ok(String::new())
                 }
+                Some(&"list-windows") => {
+                    let windows = self.windows.borrow();
+                    let output: Vec<String> = windows
+                        .iter()
+                        .map(|w| {
+                            format!(
+                                "{}\t{}\t{}\t{}\t{}\t{}",
+                                w.running_command,
+                                w.current_dir,
+                                if w.notification_pending { "1" } else { "0" },
+                                if w.is_active { "1" } else { "0" },
+                                w.id,
+                                w.name
+                            )
+                        })
+                        .collect();
+                    Ok(output.join("\n"))
+                }
+                Some(&"new-session") => {
+                    *self.session_exists.borrow_mut() = true;
+                    Ok(String::new())
+                }
+                Some(&"new-window") => {
+                    let name = args
+                        .windows(2)
+                        .find(|w| w[0] == "-n")
+                        .map(|w| w[1].to_string())
+                        .unwrap_or_else(|| "unnamed".to_string());
+                    let mut windows = self.windows.borrow_mut();
+                    let id = windows.iter().map(|w| w.id).max().unwrap_or(0) + 1;
+                    let window = Window {
+                        current_dir: "/home/user".to_string(),
+                        id,
+                        is_active: false,
+                        name,
+                        notification_pending: false,
+                        running_command: "bash".to_string(),
+                        started_at: None,
+                    };
+                    windows.push(window.clone());
+                    Ok(String::new())
+                }
                 Some(&"select-window") => Ok(String::new()),
                 Some(&"send-keys") => Ok(String::new()),
+                Some(&"set-option") => Ok(String::new()),
                 Some(&"split-window") => Ok(self.pane_id.borrow().clone()),
                 _ => Err(TmuxError::CommandFailed {
                     message: format!("unknown command: {:?}", args),
@@ -428,7 +424,7 @@ mod tests {
 
     #[test]
     fn test_parse_window_line_valid() {
-        let line = "1\tagent-1\t0\tbash\t0\t/home/user/project";
+        let line = "bash\t/home/user/project\t0\t0\t1\tagent-1";
         let window = parse_window_line(line).unwrap();
         assert_eq!(window.id, 1);
         assert_eq!(window.name, "agent-1");
@@ -441,7 +437,7 @@ mod tests {
 
     #[test]
     fn test_parse_window_line_with_notification() {
-        let line = "2\tagent-2\t1\tzsh\t0\t/home/user";
+        let line = "zsh\t/home/user\t1\t0\t2\tagent-2";
         let window = parse_window_line(line).unwrap();
         assert_eq!(window.id, 2);
         assert_eq!(window.name, "agent-2");
@@ -453,7 +449,7 @@ mod tests {
 
     #[test]
     fn test_parse_window_line_active() {
-        let line = "3\tagent-3\t0\tbash\t1\t/tmp";
+        let line = "bash\t/tmp\t0\t1\t3\tagent-3";
         let window = parse_window_line(line).unwrap();
         assert_eq!(window.id, 3);
         assert!(window.is_active);
@@ -467,7 +463,7 @@ mod tests {
         assert!(parse_window_line("1\tname\t0").is_none());
         assert!(parse_window_line("1\tname\t0\tbash").is_none());
         assert!(parse_window_line("1\tname\t0\tbash\t0").is_none());
-        assert!(parse_window_line("notanumber\tname\t0\tbash\t0\t/path").is_none());
+        assert!(parse_window_line("bash\t/path\t0\t0\tnotanumber\tname").is_none());
     }
 
     #[test]
@@ -482,13 +478,13 @@ mod tests {
     fn test_list_windows_with_windows() {
         let executor = MockCommandExecutor::with_session();
         executor.windows.borrow_mut().push(Window {
+            current_dir: "/home/user".to_string(),
             id: 1,
+            is_active: false,
             name: "test-window".to_string(),
+            notification_pending: false,
             running_command: "bash".to_string(),
             started_at: None,
-            notification_pending: false,
-            is_active: false,
-            current_dir: "/home/user".to_string(),
         });
         let driver = TmuxDriver::with_executor(executor);
         let windows = driver.list_windows().unwrap();
@@ -510,13 +506,13 @@ mod tests {
     fn test_kill_window() {
         let executor = MockCommandExecutor::with_session();
         executor.windows.borrow_mut().push(Window {
+            current_dir: "/home/user".to_string(),
             id: 1,
+            is_active: false,
             name: "to-kill".to_string(),
+            notification_pending: false,
             running_command: "bash".to_string(),
             started_at: None,
-            notification_pending: false,
-            is_active: false,
-            current_dir: "/home/user".to_string(),
         });
         let driver = TmuxDriver::with_executor(executor);
         assert!(driver.kill_window(1).is_ok());
@@ -541,13 +537,13 @@ mod tests {
     #[test]
     fn test_window_struct_fields() {
         let window = Window {
+            current_dir: "/home/user/project".to_string(),
             id: 42,
+            is_active: true,
             name: "test".to_string(),
+            notification_pending: true,
             running_command: "echo hello".to_string(),
             started_at: Some(Instant::now() - Duration::from_secs(60)),
-            notification_pending: true,
-            is_active: true,
-            current_dir: "/home/user/project".to_string(),
         };
         assert_eq!(window.id, 42);
         assert_eq!(window.name, "test");
