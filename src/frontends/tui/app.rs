@@ -91,10 +91,10 @@ impl App {
             _ => {
                 self.pending_action = None;
                 match action {
-                    Action::CreateWindow => self.create_window(driver),
-                    Action::FocusWindow => self.focus_window(driver),
-                    Action::NavigateDown => self.navigate_down(),
                     Action::NavigateUp => self.navigate_up(),
+                    Action::NavigateDown => self.navigate_down(),
+                    Action::FocusWindow => self.focus_window(driver),
+                    Action::CreateWindow => self.create_window(driver),
                     Action::SwitchTabLeft => self.switch_tab(self.active_tab.left()),
                     Action::SwitchTabRight => self.switch_tab(self.active_tab.right()),
                     _ => {}

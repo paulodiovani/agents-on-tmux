@@ -179,12 +179,12 @@ fn parse_window_line(line: &str) -> Option<Window> {
         return None;
     }
 
-    let id = parts[0].parse::<u32>().ok()?;
-    let name = parts[1].to_string();
+    let running_command = parts[0].to_string();
+    let current_dir = parts[1].to_string();
     let notification_pending = parts[2] == "1";
-    let running_command = parts[3].to_string();
-    let is_active = parts[4] == "1";
-    let current_dir = parts[5].to_string();
+    let is_active = parts[3] == "1";
+    let id = parts[4].parse::<u32>().ok()?;
+    let name = parts[5].to_string();
 
     Some(Window {
         current_dir,
@@ -225,7 +225,7 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
             "-t",
             &self.session,
             "-F",
-            "#{window_index}\t#{window_name}\t#{window_activity_flag}\t#{pane_current_command}\t#{window_active}\t#{pane_current_path}",
+            "#{pane_current_command}\t#{pane_current_path}\t#{window_activity_flag}\t#{window_active}\t#{window_index}\t#{window_name}",
         ])?;
 
         let windows: Vec<Window> = output.lines().filter_map(parse_window_line).collect();
@@ -346,12 +346,12 @@ mod tests {
                         .map(|w| {
                             format!(
                                 "{}\t{}\t{}\t{}\t{}\t{}",
-                                w.id,
-                                w.name,
-                                if w.notification_pending { "1" } else { "0" },
                                 w.running_command,
+                                w.current_dir,
+                                if w.notification_pending { "1" } else { "0" },
                                 if w.is_active { "1" } else { "0" },
-                                w.current_dir
+                                w.id,
+                                w.name
                             )
                         })
                         .collect();
@@ -424,7 +424,7 @@ mod tests {
 
     #[test]
     fn test_parse_window_line_valid() {
-        let line = "1\tagent-1\t0\tbash\t0\t/home/user/project";
+        let line = "bash\t/home/user/project\t0\t0\t1\tagent-1";
         let window = parse_window_line(line).unwrap();
         assert_eq!(window.id, 1);
         assert_eq!(window.name, "agent-1");
@@ -437,7 +437,7 @@ mod tests {
 
     #[test]
     fn test_parse_window_line_with_notification() {
-        let line = "2\tagent-2\t1\tzsh\t0\t/home/user";
+        let line = "zsh\t/home/user\t1\t0\t2\tagent-2";
         let window = parse_window_line(line).unwrap();
         assert_eq!(window.id, 2);
         assert_eq!(window.name, "agent-2");
@@ -449,7 +449,7 @@ mod tests {
 
     #[test]
     fn test_parse_window_line_active() {
-        let line = "3\tagent-3\t0\tbash\t1\t/tmp";
+        let line = "bash\t/tmp\t0\t1\t3\tagent-3";
         let window = parse_window_line(line).unwrap();
         assert_eq!(window.id, 3);
         assert!(window.is_active);
@@ -463,7 +463,7 @@ mod tests {
         assert!(parse_window_line("1\tname\t0").is_none());
         assert!(parse_window_line("1\tname\t0\tbash").is_none());
         assert!(parse_window_line("1\tname\t0\tbash\t0").is_none());
-        assert!(parse_window_line("notanumber\tname\t0\tbash\t0\t/path").is_none());
+        assert!(parse_window_line("bash\t/path\t0\t0\tnotanumber\tname").is_none());
     }
 
     #[test]
