@@ -2,6 +2,8 @@
 
 A TMUX-based AI Agents orchestrator.
 
+![screenshot](assets/media/screenshot.png)
+
 ## Design
 
 `agents-on-tmux`, or just `aot`, works as a thin wrapper over tmux and a TUI control panel. Its features are divided into three primary modules:
@@ -54,9 +56,9 @@ Also check the [Recommended TMUX Config settings](./docs/recommended-tmux-config
 3. The TUI control panel is started by default on a left panel. Can also be started with `aot --tui`.
 4. User can interact with the dedicated session using the TUI control or standard TMUX mappings.
 
-## Screenshots
+## Screencast
 
-![screenshot](assets/media/screenshot.png)
+https://github.com/user-attachments/assets/e85bea40-2204-4f9d-9644-72dfd7c74dce
 
 ## Supported Agents
 
