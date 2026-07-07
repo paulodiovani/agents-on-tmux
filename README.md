@@ -8,6 +8,7 @@ A TMUX-based AI Agents orchestrator.
 
 - `tui` The terminal interface provides a control panel for running agents, including actions to focus, stop, or start a new agent.
   The TUI run on its own TMUX pane, window, or popup, it does not highjack or wrap your terminal to run agents inside its interface.
+  + Windows are organized into two tabs: **Agents** (running AI coding agents) and **Windows** (regular tmux windows).
 - `tmux` The TMUX communication interface, allowing to start and control a dedicated TMUX session.
 - `agents` The `agents` interface, supporting popular terminal-based AI Agents and interact with them.
 
