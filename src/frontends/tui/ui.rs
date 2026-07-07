@@ -157,6 +157,11 @@ fn draw_cards(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect, the
 /// Renders the footer with keybinding hints or confirmation message.
 fn draw_footer(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect, theme: &Theme) {
     let footer = match app.pending_action() {
+        None => {
+            let entries = build_footer_entries(app, theme);
+            let lines = wrap_entries(&entries, area.width as usize);
+            Paragraph::new(lines)
+        }
         Some(PendingAction::KillWindow) => {
             let msg = Line::from(vec![
                 Span::styled("d", theme.footer_key_style),
@@ -170,11 +175,6 @@ fn draw_footer(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect, th
                 Span::styled(" quit", theme.footer_style),
             ]);
             Paragraph::new(msg)
-        }
-        None => {
-            let entries = build_footer_entries(app, theme);
-            let lines = wrap_entries(&entries, area.width as usize);
-            Paragraph::new(lines)
         }
     };
     frame.render_widget(footer, area);
@@ -252,6 +252,7 @@ fn wrap_entries(entries: &[(Vec<Span<'static>>, usize)], width: usize) -> Vec<Li
 /// Formats an elapsed duration as a human-readable string.
 fn format_elapsed(started_at: Option<Instant>) -> String {
     match started_at {
+        None => String::new(),
         Some(start) => {
             let duration = Instant::now().duration_since(start);
             let total_secs = duration.as_secs();
@@ -263,7 +264,6 @@ fn format_elapsed(started_at: Option<Instant>) -> String {
                 format!("{}s", seconds)
             }
         }
-        None => String::new(),
     }
 }
 

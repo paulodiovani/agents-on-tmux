@@ -329,11 +329,16 @@ mod tests {
                         })
                     }
                 }
-                Some(&"new-session") => {
-                    *self.session_exists.borrow_mut() = true;
+                Some(&"kill-window") => {
+                    let id_str = args
+                        .windows(2)
+                        .find(|w| w[0] == "-t")
+                        .and_then(|w| w[1].split(':').nth(1))
+                        .unwrap_or("0");
+                    let id: u32 = id_str.parse().unwrap_or(0);
+                    self.windows.borrow_mut().retain(|w| w.id != id);
                     Ok(String::new())
                 }
-                Some(&"set-option") => Ok(String::new()),
                 Some(&"list-windows") => {
                     let windows = self.windows.borrow();
                     let output: Vec<String> = windows
@@ -351,6 +356,10 @@ mod tests {
                         })
                         .collect();
                     Ok(output.join("\n"))
+                }
+                Some(&"new-session") => {
+                    *self.session_exists.borrow_mut() = true;
+                    Ok(String::new())
                 }
                 Some(&"new-window") => {
                     let name = args
@@ -372,18 +381,9 @@ mod tests {
                     windows.push(window.clone());
                     Ok(String::new())
                 }
-                Some(&"kill-window") => {
-                    let id_str = args
-                        .windows(2)
-                        .find(|w| w[0] == "-t")
-                        .and_then(|w| w[1].split(':').nth(1))
-                        .unwrap_or("0");
-                    let id: u32 = id_str.parse().unwrap_or(0);
-                    self.windows.borrow_mut().retain(|w| w.id != id);
-                    Ok(String::new())
-                }
                 Some(&"select-window") => Ok(String::new()),
                 Some(&"send-keys") => Ok(String::new()),
+                Some(&"set-option") => Ok(String::new()),
                 Some(&"split-window") => Ok(self.pane_id.borrow().clone()),
                 _ => Err(TmuxError::CommandFailed {
                     message: format!("unknown command: {:?}", args),

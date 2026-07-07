@@ -24,8 +24,8 @@ impl Tab {
 
     pub fn left(self) -> Self {
         match self {
-            Tab::Windows => Tab::Agents,
             Tab::Agents => Tab::Agents,
+            Tab::Windows => Tab::Agents,
         }
     }
 
