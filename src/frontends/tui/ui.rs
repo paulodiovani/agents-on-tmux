@@ -249,15 +249,23 @@ fn wrap_entries(entries: &[(Vec<Span<'static>>, usize)], width: usize) -> Vec<Li
     lines
 }
 
-/// Formats an elapsed duration as a human-readable string.
+/// Formats an elapsed duration as a human-readable string, showing at most two units.
 fn format_elapsed(started_at: Option<Instant>) -> String {
     match started_at {
         Some(start) => {
-            let duration = Instant::now().duration_since(start);
-            let total_secs = duration.as_secs();
-            let minutes = total_secs / 60;
-            let seconds = total_secs % 60;
-            if minutes > 0 {
+            let total_secs = Instant::now().duration_since(start).as_secs();
+            let days = total_secs / 86_400;
+            let rem = total_secs % 86_400;
+            let hours = rem / 3_600;
+            let rem = rem % 3_600;
+            let minutes = rem / 60;
+            let seconds = rem % 60;
+
+            if days > 0 {
+                format!("{}d {}h", days, hours)
+            } else if hours > 0 {
+                format!("{}h {}m", hours, minutes)
+            } else if minutes > 0 {
                 format!("{}m {}s", minutes, seconds)
             } else {
                 format!("{}s", seconds)
@@ -419,6 +427,18 @@ mod tests {
     fn test_format_elapsed_minutes_and_seconds() {
         let start = Instant::now() - Duration::from_secs(125);
         assert_eq!(format_elapsed(Some(start)), "2m 5s");
+    }
+
+    #[test]
+    fn test_format_elapsed_hours_and_minutes() {
+        let start = Instant::now() - Duration::from_secs(3 * 3_600 + 28 * 60);
+        assert_eq!(format_elapsed(Some(start)), "3h 28m");
+    }
+
+    #[test]
+    fn test_format_elapsed_days_and_hours() {
+        let start = Instant::now() - Duration::from_secs(28 * 86_400 + 3 * 3_600);
+        assert_eq!(format_elapsed(Some(start)), "28d 3h");
     }
 
     #[test]
