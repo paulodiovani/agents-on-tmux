@@ -166,9 +166,24 @@ impl App {
     /// Switches to the given tab if it is not empty.
     pub fn switch_tab(&mut self, tab: Tab) {
         if !self.is_tab_empty(tab) {
+            let current_dir = self
+                .current_tab_window()
+                .map(|w| w.current_dir.clone())
+                .unwrap_or_default();
+
+            let dest_indices = self.indices_for_tab(tab);
+            let target_pos = if !current_dir.is_empty() {
+                dest_indices
+                    .iter()
+                    .position(|&i| self.windows[i].current_dir == current_dir)
+                    .unwrap_or(0)
+            } else {
+                0
+            };
+
             self.active_tab = tab;
-            self.set_selected_for_tab(tab, 0);
-            self.list_state.select(Some(0));
+            self.set_selected_for_tab(tab, target_pos);
+            self.list_state.select(Some(target_pos));
         }
     }
 
@@ -771,7 +786,7 @@ mod tests {
     }
 
     #[test]
-    fn test_switch_tab_resets_selection_to_first() {
+    fn test_switch_tab_selects_first_when_no_match() {
         let driver = MockTmux::new();
         let mut app = App::new(&driver).unwrap();
 
@@ -785,6 +800,49 @@ mod tests {
         assert_eq!(app.current_selected(), 1);
 
         app.switch_tab(Tab::Agents);
+        assert_eq!(app.current_selected(), 0);
+    }
+
+    #[test]
+    fn test_switch_tab_selects_matching_current_dir() {
+        let driver = MockTmux::new();
+        driver.windows.borrow_mut()[1].current_dir = "/home/user/shared".to_string();
+        driver.windows.borrow_mut()[2].current_dir = "/home/user/shared".to_string();
+        let mut app = App::new(&driver).unwrap();
+
+        assert_eq!(app.active_tab(), Tab::Agents);
+        assert_eq!(app.current_selected(), 0);
+
+        app.switch_tab(Tab::Windows);
+        assert_eq!(app.current_selected(), 1);
+    }
+
+    #[test]
+    fn test_switch_tab_selects_first_match_when_multiple() {
+        let driver = MockTmux::new();
+        driver.windows.borrow_mut()[1].current_dir = "/home/user/shared".to_string();
+        driver.windows.borrow_mut()[0].current_dir = "/home/user/shared".to_string();
+        driver.windows.borrow_mut()[2].current_dir = "/home/user/shared".to_string();
+        let mut app = App::new(&driver).unwrap();
+
+        assert_eq!(app.active_tab(), Tab::Agents);
+        assert_eq!(app.current_selected(), 0);
+
+        app.switch_tab(Tab::Windows);
+        assert_eq!(app.current_selected(), 0);
+    }
+
+    #[test]
+    fn test_switch_tab_selects_first_when_current_dir_empty() {
+        let driver = MockTmux::new();
+        driver.windows.borrow_mut()[0].current_dir = String::new();
+        driver.windows.borrow_mut()[2].current_dir = "/home/user/project3".to_string();
+        let mut app = App::new(&driver).unwrap();
+
+        assert_eq!(app.active_tab(), Tab::Agents);
+        assert_eq!(app.current_selected(), 0);
+
+        app.switch_tab(Tab::Windows);
         assert_eq!(app.current_selected(), 0);
     }
 
