@@ -2,7 +2,10 @@
 
 A TMUX-based AI Agents orchestrator.
 
-![screenshot](assets/media/screenshot.png)
+<p align="center">
+  <img src="assets/media/screenshot.png" />
+</p>
+
 
 > [!NOTE]
 > The project is in early development and subject to change or evolve. Expect new features soon.
