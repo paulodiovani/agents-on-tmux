@@ -153,6 +153,7 @@ impl App {
                 self.windows_selected = pos;
                 self.list_state.select(Some(self.windows_selected));
             }
+            self.focus_window();
         }
     }
 
