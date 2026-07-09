@@ -394,6 +394,7 @@ mod tests {
     use std::time::{Duration, Instant};
 
     struct MockTmux {
+        calls: Rc<std::cell::RefCell<Vec<String>>>,
         next_id: Rc<std::cell::RefCell<u32>>,
         windows: Rc<std::cell::RefCell<Vec<Window>>>,
     }
@@ -401,6 +402,7 @@ mod tests {
     impl MockTmux {
         fn new() -> Self {
             Self {
+                calls: Rc::new(std::cell::RefCell::new(Vec::new())),
                 next_id: Rc::new(std::cell::RefCell::new(5)),
                 windows: Rc::new(std::cell::RefCell::new(vec![
                     Window {
@@ -446,6 +448,10 @@ mod tests {
         fn windows_rc(&self) -> Rc<std::cell::RefCell<Vec<Window>>> {
             self.windows.clone()
         }
+
+        fn calls_rc(&self) -> Rc<std::cell::RefCell<Vec<String>>> {
+            self.calls.clone()
+        }
     }
 
     impl Tmux for MockTmux {
@@ -462,6 +468,7 @@ mod tests {
         }
 
         fn create_window(&self, name: &str) -> Result<Window, TmuxError> {
+            self.calls.borrow_mut().push("create_window".to_string());
             let mut next_id = self.next_id.borrow_mut();
             let window = Window {
                 current_dir: "/home/user".to_string(),
@@ -483,10 +490,12 @@ mod tests {
         }
 
         fn select_window(&self, _id: u32) -> Result<(), TmuxError> {
+            self.calls.borrow_mut().push("select_window".to_string());
             Ok(())
         }
 
         fn last_pane(&self) -> Result<(), TmuxError> {
+            self.calls.borrow_mut().push("last_pane".to_string());
             Ok(())
         }
 
@@ -495,16 +504,21 @@ mod tests {
         }
     }
 
-    fn test_app() -> (App, Rc<std::cell::RefCell<Vec<Window>>>) {
+    fn test_app() -> (
+        App,
+        Rc<std::cell::RefCell<Vec<Window>>>,
+        Rc<std::cell::RefCell<Vec<String>>>,
+    ) {
         let driver = MockTmux::new();
         let windows = driver.windows_rc();
+        let calls = driver.calls_rc();
         let app = App::new(Box::new(driver), Box::new(MockTmux::new())).unwrap();
-        (app, windows)
+        (app, windows, calls)
     }
 
     #[test]
     fn test_new() {
-        let (app, _) = test_app();
+        let (app, _, _) = test_app();
         assert!(app.running);
         assert_eq!(app.active_tab(), Tab::Agents);
         assert_eq!(app.windows().len(), 4);
@@ -521,14 +535,14 @@ mod tests {
 
     #[test]
     fn test_quit() {
-        let (mut app, _) = test_app();
+        let (mut app, _, _) = test_app();
         app.quit();
         assert!(!app.running);
     }
 
     #[test]
     fn test_navigate_down() {
-        let (mut app, _) = test_app();
+        let (mut app, _, _) = test_app();
         assert_eq!(app.active_tab(), Tab::Agents);
         assert_eq!(app.current_tab_len(), 2);
         assert_eq!(app.current_selected(), 0);
@@ -540,7 +554,7 @@ mod tests {
 
     #[test]
     fn test_navigate_up() {
-        let (mut app, _) = test_app();
+        let (mut app, _, _) = test_app();
         app.navigate_down();
         assert_eq!(app.current_selected(), 1);
         app.navigate_up();
@@ -551,14 +565,14 @@ mod tests {
 
     #[test]
     fn test_focus_window() {
-        let (mut app, _) = test_app();
+        let (mut app, _, _) = test_app();
         app.navigate_down();
         app.focus_window();
     }
 
     #[test]
     fn test_create_window() {
-        let (mut app, _) = test_app();
+        let (mut app, _, _) = test_app();
         let initial_len = app.windows().len();
         app.create_window();
         assert_eq!(app.windows().len(), initial_len + 1);
@@ -566,7 +580,7 @@ mod tests {
 
     #[test]
     fn test_create_window_switches_to_windows_tab() {
-        let (mut app, _) = test_app();
+        let (mut app, _, _) = test_app();
         assert_eq!(app.active_tab(), Tab::Agents);
         app.create_window();
         assert_eq!(app.active_tab(), Tab::Windows);
@@ -574,7 +588,7 @@ mod tests {
 
     #[test]
     fn test_create_window_selects_new_window() {
-        let (mut app, _) = test_app();
+        let (mut app, _, _) = test_app();
         app.create_window();
         assert_eq!(app.active_tab(), Tab::Windows);
         let windows_tab_len = app.current_tab_len();
@@ -582,8 +596,22 @@ mod tests {
     }
 
     #[test]
+    fn test_create_window_calls_focus_window() {
+        let nested_driver = MockTmux::new();
+        let parent_driver = MockTmux::new();
+        let nested_calls = nested_driver.calls_rc();
+        let parent_calls = parent_driver.calls_rc();
+        let mut app = App::new(Box::new(nested_driver), Box::new(parent_driver)).unwrap();
+        app.create_window();
+        let nested_recorded = nested_calls.borrow();
+        assert!(nested_recorded.contains(&"select_window".to_string()));
+        let parent_recorded = parent_calls.borrow();
+        assert!(parent_recorded.contains(&"last_pane".to_string()));
+    }
+
+    #[test]
     fn test_kill_window() {
-        let (mut app, _) = test_app();
+        let (mut app, _, _) = test_app();
         let initial_agents = app.current_tab_len();
         app.kill_window();
         assert_eq!(app.current_tab_len(), initial_agents - 1);
@@ -591,7 +619,7 @@ mod tests {
 
     #[test]
     fn test_kill_last_window_adjusts_selection() {
-        let (mut app, _) = test_app();
+        let (mut app, _, _) = test_app();
         app.navigate_down();
         assert_eq!(app.current_selected(), 1);
         app.kill_window();
@@ -600,7 +628,7 @@ mod tests {
 
     #[test]
     fn test_handle_action_quit() {
-        let (mut app, _) = test_app();
+        let (mut app, _, _) = test_app();
         app.handle_action(Action::Quit);
         assert!(app.running);
         app.handle_action(Action::Quit);
@@ -609,7 +637,7 @@ mod tests {
 
     #[test]
     fn test_handle_action_navigate() {
-        let (mut app, _) = test_app();
+        let (mut app, _, _) = test_app();
         app.handle_action(Action::NavigateDown);
         assert_eq!(app.current_selected(), 1);
         app.handle_action(Action::NavigateUp);
@@ -618,7 +646,7 @@ mod tests {
 
     #[test]
     fn test_kill_window_requires_double_press() {
-        let (mut app, _) = test_app();
+        let (mut app, _, _) = test_app();
         let initial_agents = app.current_tab_len();
         assert_eq!(app.pending_action(), None);
         app.handle_action(Action::KillWindow);
@@ -631,7 +659,7 @@ mod tests {
 
     #[test]
     fn test_quit_requires_double_press() {
-        let (mut app, _) = test_app();
+        let (mut app, _, _) = test_app();
         assert!(app.running);
         assert_eq!(app.pending_action(), None);
         app.handle_action(Action::Quit);
@@ -644,7 +672,7 @@ mod tests {
 
     #[test]
     fn test_other_action_cancels_pending_kill() {
-        let (mut app, _) = test_app();
+        let (mut app, _, _) = test_app();
         app.handle_action(Action::KillWindow);
         assert_eq!(app.pending_action(), Some(PendingAction::KillWindow));
         app.handle_action(Action::NavigateDown);
@@ -653,7 +681,7 @@ mod tests {
 
     #[test]
     fn test_other_action_cancels_pending_quit() {
-        let (mut app, _) = test_app();
+        let (mut app, _, _) = test_app();
         app.handle_action(Action::Quit);
         assert_eq!(app.pending_action(), Some(PendingAction::Quit));
         app.handle_action(Action::NavigateDown);
@@ -663,7 +691,7 @@ mod tests {
 
     #[test]
     fn test_none_action_clears_pending() {
-        let (mut app, _) = test_app();
+        let (mut app, _, _) = test_app();
         app.handle_action(Action::KillWindow);
         assert_eq!(app.pending_action(), Some(PendingAction::KillWindow));
         app.handle_action(Action::None);
@@ -677,13 +705,13 @@ mod tests {
 
     #[test]
     fn test_refresh_windows_new_windows_get_start_time() {
-        let (app, _) = test_app();
+        let (app, _, _) = test_app();
         assert!(app.windows().iter().all(|w| w.started_at.is_some()));
     }
 
     #[test]
     fn test_refresh_windows_existing_windows_keep_time() {
-        let (mut app, _) = test_app();
+        let (mut app, _, _) = test_app();
         let first_times: Vec<Option<Instant>> =
             app.windows().iter().map(|w| w.started_at).collect();
         std::thread::sleep(std::time::Duration::from_millis(10));
@@ -695,7 +723,7 @@ mod tests {
 
     #[test]
     fn test_refresh_windows_removed_windows_cleaned_up() {
-        let (mut app, windows) = test_app();
+        let (mut app, windows, _) = test_app();
         assert_eq!(app.window_starts.len(), 4);
         let window_id = app.windows()[0].id;
         windows.borrow_mut().retain(|w| w.id != window_id);
@@ -706,7 +734,7 @@ mod tests {
 
     #[test]
     fn test_external_tmux_change_syncs_selection() {
-        let (mut app, windows) = test_app();
+        let (mut app, windows, _) = test_app();
         assert_eq!(app.current_selected(), 0);
 
         windows.borrow_mut()[3].is_active = true;
@@ -716,7 +744,7 @@ mod tests {
 
     #[test]
     fn test_external_tmux_change_switches_tab() {
-        let (mut app, windows) = test_app();
+        let (mut app, windows, _) = test_app();
         assert_eq!(app.active_tab(), Tab::Agents);
 
         windows.borrow_mut()[0].is_active = true;
@@ -726,7 +754,7 @@ mod tests {
 
     #[test]
     fn test_external_tmux_change_syncs_after_navigation() {
-        let (mut app, windows) = test_app();
+        let (mut app, windows, _) = test_app();
         assert_eq!(app.current_selected(), 0);
 
         app.navigate_down();
@@ -742,7 +770,7 @@ mod tests {
 
     #[test]
     fn test_selected_window_moving_to_other_tab_switches_tab() {
-        let (mut app, windows) = test_app();
+        let (mut app, windows, _) = test_app();
         assert_eq!(app.active_tab(), Tab::Agents);
         assert_eq!(app.current_tab_len(), 2);
 
@@ -758,7 +786,7 @@ mod tests {
 
     #[test]
     fn test_switch_tab() {
-        let (mut app, _) = test_app();
+        let (mut app, _, _) = test_app();
         assert_eq!(app.active_tab(), Tab::Agents);
         app.switch_tab(Tab::Windows);
         assert_eq!(app.active_tab(), Tab::Windows);
@@ -780,7 +808,7 @@ mod tests {
 
     #[test]
     fn test_switch_tab_selects_first_when_no_match() {
-        let (mut app, _) = test_app();
+        let (mut app, _, _) = test_app();
 
         app.navigate_down();
         assert_eq!(app.current_selected(), 1);
@@ -840,14 +868,14 @@ mod tests {
 
     #[test]
     fn test_is_tab_empty() {
-        let (app, _) = test_app();
+        let (app, _, _) = test_app();
         assert!(!app.is_tab_empty(Tab::Agents));
         assert!(!app.is_tab_empty(Tab::Windows));
     }
 
     #[test]
     fn test_current_tab_windows() {
-        let (app, _) = test_app();
+        let (app, _, _) = test_app();
         let agent_windows = app.current_tab_windows();
         assert_eq!(agent_windows.len(), 2);
         assert!(is_agent(&agent_windows[0].running_command).is_some());
@@ -856,7 +884,7 @@ mod tests {
 
     #[test]
     fn test_ensure_visible_no_change_when_already_visible() {
-        let (mut app, _) = test_app();
+        let (mut app, _, _) = test_app();
         assert_eq!(app.list_state().offset(), 0);
 
         app.ensure_visible(3);
@@ -865,7 +893,7 @@ mod tests {
 
     #[test]
     fn test_ensure_visible_scrolls_down_when_selected_below_visible() {
-        let (mut app, _) = test_app();
+        let (mut app, _, _) = test_app();
         app.navigate_down();
         assert_eq!(app.current_selected(), 1);
 
@@ -875,7 +903,7 @@ mod tests {
 
     #[test]
     fn test_ensure_visible_scrolls_up_when_selected_above_visible() {
-        let (mut app, _) = test_app();
+        let (mut app, _, _) = test_app();
         app.navigate_down();
         *app.list_state.offset_mut() = 1;
 
@@ -888,7 +916,7 @@ mod tests {
 
     #[test]
     fn test_ensure_visible_no_scroll_when_zero_visible_count() {
-        let (mut app, _) = test_app();
+        let (mut app, _, _) = test_app();
         app.navigate_down();
 
         app.ensure_visible(0);
