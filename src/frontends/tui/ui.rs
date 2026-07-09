@@ -407,14 +407,18 @@ mod tests {
         fn select_window(&self, _id: u32) -> Result<(), TmuxError> {
             Ok(())
         }
+        fn last_pane(&self) -> Result<(), TmuxError> {
+            Ok(())
+        }
         fn split_window(&self, _command: &str) -> Result<String, TmuxError> {
             Ok("%99".to_string())
         }
     }
 
     fn test_app() -> App {
-        let driver = MockTmux::new();
-        App::new(&driver).unwrap()
+        let nested_driver = MockTmux::new();
+        let parent_driver = MockTmux::new();
+        App::new(Box::new(nested_driver), Box::new(parent_driver)).unwrap()
     }
 
     #[test]

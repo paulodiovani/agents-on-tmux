@@ -26,8 +26,9 @@ fn main() -> anyhow::Result<()> {
 
     if cli.tui {
         let terminal = ratatui::init();
-        let mut app = frontends::tui::app::App::new(&nested_driver)?;
-        app.run(terminal, &nested_driver)?;
+        let mut app =
+            frontends::tui::app::App::new(Box::new(nested_driver), Box::new(parent_driver))?;
+        app.run(terminal)?;
         ratatui::restore();
     } else {
         let exe = std::env::current_exe()?;

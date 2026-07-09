@@ -24,6 +24,8 @@ pub trait Tmux {
     fn kill_window(&self, id: u32) -> Result<(), TmuxError>;
     /// Selects (focuses) the window with the given id.
     fn select_window(&self, id: u32) -> Result<(), TmuxError>;
+    /// Switches to the last-active pane in the session.
+    fn last_pane(&self) -> Result<(), TmuxError>;
     /// Sends keys to the specified window.
     fn split_window(&self, command: &str) -> Result<String, TmuxError>;
 }
@@ -259,6 +261,12 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
         Ok(())
     }
 
+    /// Switches to the last-active pane in the session.
+    fn last_pane(&self) -> Result<(), TmuxError> {
+        self.executor.execute(&["last-pane", "-t", &self.session])?;
+        Ok(())
+    }
+
     /// Splits the current window horizontally, creating a side pane.
     fn split_window(&self, command: &str) -> Result<String, TmuxError> {
         self.executor
@@ -382,6 +390,7 @@ mod tests {
                     Ok(String::new())
                 }
                 Some(&"select-window") => Ok(String::new()),
+                Some(&"last-pane") => Ok(String::new()),
                 Some(&"send-keys") => Ok(String::new()),
                 Some(&"set-option") => Ok(String::new()),
                 Some(&"split-window") => Ok(self.pane_id.borrow().clone()),
