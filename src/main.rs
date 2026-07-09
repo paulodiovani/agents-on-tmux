@@ -4,7 +4,7 @@ mod frontends;
 use clap::Parser;
 
 #[derive(Parser)]
-#[command(name = "aot", about = "Agents on tmux")]
+#[command(name = "aot", about = "Agents on tmux", version)]
 struct Cli {
     /// Launch the terminal UI
     #[arg(long)]
