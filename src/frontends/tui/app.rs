@@ -19,6 +19,8 @@ pub struct App {
     agents_selected: usize,
     last_focused_id: Option<u32>,
     list_state: ListState,
+    nested_driver: Box<dyn Tmux>,
+    parent_driver: Box<dyn Tmux>,
     pending_action: Option<PendingAction>,
     running: bool,
     window_starts: HashMap<u32, Instant>,
@@ -28,19 +30,21 @@ pub struct App {
 
 impl App {
     /// Creates a new App, loading windows from the tmux driver.
-    pub fn new<T: Tmux>(driver: &T) -> anyhow::Result<Self> {
+    pub fn new(nested_driver: Box<dyn Tmux>, parent_driver: Box<dyn Tmux>) -> anyhow::Result<Self> {
         let mut app = Self {
             active_tab: Tab::Windows,
             agents_selected: 0,
             last_focused_id: None,
             list_state: ListState::default(),
+            nested_driver,
+            parent_driver,
             pending_action: None,
             running: true,
             window_starts: HashMap::new(),
             windows: Vec::new(),
             windows_selected: 0,
         };
-        app.refresh_windows(driver)?;
+        app.refresh_windows()?;
         if !app.is_tab_empty(Tab::Agents) {
             app.active_tab = Tab::Agents;
         }
@@ -48,18 +52,14 @@ impl App {
     }
 
     /// Runs the main event loop, drawing the UI and handling input.
-    pub fn run<T: Tmux>(
-        &mut self,
-        mut terminal: DefaultTerminal,
-        driver: &T,
-    ) -> anyhow::Result<()> {
+    pub fn run(&mut self, mut terminal: DefaultTerminal) -> anyhow::Result<()> {
         let theme = Theme::default();
         let tick_rate = Duration::from_secs(REFRESH_INTERVAL_SECS);
         let mut last_draw = Instant::now() - tick_rate;
         while self.running {
             let should_redraw = last_draw.elapsed() >= tick_rate;
             if should_redraw {
-                self.refresh_windows(driver)?;
+                self.refresh_windows()?;
                 last_draw = Instant::now();
             }
             terminal.draw(|frame| ui::draw(frame, self, &theme))?;
@@ -67,7 +67,7 @@ impl App {
                 && let event::Event::Key(key) = event::read()?
                 && key.kind == event::KeyEventKind::Press
             {
-                self.handle_action(key_to_action(key), driver);
+                self.handle_action(key_to_action(key));
                 last_draw = Instant::now();
             }
         }
@@ -75,10 +75,10 @@ impl App {
     }
 
     /// Dispatches a user action to the appropriate handler.
-    pub fn handle_action<T: Tmux>(&mut self, action: Action, driver: &T) {
+    pub fn handle_action(&mut self, action: Action) {
         match action {
             Action::KillWindow if self.pending_action == Some(PendingAction::KillWindow) => {
-                self.kill_window(driver);
+                self.kill_window();
                 self.pending_action = None;
             }
             Action::KillWindow => self.pending_action = Some(PendingAction::KillWindow),
@@ -93,8 +93,8 @@ impl App {
                 match action {
                     Action::NavigateUp => self.navigate_up(),
                     Action::NavigateDown => self.navigate_down(),
-                    Action::FocusWindow => self.focus_window(driver),
-                    Action::CreateWindow => self.create_window(driver),
+                    Action::FocusWindow => self.focus_window(),
+                    Action::CreateWindow => self.create_window(),
                     Action::SwitchTabLeft => self.switch_tab(self.active_tab.left()),
                     Action::SwitchTabRight => self.switch_tab(self.active_tab.right()),
                     _ => {}
@@ -132,18 +132,19 @@ impl App {
     }
 
     /// Focuses the currently selected tmux window.
-    pub fn focus_window<T: Tmux>(&self, driver: &T) {
+    pub fn focus_window(&self) {
         if let Some(window) = self.current_tab_window() {
-            let _ = driver.select_window(window.id);
+            let _ = self.nested_driver.select_window(window.id);
+            let _ = self.parent_driver.last_pane();
         }
     }
 
     /// Creates a new tmux window and adds it to the list.
-    pub fn create_window<T: Tmux>(&mut self, driver: &T) {
+    pub fn create_window(&mut self) {
         self.active_tab = Tab::Windows;
         let name = format!("agent-{}", self.windows.len() + 1);
-        if let Ok(new_window) = driver.create_window(&name) {
-            let _ = self.refresh_windows(driver);
+        if let Ok(new_window) = self.nested_driver.create_window(&name) {
+            let _ = self.refresh_windows();
             let indices = self.current_tab_indices();
             if let Some(pos) = indices
                 .iter()
@@ -156,10 +157,10 @@ impl App {
     }
 
     /// Kills the currently selected tmux window.
-    pub fn kill_window<T: Tmux>(&mut self, driver: &T) {
+    pub fn kill_window(&mut self) {
         if let Some(window) = self.current_tab_window() {
-            let _ = driver.kill_window(window.id);
-            let _ = self.refresh_windows(driver);
+            let _ = self.nested_driver.kill_window(window.id);
+            let _ = self.refresh_windows();
         }
     }
 
@@ -188,8 +189,8 @@ impl App {
     }
 
     /// Reloads the window list from the tmux driver and tracks start times.
-    pub fn refresh_windows<T: Tmux>(&mut self, driver: &T) -> anyhow::Result<()> {
-        let windows = driver.list_windows()?;
+    pub fn refresh_windows(&mut self) -> anyhow::Result<()> {
+        let windows = self.nested_driver.list_windows()?;
         let now = Instant::now();
 
         let selected_window_id = self.current_tab_window().map(|w| w.id);
@@ -388,18 +389,19 @@ impl App {
 mod tests {
     use super::*;
     use crate::backends::tmux::{Tmux, TmuxError, Window};
+    use std::rc::Rc;
     use std::time::{Duration, Instant};
 
     struct MockTmux {
-        next_id: std::cell::RefCell<u32>,
-        windows: std::cell::RefCell<Vec<Window>>,
+        next_id: Rc<std::cell::RefCell<u32>>,
+        windows: Rc<std::cell::RefCell<Vec<Window>>>,
     }
 
     impl MockTmux {
         fn new() -> Self {
             Self {
-                next_id: std::cell::RefCell::new(5),
-                windows: std::cell::RefCell::new(vec![
+                next_id: Rc::new(std::cell::RefCell::new(5)),
+                windows: Rc::new(std::cell::RefCell::new(vec![
                     Window {
                         current_dir: "/home/user/project1".to_string(),
                         id: 1,
@@ -436,8 +438,12 @@ mod tests {
                         running_command: "opencode".to_string(),
                         started_at: Some(Instant::now() - Duration::from_secs(10)),
                     },
-                ]),
+                ])),
             }
+        }
+
+        fn windows_rc(&self) -> Rc<std::cell::RefCell<Vec<Window>>> {
+            self.windows.clone()
         }
     }
 
@@ -479,15 +485,25 @@ mod tests {
             Ok(())
         }
 
+        fn last_pane(&self) -> Result<(), TmuxError> {
+            Ok(())
+        }
+
         fn split_window(&self, _command: &str) -> Result<String, TmuxError> {
             Ok("%99".to_string())
         }
     }
 
+    fn test_app() -> (App, Rc<std::cell::RefCell<Vec<Window>>>) {
+        let driver = MockTmux::new();
+        let windows = driver.windows_rc();
+        let app = App::new(Box::new(driver), Box::new(MockTmux::new())).unwrap();
+        (app, windows)
+    }
+
     #[test]
     fn test_new() {
-        let driver = MockTmux::new();
-        let app = App::new(&driver).unwrap();
+        let (app, _) = test_app();
         assert!(app.running);
         assert_eq!(app.active_tab(), Tab::Agents);
         assert_eq!(app.windows().len(), 4);
@@ -498,22 +514,20 @@ mod tests {
         let driver = MockTmux::new();
         driver.windows.borrow_mut()[1].running_command = "bash".to_string();
         driver.windows.borrow_mut()[3].running_command = "zsh".to_string();
-        let app = App::new(&driver).unwrap();
+        let app = App::new(Box::new(driver), Box::new(MockTmux::new())).unwrap();
         assert_eq!(app.active_tab(), Tab::Windows);
     }
 
     #[test]
     fn test_quit() {
-        let driver = MockTmux::new();
-        let mut app = App::new(&driver).unwrap();
+        let (mut app, _) = test_app();
         app.quit();
         assert!(!app.running);
     }
 
     #[test]
     fn test_navigate_down() {
-        let driver = MockTmux::new();
-        let mut app = App::new(&driver).unwrap();
+        let (mut app, _) = test_app();
         assert_eq!(app.active_tab(), Tab::Agents);
         assert_eq!(app.current_tab_len(), 2);
         assert_eq!(app.current_selected(), 0);
@@ -525,8 +539,7 @@ mod tests {
 
     #[test]
     fn test_navigate_up() {
-        let driver = MockTmux::new();
-        let mut app = App::new(&driver).unwrap();
+        let (mut app, _) = test_app();
         app.navigate_down();
         assert_eq!(app.current_selected(), 1);
         app.navigate_up();
@@ -537,35 +550,31 @@ mod tests {
 
     #[test]
     fn test_focus_window() {
-        let driver = MockTmux::new();
-        let mut app = App::new(&driver).unwrap();
+        let (mut app, _) = test_app();
         app.navigate_down();
-        app.focus_window(&driver);
+        app.focus_window();
     }
 
     #[test]
     fn test_create_window() {
-        let driver = MockTmux::new();
-        let mut app = App::new(&driver).unwrap();
+        let (mut app, _) = test_app();
         let initial_len = app.windows().len();
-        app.create_window(&driver);
+        app.create_window();
         assert_eq!(app.windows().len(), initial_len + 1);
     }
 
     #[test]
     fn test_create_window_switches_to_windows_tab() {
-        let driver = MockTmux::new();
-        let mut app = App::new(&driver).unwrap();
+        let (mut app, _) = test_app();
         assert_eq!(app.active_tab(), Tab::Agents);
-        app.create_window(&driver);
+        app.create_window();
         assert_eq!(app.active_tab(), Tab::Windows);
     }
 
     #[test]
     fn test_create_window_selects_new_window() {
-        let driver = MockTmux::new();
-        let mut app = App::new(&driver).unwrap();
-        app.create_window(&driver);
+        let (mut app, _) = test_app();
+        app.create_window();
         assert_eq!(app.active_tab(), Tab::Windows);
         let windows_tab_len = app.current_tab_len();
         assert_eq!(app.current_selected(), windows_tab_len - 1);
@@ -573,122 +582,111 @@ mod tests {
 
     #[test]
     fn test_kill_window() {
-        let driver = MockTmux::new();
-        let mut app = App::new(&driver).unwrap();
+        let (mut app, _) = test_app();
         let initial_agents = app.current_tab_len();
-        app.kill_window(&driver);
+        app.kill_window();
         assert_eq!(app.current_tab_len(), initial_agents - 1);
     }
 
     #[test]
     fn test_kill_last_window_adjusts_selection() {
-        let driver = MockTmux::new();
-        let mut app = App::new(&driver).unwrap();
+        let (mut app, _) = test_app();
         app.navigate_down();
         assert_eq!(app.current_selected(), 1);
-        app.kill_window(&driver);
+        app.kill_window();
         assert_eq!(app.current_selected(), 0);
     }
 
     #[test]
     fn test_handle_action_quit() {
-        let driver = MockTmux::new();
-        let mut app = App::new(&driver).unwrap();
-        app.handle_action(Action::Quit, &driver);
+        let (mut app, _) = test_app();
+        app.handle_action(Action::Quit);
         assert!(app.running);
-        app.handle_action(Action::Quit, &driver);
+        app.handle_action(Action::Quit);
         assert!(!app.running);
     }
 
     #[test]
     fn test_handle_action_navigate() {
-        let driver = MockTmux::new();
-        let mut app = App::new(&driver).unwrap();
-        app.handle_action(Action::NavigateDown, &driver);
+        let (mut app, _) = test_app();
+        app.handle_action(Action::NavigateDown);
         assert_eq!(app.current_selected(), 1);
-        app.handle_action(Action::NavigateUp, &driver);
+        app.handle_action(Action::NavigateUp);
         assert_eq!(app.current_selected(), 0);
     }
 
     #[test]
     fn test_kill_window_requires_double_press() {
-        let driver = MockTmux::new();
-        let mut app = App::new(&driver).unwrap();
+        let (mut app, _) = test_app();
         let initial_agents = app.current_tab_len();
         assert_eq!(app.pending_action(), None);
-        app.handle_action(Action::KillWindow, &driver);
+        app.handle_action(Action::KillWindow);
         assert_eq!(app.pending_action(), Some(PendingAction::KillWindow));
         assert_eq!(app.current_tab_len(), initial_agents);
-        app.handle_action(Action::KillWindow, &driver);
+        app.handle_action(Action::KillWindow);
         assert_eq!(app.pending_action(), None);
         assert_eq!(app.current_tab_len(), initial_agents - 1);
     }
 
     #[test]
     fn test_quit_requires_double_press() {
-        let driver = MockTmux::new();
-        let mut app = App::new(&driver).unwrap();
+        let (mut app, _) = test_app();
         assert!(app.running);
         assert_eq!(app.pending_action(), None);
-        app.handle_action(Action::Quit, &driver);
+        app.handle_action(Action::Quit);
         assert_eq!(app.pending_action(), Some(PendingAction::Quit));
         assert!(app.running);
-        app.handle_action(Action::Quit, &driver);
+        app.handle_action(Action::Quit);
         assert_eq!(app.pending_action(), None);
         assert!(!app.running);
     }
 
     #[test]
     fn test_other_action_cancels_pending_kill() {
-        let driver = MockTmux::new();
-        let mut app = App::new(&driver).unwrap();
-        app.handle_action(Action::KillWindow, &driver);
+        let (mut app, _) = test_app();
+        app.handle_action(Action::KillWindow);
         assert_eq!(app.pending_action(), Some(PendingAction::KillWindow));
-        app.handle_action(Action::NavigateDown, &driver);
+        app.handle_action(Action::NavigateDown);
         assert_eq!(app.pending_action(), None);
     }
 
     #[test]
     fn test_other_action_cancels_pending_quit() {
-        let driver = MockTmux::new();
-        let mut app = App::new(&driver).unwrap();
-        app.handle_action(Action::Quit, &driver);
+        let (mut app, _) = test_app();
+        app.handle_action(Action::Quit);
         assert_eq!(app.pending_action(), Some(PendingAction::Quit));
-        app.handle_action(Action::NavigateDown, &driver);
+        app.handle_action(Action::NavigateDown);
         assert_eq!(app.pending_action(), None);
         assert!(app.running);
     }
 
     #[test]
     fn test_none_action_clears_pending() {
-        let driver = MockTmux::new();
-        let mut app = App::new(&driver).unwrap();
-        app.handle_action(Action::KillWindow, &driver);
+        let (mut app, _) = test_app();
+        app.handle_action(Action::KillWindow);
         assert_eq!(app.pending_action(), Some(PendingAction::KillWindow));
-        app.handle_action(Action::None, &driver);
+        app.handle_action(Action::None);
         assert_eq!(app.pending_action(), None);
 
-        app.handle_action(Action::Quit, &driver);
+        app.handle_action(Action::Quit);
         assert_eq!(app.pending_action(), Some(PendingAction::Quit));
-        app.handle_action(Action::None, &driver);
+        app.handle_action(Action::None);
         assert_eq!(app.pending_action(), None);
     }
 
     #[test]
     fn test_refresh_windows_new_windows_get_start_time() {
-        let driver = MockTmux::new();
-        let app = App::new(&driver).unwrap();
+        let (app, _) = test_app();
         assert!(app.windows().iter().all(|w| w.started_at.is_some()));
     }
 
     #[test]
     fn test_refresh_windows_existing_windows_keep_time() {
-        let driver = MockTmux::new();
-        let mut app = App::new(&driver).unwrap();
+        let (mut app, _) = test_app();
         let first_times: Vec<Option<Instant>> =
             app.windows().iter().map(|w| w.started_at).collect();
         std::thread::sleep(std::time::Duration::from_millis(10));
-        app.refresh_windows(&driver).unwrap();
+        app.refresh_windows().unwrap();
         let second_times: Vec<Option<Instant>> =
             app.windows().iter().map(|w| w.started_at).collect();
         assert_eq!(first_times, second_times);
@@ -696,50 +694,46 @@ mod tests {
 
     #[test]
     fn test_refresh_windows_removed_windows_cleaned_up() {
-        let driver = MockTmux::new();
-        let mut app = App::new(&driver).unwrap();
+        let (mut app, windows) = test_app();
         assert_eq!(app.window_starts.len(), 4);
         let window_id = app.windows()[0].id;
-        driver.kill_window(window_id).unwrap();
-        app.refresh_windows(&driver).unwrap();
+        windows.borrow_mut().retain(|w| w.id != window_id);
+        app.refresh_windows().unwrap();
         assert_eq!(app.window_starts.len(), 3);
         assert!(!app.window_starts.contains_key(&window_id));
     }
 
     #[test]
     fn test_external_tmux_change_syncs_selection() {
-        let driver = MockTmux::new();
-        let mut app = App::new(&driver).unwrap();
+        let (mut app, windows) = test_app();
         assert_eq!(app.current_selected(), 0);
 
-        driver.windows.borrow_mut()[3].is_active = true;
-        app.refresh_windows(&driver).unwrap();
+        windows.borrow_mut()[3].is_active = true;
+        app.refresh_windows().unwrap();
         assert_eq!(app.current_selected(), 1);
     }
 
     #[test]
     fn test_external_tmux_change_switches_tab() {
-        let driver = MockTmux::new();
-        let mut app = App::new(&driver).unwrap();
+        let (mut app, windows) = test_app();
         assert_eq!(app.active_tab(), Tab::Agents);
 
-        driver.windows.borrow_mut()[0].is_active = true;
-        app.refresh_windows(&driver).unwrap();
+        windows.borrow_mut()[0].is_active = true;
+        app.refresh_windows().unwrap();
         assert_eq!(app.active_tab(), Tab::Windows);
     }
 
     #[test]
     fn test_external_tmux_change_syncs_after_navigation() {
-        let driver = MockTmux::new();
-        let mut app = App::new(&driver).unwrap();
+        let (mut app, windows) = test_app();
         assert_eq!(app.current_selected(), 0);
 
         app.navigate_down();
         assert_eq!(app.current_selected(), 1);
         assert_eq!(app.last_focused_id, Some(4));
 
-        driver.windows.borrow_mut()[0].is_active = true;
-        app.refresh_windows(&driver).unwrap();
+        windows.borrow_mut()[0].is_active = true;
+        app.refresh_windows().unwrap();
         assert_eq!(app.active_tab(), Tab::Windows);
         assert_eq!(app.current_selected(), 0);
         assert_eq!(app.last_focused_id, Some(1));
@@ -747,16 +741,15 @@ mod tests {
 
     #[test]
     fn test_selected_window_moving_to_other_tab_switches_tab() {
-        let driver = MockTmux::new();
-        let mut app = App::new(&driver).unwrap();
+        let (mut app, windows) = test_app();
         assert_eq!(app.active_tab(), Tab::Agents);
         assert_eq!(app.current_tab_len(), 2);
 
         let selected_id = app.current_tab_window().unwrap().id;
         assert_eq!(selected_id, 2);
 
-        driver.windows.borrow_mut()[1].running_command = "bash".to_string();
-        app.refresh_windows(&driver).unwrap();
+        windows.borrow_mut()[1].running_command = "bash".to_string();
+        app.refresh_windows().unwrap();
 
         assert_eq!(app.active_tab(), Tab::Windows);
         assert_eq!(app.current_tab_window().unwrap().id, selected_id);
@@ -764,8 +757,7 @@ mod tests {
 
     #[test]
     fn test_switch_tab() {
-        let driver = MockTmux::new();
-        let mut app = App::new(&driver).unwrap();
+        let (mut app, _) = test_app();
         assert_eq!(app.active_tab(), Tab::Agents);
         app.switch_tab(Tab::Windows);
         assert_eq!(app.active_tab(), Tab::Windows);
@@ -778,7 +770,7 @@ mod tests {
         let driver = MockTmux::new();
         driver.windows.borrow_mut()[1].running_command = "bash".to_string();
         driver.windows.borrow_mut()[3].running_command = "zsh".to_string();
-        let mut app = App::new(&driver).unwrap();
+        let mut app = App::new(Box::new(driver), Box::new(MockTmux::new())).unwrap();
         assert_eq!(app.active_tab(), Tab::Windows);
         assert!(app.is_tab_empty(Tab::Agents));
         app.switch_tab(Tab::Agents);
@@ -787,8 +779,7 @@ mod tests {
 
     #[test]
     fn test_switch_tab_selects_first_when_no_match() {
-        let driver = MockTmux::new();
-        let mut app = App::new(&driver).unwrap();
+        let (mut app, _) = test_app();
 
         app.navigate_down();
         assert_eq!(app.current_selected(), 1);
@@ -808,7 +799,7 @@ mod tests {
         let driver = MockTmux::new();
         driver.windows.borrow_mut()[1].current_dir = "/home/user/shared".to_string();
         driver.windows.borrow_mut()[2].current_dir = "/home/user/shared".to_string();
-        let mut app = App::new(&driver).unwrap();
+        let mut app = App::new(Box::new(driver), Box::new(MockTmux::new())).unwrap();
 
         assert_eq!(app.active_tab(), Tab::Agents);
         assert_eq!(app.current_selected(), 0);
@@ -823,7 +814,7 @@ mod tests {
         driver.windows.borrow_mut()[1].current_dir = "/home/user/shared".to_string();
         driver.windows.borrow_mut()[0].current_dir = "/home/user/shared".to_string();
         driver.windows.borrow_mut()[2].current_dir = "/home/user/shared".to_string();
-        let mut app = App::new(&driver).unwrap();
+        let mut app = App::new(Box::new(driver), Box::new(MockTmux::new())).unwrap();
 
         assert_eq!(app.active_tab(), Tab::Agents);
         assert_eq!(app.current_selected(), 0);
@@ -837,7 +828,7 @@ mod tests {
         let driver = MockTmux::new();
         driver.windows.borrow_mut()[0].current_dir = String::new();
         driver.windows.borrow_mut()[2].current_dir = "/home/user/project3".to_string();
-        let mut app = App::new(&driver).unwrap();
+        let mut app = App::new(Box::new(driver), Box::new(MockTmux::new())).unwrap();
 
         assert_eq!(app.active_tab(), Tab::Agents);
         assert_eq!(app.current_selected(), 0);
@@ -848,16 +839,14 @@ mod tests {
 
     #[test]
     fn test_is_tab_empty() {
-        let driver = MockTmux::new();
-        let app = App::new(&driver).unwrap();
+        let (app, _) = test_app();
         assert!(!app.is_tab_empty(Tab::Agents));
         assert!(!app.is_tab_empty(Tab::Windows));
     }
 
     #[test]
     fn test_current_tab_windows() {
-        let driver = MockTmux::new();
-        let app = App::new(&driver).unwrap();
+        let (app, _) = test_app();
         let agent_windows = app.current_tab_windows();
         assert_eq!(agent_windows.len(), 2);
         assert!(is_agent(&agent_windows[0].running_command).is_some());
@@ -866,8 +855,7 @@ mod tests {
 
     #[test]
     fn test_ensure_visible_no_change_when_already_visible() {
-        let driver = MockTmux::new();
-        let mut app = App::new(&driver).unwrap();
+        let (mut app, _) = test_app();
         assert_eq!(app.list_state().offset(), 0);
 
         app.ensure_visible(3);
@@ -876,8 +864,7 @@ mod tests {
 
     #[test]
     fn test_ensure_visible_scrolls_down_when_selected_below_visible() {
-        let driver = MockTmux::new();
-        let mut app = App::new(&driver).unwrap();
+        let (mut app, _) = test_app();
         app.navigate_down();
         assert_eq!(app.current_selected(), 1);
 
@@ -887,8 +874,7 @@ mod tests {
 
     #[test]
     fn test_ensure_visible_scrolls_up_when_selected_above_visible() {
-        let driver = MockTmux::new();
-        let mut app = App::new(&driver).unwrap();
+        let (mut app, _) = test_app();
         app.navigate_down();
         *app.list_state.offset_mut() = 1;
 
@@ -901,8 +887,7 @@ mod tests {
 
     #[test]
     fn test_ensure_visible_no_scroll_when_zero_visible_count() {
-        let driver = MockTmux::new();
-        let mut app = App::new(&driver).unwrap();
+        let (mut app, _) = test_app();
         app.navigate_down();
 
         app.ensure_visible(0);
