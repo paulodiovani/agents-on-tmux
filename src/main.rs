@@ -1,6 +1,8 @@
 mod backends;
 mod frontends;
 
+use std::fmt::Display;
+
 use backends::config::Config;
 use clap::Parser;
 
@@ -24,8 +26,26 @@ struct Cli {
     font_awesome: Option<bool>,
 }
 
-impl From<Cli> for Config {
-    fn from(cli: Cli) -> Self {
+impl Display for Cli {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(tui) = self.tui {
+            write!(f, "--tui={}", tui)?;
+        }
+        if let Some(no_tui) = self.no_tui {
+            write!(f, " --no-tui={}", no_tui)?;
+        }
+        if let Some(nerd_font) = self.nerd_font {
+            write!(f, " --nerd-font={}", nerd_font)?;
+        }
+        if let Some(font_awesome) = self.font_awesome {
+            write!(f, " --font-awesome={}", font_awesome)?;
+        }
+        Ok(())
+    }
+}
+
+impl From<&Cli> for Config {
+    fn from(cli: &Cli) -> Self {
         Self {
             tui: cli.tui,
             no_tui: cli.no_tui,
@@ -47,7 +67,7 @@ fn main() -> anyhow::Result<()> {
     use backends::tmux::{SESSION_NAME, Tmux, TmuxDriver, TmuxError, detect_parent_session};
     let config = Config::parse()?;
     let cli = Cli::parse();
-    let config = config.merge(cli);
+    let config = config.merge(&cli);
 
     backends::agents::set_icon_fonts(
         config.nerd_font.unwrap_or(false),
@@ -72,27 +92,13 @@ fn main() -> anyhow::Result<()> {
     } else {
         let exe = std::env::current_exe()?;
         if !config.no_tui.unwrap_or(false) {
-            let command = tui_command(&exe, &config);
+            let command = format!("{} --tui=true{}", exe.to_string_lossy(), cli);
             parent_driver.split_window(&command)?;
         }
         nested_driver.attach_session()?;
     }
 
     Ok(())
-}
-
-fn tui_command(exe: &std::path::Path, config: &Config) -> String {
-    let mut command = format!("{} --tui", exe.to_string_lossy());
-
-    if config.nerd_font.unwrap_or(false) {
-        command.push_str(" --nerd-font");
-    }
-
-    if config.font_awesome.unwrap_or(false) {
-        command.push_str(" --font-awesome");
-    }
-
-    command
 }
 
 #[cfg(test)]
@@ -134,44 +140,39 @@ mod tests {
     }
 
     #[test]
-    fn test_tui_command_without_icon_flags() {
+    fn test_cli_display_without_icon_flags() {
         let cli = with_icon_env(None, None, || Cli::parse_from(["aot"]));
-        let config = Config::default().merge(cli);
-        assert_eq!(
-            tui_command(std::path::Path::new("/bin/aot"), &config),
-            "/bin/aot --tui"
-        );
+        assert_eq!(format!("{}", cli), "");
     }
 
     #[test]
-    fn test_tui_command_with_nerd_font_flag() {
+    fn test_cli_display_with_nerd_font_flag() {
         let cli = with_icon_env(None, None, || Cli::parse_from(["aot", "--nerd-font"]));
-        let config = Config::default().merge(cli);
-        assert_eq!(
-            tui_command(std::path::Path::new("/bin/aot"), &config),
-            "/bin/aot --tui --nerd-font"
-        );
+        assert_eq!(format!("{}", cli), " --nerd-font=true");
     }
 
     #[test]
-    fn test_tui_command_with_font_awesome_flag() {
+    fn test_cli_display_with_font_awesome_flag() {
         let cli = with_icon_env(None, None, || Cli::parse_from(["aot", "--font-awesome"]));
-        let config = Config::default().merge(cli);
-        assert_eq!(
-            tui_command(std::path::Path::new("/bin/aot"), &config),
-            "/bin/aot --tui --font-awesome"
-        );
+        assert_eq!(format!("{}", cli), " --font-awesome=true");
     }
 
     #[test]
-    fn test_tui_command_with_both_icon_flags() {
+    fn test_cli_display_with_both_icon_flags() {
         let cli = with_icon_env(None, None, || {
             Cli::parse_from(["aot", "--nerd-font", "--font-awesome"])
         });
-        let config = Config::default().merge(cli);
+        assert_eq!(format!("{}", cli), " --nerd-font=true --font-awesome=true");
+    }
+
+    #[test]
+    fn test_cli_display_with_explicit_false_values() {
+        let cli = with_icon_env(None, None, || {
+            Cli::parse_from(["aot", "--nerd-font=false", "--font-awesome=false"])
+        });
         assert_eq!(
-            tui_command(std::path::Path::new("/bin/aot"), &config),
-            "/bin/aot --tui --nerd-font --font-awesome"
+            format!("{}", cli),
+            " --nerd-font=false --font-awesome=false"
         );
     }
 
@@ -199,7 +200,7 @@ mod tests {
         let cli = with_icon_env(None, None, || {
             Cli::parse_from(["aot", "--tui", "--nerd-font"])
         });
-        let config: Config = cli.into();
+        let config: Config = (&cli).into();
         assert_eq!(config.tui, Some(true));
         assert_eq!(config.no_tui, None);
         assert_eq!(config.nerd_font, Some(true));
