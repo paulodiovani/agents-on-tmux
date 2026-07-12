@@ -8,9 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.2.0] - 2026-07-12
 
 ### Added
-- Agent Icons support using Nerdfont or Font Awesome
-- User config file at `~/.config/aot/aot.conf`, also supporting env vars and cli options
+- Agent Icons support using Nerd font or Font Awesome
+- User config file at `~/.config/aot/aot.conf`, also supporting env vars and CLI options
 - Include Copilot agent
+
+### Changed
+- Updated README and added installation instructions
 
 ## [0.1.4] - 2026-07-09
 

@@ -61,6 +61,20 @@ When both icon fonts are enabled, Nerd Font custom icons take precedence.
 
 Also check the [Recommended TMUX Config settings](./docs/recommended-tmux-config.md).
 
+### Dev Dependencies
+
+Required only to build from source:
+
+- [Rust](https://www.rust-lang.org/) 1.85+ (edition 2024)
+
+## Install
+
+Build and install the `aot` binary from source:
+
+```sh
+cargo install --path .
+```
+
 ## Configuration
 
 `aot` supports configuration via CLI arguments, environment variables, and a TOML config file.
@@ -102,7 +116,7 @@ All fields are optional. Omitted fields use their defaults (`false`).
 1. The application checks if a parent TMUX session is running or stops if not.
 1. Start a new dedicated TMUX session named `agents-on-tmux`, this is the session that will host the agents.
 1. The TUI control panel is started by default on a left panel. Can also be started with `aot --tui` or skipped with `aot --no-tui`.
-1. User can interact with the dedicated session using the TUI control or standard TMUX mappings.
+1. User can interact with the dedicated session using the TUI control or standard TMUX bindings.
 
 ## Screencast
 
