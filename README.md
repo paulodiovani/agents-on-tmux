@@ -52,6 +52,13 @@ A TMUX-based AI Agents orchestrator.
 
 - [TMUX](https://tmux.app/)
 
+Optional dependencies:
+
+- [Nerd Font](https://www.nerdfonts.com/) 3+ for agent icons. Enable with `NERD_FONT=1`.
+- [Font Awesome](https://fontawesome.com/) 7+ for agent icons. Enable with `FONT_AWESOME=1`.
+
+When both icon fonts are enabled, Nerd Font custom icons take precedence.
+
 Also check the [Recommended TMUX Config settings](./docs/recommended-tmux-config.md).
 
 ## How does it work
