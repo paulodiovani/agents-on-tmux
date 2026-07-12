@@ -54,12 +54,47 @@ A TMUX-based AI Agents orchestrator.
 
 Optional dependencies:
 
-- [Nerd Font](https://www.nerdfonts.com/) 3+ for agent icons. Enable with `--nerd-font` or `NERD_FONT=1`.
-- [Font Awesome](https://fontawesome.com/) 7+ for agent icons. Enable with `--font-awesome` or `FONT_AWESOME=1`.
+- [Nerd Font](https://www.nerdfonts.com/) 3+ for agent icons
+- [Font Awesome](https://fontawesome.com/) 7+ for agent icons
 
 When both icon fonts are enabled, Nerd Font custom icons take precedence.
 
 Also check the [Recommended TMUX Config settings](./docs/recommended-tmux-config.md).
+
+## Configuration
+
+`aot` supports configuration via CLI arguments, environment variables, and a TOML config file.
+
+**Priority chain:** CLI arguments > environment variables > config file > defaults
+
+### Config File
+
+Create `~/.config/aot/aot.conf` to set default values:
+
+```toml
+tui = false
+no_tui = false
+nerd_font = true
+font_awesome = true
+```
+
+All fields are optional. Omitted fields use their defaults (`false`).
+
+### CLI Arguments
+
+| Flag | Description |
+|------|-------------|
+| `--tui` | Launch only the terminal UI |
+| `--no-tui` | Do not launch the terminal UI pane |
+| `--nerd-font[=true\|false]` | Enable Nerd Font icons |
+| `--font-awesome[=true\|false]` | Enable Font Awesome icons |
+
+### Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `NERD_FONT` | Enable Nerd Font icons (`1`, `true`, `yes`, `on`) |
+| `FONT_AWESOME` | Enable Font Awesome icons (`1`, `true`, `yes`, `on`) |
 
 ## How does it work
 
