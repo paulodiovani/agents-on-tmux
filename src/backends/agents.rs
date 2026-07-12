@@ -12,8 +12,8 @@ pub trait Agent {
 static NERD_FONT_ENABLED: AtomicBool = AtomicBool::new(false);
 static FONT_AWESOME_ENABLED: AtomicBool = AtomicBool::new(false);
 
-const NERD_FONT_DEFAULT: &'static str = "\u{ee0d}"; //
-const FONT_AWESOME_DEFAULT: &'static str = "\u{f544}"; // 
+const NERD_FONT_DEFAULT: &str = "\u{ee0d}"; //
+const FONT_AWESOME_DEFAULT: &str = "\u{f544}"; // 
 
 #[derive(Debug, Clone)]
 pub struct AgentIcon {
@@ -69,14 +69,22 @@ impl GenericAgent {
 static AGENTS: LazyLock<Vec<GenericAgent>> = LazyLock::new(|| {
     vec![
         GenericAgent::new("Aider", "aider", AgentIcon::new("\u{e669}", "\u{f544}")), //  
-        GenericAgent::new("Claude Code", "claude", AgentIcon::new("\u{ee0d}", "\u{e861}")), //  
+        GenericAgent::new(
+            "Claude Code",
+            "claude",
+            AgentIcon::new("\u{ee0d}", "\u{e861}"),
+        ), //  
         GenericAgent::new("Codex", "codex", AgentIcon::new("\u{ee0d}", "\u{e7cf}")), //  
         GenericAgent::new("Copilot", "copilot", AgentIcon::new("\u{f09b}", "\u{f09b}")), //  
         GenericAgent::new("Cursor", "cursor", AgentIcon::new("\u{ee0d}", "\u{f544}")), //  
         GenericAgent::new("Devin", "devin", AgentIcon::new("\u{ee0d}", "\u{f544}")), //  
         GenericAgent::new("Hermes", "hermes", AgentIcon::new("\u{ee0d}", "\u{f544}")), //  
-        GenericAgent::new("OpenCode", "opencode", AgentIcon::new("\u{ee0d}", "\u{f544}")), //  
-        GenericAgent::new("Pi", "pi", AgentIcon::new("\u{e22c}", "\u{f544}")), //  
+        GenericAgent::new(
+            "OpenCode",
+            "opencode",
+            AgentIcon::new("\u{ee0d}", "\u{f544}"),
+        ), //  
+        GenericAgent::new("Pi", "pi", AgentIcon::new("\u{e22c}", "\u{f544}")),       //  
     ]
 });
 
