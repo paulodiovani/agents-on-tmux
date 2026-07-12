@@ -15,6 +15,7 @@ static FONT_AWESOME_ENABLED: AtomicBool = AtomicBool::new(false);
 const NERD_FONT_DEFAULT: &str = "\u{ee0d}"; //
 const FONT_AWESOME_DEFAULT: &str = "\u{f544}"; // 
 
+/// Icon version used by agents, from nerd font or font awesome
 #[derive(Debug, Clone)]
 pub struct AgentIcon {
     nf_icon: String,
