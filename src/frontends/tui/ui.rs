@@ -134,7 +134,12 @@ fn draw_cards(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect, the
             .unwrap_or_else(|| "n/a".to_string());
 
         let command_display = if let Some(agent) = is_agent(&window.running_command) {
-            format!("{} {}", agent.icon(), agent.name())
+            let icon = agent.icon().to_string();
+            if icon.is_empty() {
+                agent.name().to_string()
+            } else {
+                format!("{} {}", icon, agent.name())
+            }
         } else {
             window.running_command.clone()
         };
