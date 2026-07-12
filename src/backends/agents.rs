@@ -12,6 +12,9 @@ pub trait Agent {
 static NERD_FONT_ENABLED: AtomicBool = AtomicBool::new(false);
 static FONT_AWESOME_ENABLED: AtomicBool = AtomicBool::new(false);
 
+const NERD_FONT_DEFAULT: &'static str = "\u{ee0d}"; //
+const FONT_AWESOME_DEFAULT: &'static str = "\u{f544}"; // 
+
 #[derive(Debug, Clone)]
 pub struct AgentIcon {
     nf_icon: String,
@@ -23,23 +26,16 @@ impl Display for AgentIcon {
         let nerd_font = NERD_FONT_ENABLED.load(Ordering::Relaxed);
         let font_awesome = FONT_AWESOME_ENABLED.load(Ordering::Relaxed);
 
-        if nerd_font && !self.nf_icon.is_empty() && self.nf_icon != "\u{ee0d}" {
-            return write!(f, "{}", self.nf_icon);
-        }
+        let icon = match (nerd_font, font_awesome) {
+            (true, false) => &self.nf_icon,
+            (false, true) => &self.fa_icon,
+            (true, true) if self.nf_icon != NERD_FONT_DEFAULT => &self.nf_icon,
+            (true, true) if self.fa_icon != FONT_AWESOME_DEFAULT => &self.fa_icon,
+            (true, true) => &self.nf_icon,
+            _ => "",
+        };
 
-        if font_awesome {
-            if nerd_font {
-                return write!(f, "\u{f544}");
-            }
-
-            return write!(f, "{}", self.fa_icon);
-        }
-
-        if nerd_font {
-            return write!(f, "{}", self.nf_icon);
-        }
-
-        write!(f, "")
+        write!(f, "{}", icon)
     }
 }
 
@@ -75,19 +71,19 @@ static AGENTS: LazyLock<Vec<GenericAgent>> = LazyLock::new(|| {
         GenericAgent::new(
             "Claude Code",
             "claude",
-            AgentIcon::new("\u{ee0d}", "\u{e861}"),
+            AgentIcon::new("\u{ee0d}", "\u{e861}"), //  
         ),
         GenericAgent::new(
             "OpenCode",
             "opencode",
-            AgentIcon::new("\u{ee0d}", "\u{f544}"),
+            AgentIcon::new("\u{ee0d}", "\u{f544}"), //  
         ),
-        GenericAgent::new("Pi", "pi", AgentIcon::new("\u{e22c}", "\u{f544}")),
-        GenericAgent::new("Codex", "codex", AgentIcon::new("\u{ee0d}", "\u{e7cf}")),
-        GenericAgent::new("Devin", "devin", AgentIcon::new("\u{ee0d}", "\u{f544}")),
-        GenericAgent::new("Hermes", "hermes", AgentIcon::new("\u{ee0d}", "\u{f544}")),
-        GenericAgent::new("Aider", "aider", AgentIcon::new("\u{e669}", "\u{f544}")),
-        GenericAgent::new("Cursor", "cursor", AgentIcon::new("\u{ee0d}", "\u{f544}")),
+        GenericAgent::new("Pi", "pi", AgentIcon::new("\u{e22c}", "\u{f544}")), //  
+        GenericAgent::new("Codex", "codex", AgentIcon::new("\u{ee0d}", "\u{e7cf}")), //  
+        GenericAgent::new("Devin", "devin", AgentIcon::new("\u{ee0d}", "\u{f544}")), //  
+        GenericAgent::new("Hermes", "hermes", AgentIcon::new("\u{ee0d}", "\u{f544}")), //  
+        GenericAgent::new("Aider", "aider", AgentIcon::new("\u{e669}", "\u{f544}")), //  
+        GenericAgent::new("Cursor", "cursor", AgentIcon::new("\u{ee0d}", "\u{f544}")), //  
     ]
 });
 
@@ -169,55 +165,55 @@ mod tests {
 
     #[test]
     fn test_agent_icon_without_icon_fonts() {
-        let icon = AgentIcon::new("\u{e669}", "\u{f544}");
+        let icon = AgentIcon::new("\u{e669}", "\u{f544}"); //  
         assert_eq!(with_icon_fonts(false, false, || icon.to_string()), "");
     }
 
     #[test]
     fn test_agent_icon_with_nerd_font_custom() {
-        let icon = AgentIcon::new("\u{e669}", "\u{f544}");
+        let icon = AgentIcon::new("\u{e669}", "\u{f544}"); //  
         assert_eq!(
             with_icon_fonts(true, false, || icon.to_string()),
-            "\u{e669}"
+            "\u{e669}" // 
         );
     }
 
     #[test]
     fn test_agent_icon_with_nerd_font_default() {
-        let icon = AgentIcon::new("\u{ee0d}", "\u{e861}");
+        let icon = AgentIcon::new("\u{ee0d}", "\u{e861}"); //  
         assert_eq!(
             with_icon_fonts(true, false, || icon.to_string()),
-            "\u{ee0d}"
+            "\u{ee0d}" // 
         );
     }
 
     #[test]
     fn test_agent_icon_with_font_awesome_custom() {
-        let icon = AgentIcon::new("\u{ee0d}", "\u{e861}");
+        let icon = AgentIcon::new("\u{ee0d}", "\u{e861}"); //  
         assert_eq!(
             with_icon_fonts(false, true, || icon.to_string()),
-            "\u{e861}"
+            "\u{e861}" // 
         );
     }
 
     #[test]
     fn test_agent_icon_with_font_awesome_default() {
-        let icon = AgentIcon::new("\u{e669}", "\u{f544}");
+        let icon = AgentIcon::new("\u{e669}", "\u{f544}"); //  
         assert_eq!(
             with_icon_fonts(false, true, || icon.to_string()),
-            "\u{f544}"
+            "\u{f544}" // 
         );
     }
 
     #[test]
     fn test_agent_icon_prefers_nerd_font_custom_when_both_enabled() {
-        let icon = AgentIcon::new("\u{e669}", "\u{f544}");
-        assert_eq!(with_icon_fonts(true, true, || icon.to_string()), "\u{e669}");
+        let icon = AgentIcon::new("\u{e669}", "\u{f544}"); //  
+        assert_eq!(with_icon_fonts(true, true, || icon.to_string()), "\u{e669}"); // 
     }
 
     #[test]
-    fn test_agent_icon_uses_font_awesome_default_when_both_enabled_without_nerd_custom() {
-        let icon = AgentIcon::new("\u{ee0d}", "\u{e861}");
-        assert_eq!(with_icon_fonts(true, true, || icon.to_string()), "\u{f544}");
+    fn test_agent_icon_prefers_nerd_font_default_when_both_enabled() {
+        let icon = AgentIcon::new("\u{ee0d}", "\u{f544}"); //  
+        assert_eq!(with_icon_fonts(true, true, || icon.to_string()), "\u{ee0d}"); // 
     }
 }
