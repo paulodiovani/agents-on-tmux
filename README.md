@@ -54,8 +54,8 @@ A TMUX-based AI Agents orchestrator.
 
 Optional dependencies:
 
-- [Nerd Font](https://www.nerdfonts.com/) 3+ for agent icons. Enable with `NERD_FONT=1`.
-- [Font Awesome](https://fontawesome.com/) 7+ for agent icons. Enable with `FONT_AWESOME=1`.
+- [Nerd Font](https://www.nerdfonts.com/) 3+ for agent icons. Enable with `--nerd-font` or `NERD_FONT=1`.
+- [Font Awesome](https://fontawesome.com/) 7+ for agent icons. Enable with `--font-awesome` or `FONT_AWESOME=1`.
 
 When both icon fonts are enabled, Nerd Font custom icons take precedence.
 
@@ -66,7 +66,7 @@ Also check the [Recommended TMUX Config settings](./docs/recommended-tmux-config
 1. Start the application with `aot`.
 1. The application checks if a parent TMUX session is running or stops if not.
 1. Start a new dedicated TMUX session named `agents-on-tmux`, this is the session that will host the agents.
-1. The TUI control panel is started by default on a left panel. Can also be started with `aot --tui`.
+1. The TUI control panel is started by default on a left panel. Can also be started with `aot --tui` or skipped with `aot --no-tui`.
 1. User can interact with the dedicated session using the TUI control or standard TMUX mappings.
 
 ## Screencast
