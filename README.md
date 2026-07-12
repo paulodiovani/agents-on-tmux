@@ -80,6 +80,7 @@ https://github.com/user-attachments/assets/e85bea40-2204-4f9d-9644-72dfd7c74dce
 | Aider       |   ✔️   |   -    |       -        |
 | Claude Code |   ✔️   |   -    |       -        |
 | Codex       |   ✔️   |   -    |       -        |
+| Copilot     |   ✔️   |   -    |       -        |
 | Cursor      |   ✔️   |   -    |       -        |
 | Devin       |   ✔️   |   -    |       -        |
 | Hermes      |   ✔️   |   -    |       -        |

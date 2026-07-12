@@ -68,22 +68,15 @@ impl GenericAgent {
 
 static AGENTS: LazyLock<Vec<GenericAgent>> = LazyLock::new(|| {
     vec![
-        GenericAgent::new(
-            "Claude Code",
-            "claude",
-            AgentIcon::new("\u{ee0d}", "\u{e861}"), //  
-        ),
-        GenericAgent::new(
-            "OpenCode",
-            "opencode",
-            AgentIcon::new("\u{ee0d}", "\u{f544}"), //  
-        ),
-        GenericAgent::new("Pi", "pi", AgentIcon::new("\u{e22c}", "\u{f544}")), //  
+        GenericAgent::new("Aider", "aider", AgentIcon::new("\u{e669}", "\u{f544}")), //  
+        GenericAgent::new("Claude Code", "claude", AgentIcon::new("\u{ee0d}", "\u{e861}")), //  
         GenericAgent::new("Codex", "codex", AgentIcon::new("\u{ee0d}", "\u{e7cf}")), //  
+        GenericAgent::new("Copilot", "copilot", AgentIcon::new("\u{f09b}", "\u{f09b}")), //  
+        GenericAgent::new("Cursor", "cursor", AgentIcon::new("\u{ee0d}", "\u{f544}")), //  
         GenericAgent::new("Devin", "devin", AgentIcon::new("\u{ee0d}", "\u{f544}")), //  
         GenericAgent::new("Hermes", "hermes", AgentIcon::new("\u{ee0d}", "\u{f544}")), //  
-        GenericAgent::new("Aider", "aider", AgentIcon::new("\u{e669}", "\u{f544}")), //  
-        GenericAgent::new("Cursor", "cursor", AgentIcon::new("\u{ee0d}", "\u{f544}")), //  
+        GenericAgent::new("OpenCode", "opencode", AgentIcon::new("\u{ee0d}", "\u{f544}")), //  
+        GenericAgent::new("Pi", "pi", AgentIcon::new("\u{e22c}", "\u{f544}")), //  
     ]
 });
 
