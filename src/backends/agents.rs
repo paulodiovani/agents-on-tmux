@@ -70,11 +70,7 @@ impl GenericAgent {
 static AGENTS: LazyLock<Vec<GenericAgent>> = LazyLock::new(|| {
     vec![
         GenericAgent::new("Aider", "aider", AgentIcon::new("\u{e669}", "\u{f544}")), //  
-        GenericAgent::new(
-            "Claude Code",
-            "claude",
-            AgentIcon::new("\u{ee0d}", "\u{e861}"),
-        ), //  
+        GenericAgent::new("Claude", "claude", AgentIcon::new("\u{ee0d}", "\u{e861}")), //  
         GenericAgent::new("Codex", "codex", AgentIcon::new("\u{ee0d}", "\u{e7cf}")), //  
         GenericAgent::new("Copilot", "copilot", AgentIcon::new("\u{f09b}", "\u{f09b}")), //  
         GenericAgent::new("Cursor", "cursor", AgentIcon::new("\u{ee0d}", "\u{f544}")), //  
@@ -150,7 +146,7 @@ mod tests {
     #[test]
     fn test_is_agent_returns_correct_agent() {
         let agent = is_agent("claude").unwrap();
-        assert_eq!(agent.name(), "Claude Code");
+        assert_eq!(agent.name(), "Claude");
         assert_eq!(agent.command(), "claude");
     }
 
