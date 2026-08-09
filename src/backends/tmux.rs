@@ -13,8 +13,6 @@ pub trait CommandExecutor {
 /// Contract for interacting with tmux sessions and windows.
 pub trait Tmux {
     /// Returns the session name this driver targets.
-    // TODO: remove this allow when the app wires in control mode (Phase 2).
-    #[allow(dead_code)]
     fn session_name(&self) -> &str;
     /// Ensures the tmux session exists, creating it if necessary.
     fn create_session_if_not_exists(&self) -> Result<(), TmuxError>;

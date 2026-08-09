@@ -14,9 +14,9 @@ Execute top to bottom (tests → implementation for each). Check off as complete
 - [x] **Phase 1.3** — Control-mode thread (`pump_events` + `run_with_reconnect`, injectable
       connect/backoff; stdin-piped child)
 - [x] **Phase 1.3b** — `window-size=largest` on session create (`tmux.rs`)
-- [ ] **Phase 2.1** — App structure (`event_rx` field)
-- [ ] **Phase 2.2** — Event loop (drain-then-refresh, coalesced; 1s redraw tick)
-- [ ] **Phase 2.3** — Remove the 5s data poll (keep the redraw tick)
+- [x] **Phase 2.1** — App structure (`event_rx` field)
+- [x] **Phase 2.2** — Event loop (drain-then-refresh, coalesced; 1s redraw tick)
+- [x] **Phase 2.3** — Remove the 5s data poll (keep the redraw tick)
 - [ ] **Phase 3.1** — Debug flag (thread through `Cli`, `Config`, `merge`, `From`, `Display`)
 - [ ] **Phase 3.2** — Logger init to a **file** (not stdout; std-only `src/logger.rs`)
 - [ ] **Phase 3.3** — Wire everything

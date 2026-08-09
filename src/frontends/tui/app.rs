@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use crossterm::event;
@@ -6,17 +7,17 @@ use ratatui::DefaultTerminal;
 use ratatui::widgets::ListState;
 
 use crate::backends::agents::is_agent;
+use crate::backends::control_mode::{self, TmuxEvent};
 use crate::backends::tmux::{Tmux, Window};
 use crate::frontends::tui::event::{Action, PendingAction, Tab, key_to_action};
 use crate::frontends::tui::theme::Theme;
 use crate::frontends::tui::ui;
 
-const REFRESH_INTERVAL_SECS: u64 = 5;
-
 /// Main application state for the TUI frontend.
 pub struct App {
     active_tab: Tab,
     agents_selected: usize,
+    event_rx: Option<mpsc::Receiver<TmuxEvent>>,
     last_focused_id: Option<u32>,
     list_state: ListState,
     nested_driver: Box<dyn Tmux>,
@@ -34,6 +35,7 @@ impl App {
         let mut app = Self {
             active_tab: Tab::Windows,
             agents_selected: 0,
+            event_rx: None,
             last_focused_id: None,
             list_state: ListState::default(),
             nested_driver,
@@ -52,26 +54,68 @@ impl App {
     }
 
     /// Runs the main event loop, drawing the UI and handling input.
+    /// Data refresh is event-driven (tmux control mode); the ~1s redraw tick
+    /// only repaints so the uptime counters keep ticking.
     pub fn run(&mut self, mut terminal: DefaultTerminal) -> anyhow::Result<()> {
         let theme = Theme::default();
-        let tick_rate = Duration::from_secs(REFRESH_INTERVAL_SECS);
-        let mut last_draw = Instant::now() - tick_rate;
+
+        // Spawn control mode thread (only the session name crosses the thread boundary).
+        let (event_tx, event_rx) = mpsc::channel();
+        let session = self.nested_driver.session_name().to_string();
+        std::thread::spawn(move || {
+            control_mode::control_mode_thread(session, event_tx);
+        });
+        self.event_rx = Some(event_rx);
+
+        let redraw_tick = Duration::from_secs(1);
+        let mut last_draw = Instant::now() - redraw_tick;
         while self.running {
-            let should_redraw = last_draw.elapsed() >= tick_rate;
-            if should_redraw {
-                self.refresh_windows()?;
+            if last_draw.elapsed() >= redraw_tick {
+                terminal.draw(|frame| ui::draw(frame, self, &theme))?;
                 last_draw = Instant::now();
             }
-            terminal.draw(|frame| ui::draw(frame, self, &theme))?;
+
+            // Poll keyboard (100ms). A keypress forces an immediate redraw next iteration.
             if event::poll(Duration::from_millis(100))?
                 && let event::Event::Key(key) = event::read()?
                 && key.kind == event::KeyEventKind::Press
             {
                 self.handle_action(key_to_action(key));
-                last_draw = Instant::now();
+                last_draw = Instant::now() - redraw_tick;
+            }
+
+            // Drain tmux events (non-blocking). A refresh forces an immediate redraw.
+            let before = self.windows().len();
+            self.process_tmux_events();
+            if self.windows().len() != before {
+                last_draw = Instant::now() - redraw_tick;
             }
         }
         Ok(())
+    }
+
+    /// Drains pending control-mode events, refreshing the window list at most
+    /// once per drain (events like %output arrive in bursts) and quitting on Exit.
+    fn process_tmux_events(&mut self) {
+        let mut needs_refresh = false;
+        let mut should_exit = false;
+
+        // Drain the channel; the borrow of event_rx ends before we touch &mut self.
+        if let Some(rx) = &self.event_rx {
+            while let Ok(event) = rx.try_recv() {
+                match event {
+                    TmuxEvent::Refresh => needs_refresh = true,
+                    TmuxEvent::Exit => should_exit = true,
+                }
+            }
+        }
+
+        if needs_refresh {
+            let _ = self.refresh_windows();
+        }
+        if should_exit {
+            self.running = false;
+        }
     }
 
     /// Dispatches a user action to the appropriate handler.
@@ -468,6 +512,7 @@ mod tests {
         }
 
         fn list_windows(&self) -> Result<Vec<Window>, TmuxError> {
+            self.calls.borrow_mut().push("list_windows".to_string());
             Ok(self.windows.borrow().clone())
         }
 
@@ -705,6 +750,76 @@ mod tests {
         assert_eq!(app.pending_action(), Some(PendingAction::Quit));
         app.handle_action(Action::None);
         assert_eq!(app.pending_action(), None);
+    }
+
+    #[test]
+    fn test_app_new_has_no_event_receiver() {
+        let (app, _, _) = test_app();
+        assert!(app.event_rx.is_none());
+    }
+
+    #[test]
+    fn test_process_tmux_events_without_receiver_is_noop() {
+        let (mut app, _, _) = test_app();
+        app.process_tmux_events();
+        assert!(app.running);
+        assert_eq!(app.windows().len(), 4);
+    }
+
+    #[test]
+    fn test_refresh_event_reloads_windows() {
+        let (mut app, windows, _) = test_app();
+        let (tx, rx) = mpsc::channel();
+        app.event_rx = Some(rx);
+
+        // A structural change happened externally; the event tells us to reload.
+        windows.borrow_mut().push(Window {
+            current_dir: "/home/user/project5".to_string(),
+            id: 99,
+            is_active: false,
+            name: "agent-5".to_string(),
+            notification_pending: false,
+            running_command: "bash".to_string(),
+            started_at: None,
+        });
+        let _ = tx.send(TmuxEvent::Refresh);
+
+        app.process_tmux_events();
+        assert_eq!(app.windows().len(), 5);
+    }
+
+    #[test]
+    fn test_multiple_events_refresh_once() {
+        // Coalescing: many events, but list_windows is re-read a single time.
+        let (mut app, _, calls) = test_app();
+        let (tx, rx) = mpsc::channel();
+        app.event_rx = Some(rx);
+        calls.borrow_mut().clear();
+
+        for _ in 0..10 {
+            let _ = tx.send(TmuxEvent::Refresh);
+        }
+        app.process_tmux_events();
+
+        let list_calls = calls
+            .borrow()
+            .iter()
+            .filter(|c| *c == "list_windows")
+            .count();
+        assert_eq!(list_calls, 1);
+        assert!(app.running);
+    }
+
+    #[test]
+    fn test_exit_event_quits_app() {
+        let (mut app, _, _) = test_app();
+        let (tx, rx) = mpsc::channel();
+        app.event_rx = Some(rx);
+
+        let _ = tx.send(TmuxEvent::Exit);
+        app.process_tmux_events();
+
+        assert!(!app.running);
     }
 
     #[test]

@@ -1,6 +1,3 @@
-// TODO: remove this allow when the app wires in control mode (Phase 2).
-#![allow(dead_code)]
-
 use std::io::{BufRead, BufReader, Read};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::mpsc;
