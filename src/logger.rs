@@ -1,6 +1,3 @@
-// TODO: remove this allow when main wires in logger::init (Phase 3).
-#![allow(dead_code)]
-
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
