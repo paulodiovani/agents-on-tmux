@@ -20,7 +20,7 @@ Execute top to bottom (tests → implementation for each). Check off as complete
 - [x] **Phase 3.1** — Debug flag (thread through `Cli`, `Config`, `merge`, `From`, `Display`)
 - [x] **Phase 3.2** — Logger init to a **file** (not stdout; std-only `src/logger.rs`)
 - [x] **Phase 3.3** — Wire everything
-- [ ] **Phase 4** — Verification (`fmt` → `clippy` → `test` → manual)
+- [x] **Phase 4** — Verification (`fmt` → `clippy` → `test` → manual)
 - [ ] **Cleanup** — delete this plan file once verified
 
 ## Overview
