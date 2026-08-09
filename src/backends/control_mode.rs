@@ -57,8 +57,7 @@ pub fn parse_event(line: &str) -> Option<TmuxEvent> {
             id.parse::<u32>().ok().map(|_| TmuxEvent::Refresh)
         }
         // Activity / focus changes: keep notification_pending and the active
-        // window live. %session-window-changed is what fires when any client
-        // selects another window (e.g. previous/next).
+        // window live.
         "%session-changed"
         | "%session-window-changed"
         | "%window-pane-changed"

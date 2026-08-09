@@ -216,15 +216,6 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
                 .execute(&["new-session", "-d", "-s", &self.session])?;
             self.executor
                 .execute(&["set-option", "-t", &self.session, "status", "off"])?;
-            // Keep the session sized to the user's terminal, not the 80x24
-            // control-mode client that also attaches (see control_mode.rs).
-            self.executor.execute(&[
-                "set-option",
-                "-t",
-                &self.session,
-                "window-size",
-                "largest",
-            ])?;
         }
 
         Ok(())
@@ -443,20 +434,6 @@ mod tests {
         let driver = TmuxDriver::with_executor(executor);
         let result = driver.create_session_if_not_exists();
         assert!(result.is_ok());
-    }
-
-    #[test]
-    fn test_create_session_sets_window_size_largest() {
-        let executor = MockCommandExecutor::new();
-        let driver = TmuxDriver::with_executor(executor);
-        driver.create_session_if_not_exists().unwrap();
-
-        let commands = driver.executor.commands.borrow();
-        assert!(commands.iter().any(|cmd| {
-            cmd.first().map(|s| s.as_str()) == Some("set-option")
-                && cmd.contains(&"window-size".to_string())
-                && cmd.contains(&"largest".to_string())
-        }));
     }
 
     #[test]
