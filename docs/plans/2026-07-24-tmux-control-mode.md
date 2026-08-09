@@ -747,6 +747,7 @@ Notifications and how this app maps them (all "state changed" notifications coll
 | Window closed | `%window-close @<id>` | `%window-close @5` | Refresh |
 | Window renamed | `%window-renamed @<id> <name>` | `%window-renamed @3 my tmux` | Refresh |
 | Session changed | `%session-changed $<sid> <widx>` | `%session-changed $1 1` | Refresh |
+| Active window changed | `%session-window-changed $<sid> @<id>` | `%session-window-changed $1 @5` | Refresh |
 | Pane changed (focus) | `%window-pane-changed @<id> %<pane>` | `%window-pane-changed @3 %6` | Refresh |
 | Pane output (activity) | `%output %<pane> <data>` | `%output %5 done` | Refresh |
 | Exit | `%exit` | `%exit` | Exit |

@@ -56,10 +56,14 @@ pub fn parse_event(line: &str) -> Option<TmuxEvent> {
             let id = parts.next()?.strip_prefix('@')?;
             id.parse::<u32>().ok().map(|_| TmuxEvent::Refresh)
         }
-        // Activity / focus changes: keep notification_pending live.
-        "%session-changed" | "%window-pane-changed" | "%output" | "%extended-output" => {
-            Some(TmuxEvent::Refresh)
-        }
+        // Activity / focus changes: keep notification_pending and the active
+        // window live. %session-window-changed is what fires when any client
+        // selects another window (e.g. previous/next).
+        "%session-changed"
+        | "%session-window-changed"
+        | "%window-pane-changed"
+        | "%output"
+        | "%extended-output" => Some(TmuxEvent::Refresh),
         _ => None,
     }
 }
@@ -177,6 +181,14 @@ mod tests {
     fn test_parse_session_changed() {
         assert_eq!(
             parse_event("%session-changed $1 1"),
+            Some(TmuxEvent::Refresh)
+        );
+    }
+
+    #[test]
+    fn test_parse_session_window_changed_triggers_refresh() {
+        assert_eq!(
+            parse_event("%session-window-changed $1 @5"),
             Some(TmuxEvent::Refresh)
         );
     }

@@ -85,9 +85,7 @@ impl App {
             }
 
             // Drain tmux events (non-blocking). A refresh forces an immediate redraw.
-            let before = self.windows().len();
-            self.process_tmux_events();
-            if self.windows().len() != before {
+            if self.process_tmux_events() {
                 last_draw = Instant::now() - redraw_tick;
             }
         }
@@ -96,7 +94,8 @@ impl App {
 
     /// Drains pending control-mode events, refreshing the window list at most
     /// once per drain (events like %output arrive in bursts) and quitting on Exit.
-    fn process_tmux_events(&mut self) {
+    /// Returns whether the window list was refreshed (i.e. a redraw is due).
+    fn process_tmux_events(&mut self) -> bool {
         let mut needs_refresh = false;
         let mut should_exit = false;
 
@@ -116,6 +115,7 @@ impl App {
         if should_exit {
             self.running = false;
         }
+        needs_refresh
     }
 
     /// Dispatches a user action to the appropriate handler.
@@ -761,7 +761,7 @@ mod tests {
     #[test]
     fn test_process_tmux_events_without_receiver_is_noop() {
         let (mut app, _, _) = test_app();
-        app.process_tmux_events();
+        assert!(!app.process_tmux_events());
         assert!(app.running);
         assert_eq!(app.windows().len(), 4);
     }
@@ -784,7 +784,7 @@ mod tests {
         });
         let _ = tx.send(TmuxEvent::Refresh);
 
-        app.process_tmux_events();
+        assert!(app.process_tmux_events());
         assert_eq!(app.windows().len(), 5);
     }
 
@@ -817,7 +817,7 @@ mod tests {
         app.event_rx = Some(rx);
 
         let _ = tx.send(TmuxEvent::Exit);
-        app.process_tmux_events();
+        assert!(!app.process_tmux_events());
 
         assert!(!app.running);
     }
