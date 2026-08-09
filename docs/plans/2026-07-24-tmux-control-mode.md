@@ -8,17 +8,17 @@
 
 Execute top to bottom (tests → implementation for each). Check off as completed.
 
-- [ ] **Phase 1.1** — Event parsing (`TmuxEvent` = `Refresh` | `Exit`; `%output` &
+- [x] **Phase 1.1** — Event parsing (`TmuxEvent` = `Refresh` | `Exit`; `%output` &
       `%window-pane-changed` map to `Refresh`)
-- [ ] **Phase 1.2** — `session_name()` on `Tmux` trait (+ `MockTmux`; rename the new test)
-- [ ] **Phase 1.3** — Control-mode thread (`pump_events` + `run_with_reconnect`, injectable
+- [x] **Phase 1.2** — `session_name()` on `Tmux` trait (+ `MockTmux`; rename the new test)
+- [x] **Phase 1.3** — Control-mode thread (`pump_events` + `run_with_reconnect`, injectable
       connect/backoff; stdin-piped child)
-- [ ] **Phase 1.3b** — `window-size=largest` on session create (`tmux.rs`)
+- [x] **Phase 1.3b** — `window-size=largest` on session create (`tmux.rs`)
 - [ ] **Phase 2.1** — App structure (`event_rx` field)
 - [ ] **Phase 2.2** — Event loop (drain-then-refresh, coalesced; 1s redraw tick)
 - [ ] **Phase 2.3** — Remove the 5s data poll (keep the redraw tick)
 - [ ] **Phase 3.1** — Debug flag (thread through `Cli`, `Config`, `merge`, `From`, `Display`)
-- [ ] **Phase 3.2** — Tracing init to a **file** (not stdout)
+- [ ] **Phase 3.2** — Logger init to a **file** (not stdout; std-only `src/logger.rs`)
 - [ ] **Phase 3.3** — Wire everything
 - [ ] **Phase 4** — Verification (`fmt` → `clippy` → `test` → manual)
 - [ ] **Cleanup** — delete this plan file once verified
@@ -80,16 +80,15 @@ src/
 ├── frontends/
 │   └── tui/
 │       └── app.rs         (MODIFY - integrate event-driven updates)
-└── main.rs                (MODIFY - add debug flag, init tracing)
+├── logger.rs              (NEW - std-only file logger)
+└── main.rs                (MODIFY - add debug flag, init logger)
 ```
 
 ## Dependencies
 
-```toml
-[dependencies]
-tracing = "0.1"
-tracing-subscriber = "0.3"
-```
+No new crates — every added crate grows the binary. Logging uses the std-only
+`src/logger.rs` module (global `OnceLock<Mutex<File>>`, `logger::init` /
+`logger::debug` / `logger::error`).
 
 ---
 
@@ -650,25 +649,28 @@ debug: Option<bool>,
 > and logging stays off where it matters. Update the existing `config.rs` merge tests and
 > `main.rs` `Display`/`From` tests to cover the new field.
 
-### Step 3.2: Tracing Initialization
+### Step 3.2: Logger Initialization
 
 **Tests to write first:**
 
 ```rust
 #[test]
-fn test_tracing_initialized_with_debug() {
+fn test_logger_initialized_with_debug() {
     // This is hard to test directly, so we'll just verify the flag is passed
     let config = Config { debug: Some(true), /* ... */ };
     assert_eq!(config.debug, Some(true));
 }
 ```
 
+(The logger itself is already covered by `src/logger.rs` tests.)
+
 **Implementation:**
 
-> **Gap — never log to stdout/stderr in a TUI.** The default `tracing_subscriber::fmt()`
-> writes to stdout, which is the ratatui alternate screen — it would corrupt the display.
-> Direct logs to a **file** instead. Initialize before `ratatui::init()` and before spawning
-> the control-mode thread.
+> **Gap — never log to stdout/stderr in a TUI.** stdout is the ratatui alternate screen —
+> logging there would corrupt the display. `logger::debug`/`logger::error` are silent
+> no-ops until `logger::init` points them at a **file**. Initialize before
+> `ratatui::init()` and before spawning the control-mode thread, and remove the temporary
+> `#![allow(dead_code)]` from `src/logger.rs`.
 
 In `main()`:
 
@@ -678,18 +680,12 @@ if config.debug.unwrap_or(false) {
         .unwrap_or_else(std::env::temp_dir)
         .join("aot");
     let _ = std::fs::create_dir_all(&path);
-    if let Ok(file) = std::fs::File::create(path.join("aot.log")) {
-        tracing_subscriber::fmt()
-            .with_max_level(tracing::Level::DEBUG)
-            .with_ansi(false)
-            .with_writer(std::sync::Mutex::new(file))
-            .init();
-    }
+    let _ = logger::init(&path.join("aot.log"));
 }
 ```
 
-> `dirs` is already a dependency. `Mutex<File>` satisfies `MakeWriter` without pulling in
-> `tracing-appender`. `.init()` is a global one-shot; guard it so it runs once.
+> `dirs` is already a dependency. `logger::init` is a global one-shot (`OnceLock`);
+> repeated calls are no-ops.
 
 ### Step 3.3: Wire Everything
 
@@ -771,8 +767,9 @@ Notes:
 - **Session lifecycle**: The tmux session persists independently of the app. Killing the app does NOT kill the session.
 - **Reconnection**: If control mode connection drops, the app attempts to reconnect with exponential backoff.
 - **Debug logging**: Use `--debug` flag or `AOT_DEBUG=1` env var to enable debug logging to
-  a file (`${XDG_CACHE_HOME:-~/.cache}/aot/aot.log`). Never log to stdout/stderr — it would
-  corrupt the ratatui alternate screen.
+  a file (`${XDG_CACHE_HOME:-~/.cache}/aot/aot.log`) via the std-only `src/logger.rs`
+  module (no logging crates). Never log to stdout/stderr — it would corrupt the ratatui
+  alternate screen.
 - **No async runtime**: Using threads and channels keeps the implementation simple and avoids adding tokio as a dependency.
 
 ---

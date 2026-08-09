@@ -12,6 +12,10 @@ pub trait CommandExecutor {
 
 /// Contract for interacting with tmux sessions and windows.
 pub trait Tmux {
+    /// Returns the session name this driver targets.
+    // TODO: remove this allow when the app wires in control mode (Phase 2).
+    #[allow(dead_code)]
+    fn session_name(&self) -> &str;
     /// Ensures the tmux session exists, creating it if necessary.
     fn create_session_if_not_exists(&self) -> Result<(), TmuxError>;
     /// Attaches to the tmux session, inheriting stdio. Blocks until detached.
@@ -200,6 +204,11 @@ fn parse_window_line(line: &str) -> Option<Window> {
 }
 
 impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
+    /// Returns the session name this driver targets.
+    fn session_name(&self) -> &str {
+        &self.session
+    }
+
     /// Ensures the tmux session exists, creating it if necessary.
     fn create_session_if_not_exists(&self) -> Result<(), TmuxError> {
         let has_session = self.executor.execute(&["has-session", "-t", &self.session]);
@@ -209,6 +218,15 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
                 .execute(&["new-session", "-d", "-s", &self.session])?;
             self.executor
                 .execute(&["set-option", "-t", &self.session, "status", "off"])?;
+            // Keep the session sized to the user's terminal, not the 80x24
+            // control-mode client that also attaches (see control_mode.rs).
+            self.executor.execute(&[
+                "set-option",
+                "-t",
+                &self.session,
+                "window-size",
+                "largest",
+            ])?;
         }
 
         Ok(())
@@ -416,11 +434,45 @@ mod tests {
     }
 
     #[test]
+    fn test_driver_session_name() {
+        let driver = TmuxDriver::new("test-session");
+        assert_eq!(driver.session_name(), "test-session");
+    }
+
+    #[test]
     fn test_create_session_if_not_exists_creates_new() {
         let executor = MockCommandExecutor::new();
         let driver = TmuxDriver::with_executor(executor);
         let result = driver.create_session_if_not_exists();
         assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_create_session_sets_window_size_largest() {
+        let executor = MockCommandExecutor::new();
+        let driver = TmuxDriver::with_executor(executor);
+        driver.create_session_if_not_exists().unwrap();
+
+        let commands = driver.executor.commands.borrow();
+        assert!(commands.iter().any(|cmd| {
+            cmd.first().map(|s| s.as_str()) == Some("set-option")
+                && cmd.contains(&"window-size".to_string())
+                && cmd.contains(&"largest".to_string())
+        }));
+    }
+
+    #[test]
+    fn test_create_session_existing_skips_set_option() {
+        let executor = MockCommandExecutor::with_session();
+        let driver = TmuxDriver::with_executor(executor);
+        driver.create_session_if_not_exists().unwrap();
+
+        let commands = driver.executor.commands.borrow();
+        assert!(
+            !commands
+                .iter()
+                .any(|cmd| cmd.first().map(|s| s.as_str()) == Some("set-option"))
+        );
     }
 
     #[test]

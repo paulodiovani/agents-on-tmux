@@ -1,5 +1,6 @@
 mod backends;
 mod frontends;
+mod logger;
 
 use std::fmt::Display;
 

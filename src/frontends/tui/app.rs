@@ -455,6 +455,10 @@ mod tests {
     }
 
     impl Tmux for MockTmux {
+        fn session_name(&self) -> &str {
+            "agents-on-tmux"
+        }
+
         fn create_session_if_not_exists(&self) -> Result<(), TmuxError> {
             Ok(())
         }

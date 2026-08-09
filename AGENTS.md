@@ -15,6 +15,9 @@
 
 - Always write tests for new code; no untested logic should land.
 - Aim for 100% code coverage.
+- Never run the code (`cargo run`, the `aot` binary, or real tmux commands) during
+  implementation — it would interact with existing tmux sessions. Only run tests with
+  mocked tmux. The user will do the final (manual) testing.
 
 ## Architecture
 
@@ -37,6 +40,10 @@ Two top-level modules under `src/`:
   - `ui::draw` renders the interface
 
 The `agents` module is planned but not yet implemented.
+
+`logger.rs` is a std-only global file logger (`init`/`debug`/`error`) — no logging crates;
+it never writes to stdout/stderr, which would corrupt the ratatui alternate screen.
+Prefer std over new crates in general: every added crate grows the binary.
 
 Entry point: `main.rs` parses CLI args with clap, detects the parent tmux session, creates a nested `TmuxDriver` for the `agents-on-tmux` session, ensures it exists. Without `--tui`, it splits a pane in the parent session to launch the TUI and attaches to the nested session. With `--tui`, it runs the TUI directly.
 
