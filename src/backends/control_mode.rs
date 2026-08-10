@@ -106,10 +106,10 @@ fn run_with_reconnect<C, R>(
                 retries = 0; // connection worked; a later drop restarts backoff.
             }
             Err(e) => {
-                crate::logger::debug(&format!("control mode connect failed: {e}"));
+                super::logger::debug(&format!("control mode connect failed: {e}"));
                 retries += 1;
                 if retries as usize >= MAX_RETRIES {
-                    crate::logger::error("max reconnection attempts reached");
+                    super::logger::error("max reconnection attempts reached");
                     let _ = event_tx.send(TmuxEvent::Exit);
                     return;
                 }

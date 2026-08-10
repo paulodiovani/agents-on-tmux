@@ -1,6 +1,5 @@
 mod backends;
 mod frontends;
-mod logger;
 
 use std::fmt::Display;
 
@@ -87,7 +86,7 @@ fn main() -> anyhow::Result<()> {
             .unwrap_or_else(std::env::temp_dir)
             .join("aot");
         let _ = std::fs::create_dir_all(&path);
-        let _ = logger::init(&path.join("aot.log"));
+        let _ = backends::logger::init(&path.join("aot.log"));
     }
 
     backends::agents::set_icon_fonts(
