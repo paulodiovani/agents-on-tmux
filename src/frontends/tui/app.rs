@@ -8,6 +8,7 @@ use ratatui::widgets::ListState;
 
 use crate::backends::agents::is_agent;
 use crate::backends::control_mode::{self, TmuxEvent};
+use crate::backends::logger;
 use crate::backends::tmux::{Tmux, Window};
 use crate::frontends::tui::event::{Action, PendingAction, Tab, key_to_action};
 use crate::frontends::tui::theme::Theme;
@@ -62,6 +63,7 @@ impl App {
         // Spawn control mode thread (only the session name crosses the thread boundary).
         let (event_tx, event_rx) = mpsc::channel();
         let session = self.nested_driver.session_name().to_string();
+        logger::info(&format!("app: starting control mode: session={session}"));
         std::thread::spawn(move || {
             control_mode::control_mode_thread(session, event_tx);
         });
@@ -149,6 +151,7 @@ impl App {
 
     /// Signals the application to stop running.
     pub fn quit(&mut self) {
+        logger::info("app: quit");
         self.running = false;
     }
 
@@ -178,6 +181,7 @@ impl App {
     /// Focuses the currently selected tmux window.
     pub fn focus_window(&self) {
         if let Some(window) = self.current_tab_window() {
+            logger::debug(&format!("app: focus window @{}", window.id));
             let _ = self.nested_driver.select_window(window.id);
             let _ = self.parent_driver.last_pane();
         }
@@ -187,6 +191,7 @@ impl App {
     pub fn create_window(&mut self) {
         self.active_tab = Tab::Windows;
         let name = format!("agent-{}", self.windows.len() + 1);
+        logger::debug(&format!("app: create window {name}"));
         if let Ok(new_window) = self.nested_driver.create_window(&name) {
             let _ = self.refresh_windows();
             let indices = self.current_tab_indices();
@@ -204,6 +209,7 @@ impl App {
     /// Kills the currently selected tmux window.
     pub fn kill_window(&mut self) {
         if let Some(window) = self.current_tab_window() {
+            logger::debug(&format!("app: kill window @{}", window.id));
             let _ = self.nested_driver.kill_window(window.id);
             let _ = self.refresh_windows();
         }
@@ -212,6 +218,7 @@ impl App {
     /// Switches to the given tab if it is not empty.
     pub fn switch_tab(&mut self, tab: Tab) {
         if !self.is_tab_empty(tab) {
+            logger::debug(&format!("app: switch tab -> {tab:?}"));
             let current_dir = self
                 .current_tab_window()
                 .map(|w| w.current_dir.clone())

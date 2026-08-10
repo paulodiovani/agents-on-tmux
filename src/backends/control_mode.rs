@@ -50,9 +50,13 @@ impl Drop for ControlModeReader {
 pub fn parse_event(line: &str) -> Option<TmuxEvent> {
     let mut parts = line.split(' ');
     match parts.next()? {
-        "%exit" => Some(TmuxEvent::Exit),
+        command @ "%exit" => {
+            super::logger::debug(&format!("control_mode: {command}"));
+            Some(TmuxEvent::Exit)
+        }
         // Structural changes: validate the id so malformed lines are ignored.
-        "%window-add" | "%window-close" | "%window-renamed" => {
+        command @ "%window-add" | command @ "%window-close" | command @ "%window-renamed" => {
+            super::logger::debug(&format!("control_mode: {command}"));
             let id = parts.next()?.strip_prefix('@')?;
             id.parse::<u32>().ok().map(|_| TmuxEvent::Refresh)
         }
@@ -63,7 +67,10 @@ pub fn parse_event(line: &str) -> Option<TmuxEvent> {
         | "%window-pane-changed"
         | "%output"
         | "%extended-output" => Some(TmuxEvent::Refresh),
-        _ => None,
+        command => {
+            super::logger::debug(&format!("control_mode: {command}"));
+            None
+        }
     }
 }
 
@@ -106,10 +113,10 @@ fn run_with_reconnect<C, R>(
                 retries = 0; // connection worked; a later drop restarts backoff.
             }
             Err(e) => {
-                super::logger::debug(&format!("control mode connect failed: {e}"));
+                super::logger::debug(&format!("control_mode: connect failed: {e}"));
                 retries += 1;
                 if retries as usize >= MAX_RETRIES {
-                    super::logger::error("max reconnection attempts reached");
+                    super::logger::error("control_mode: max reconnection attempts reached");
                     let _ = event_tx.send(TmuxEvent::Exit);
                     return;
                 }

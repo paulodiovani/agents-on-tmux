@@ -87,6 +87,7 @@ fn main() -> anyhow::Result<()> {
             .join("aot");
         let _ = std::fs::create_dir_all(&path);
         let _ = backends::logger::init(&path.join("aot.log"));
+        backends::logger::info("main: starting aot");
     }
 
     backends::agents::set_icon_fonts(
@@ -104,6 +105,7 @@ fn main() -> anyhow::Result<()> {
     nested_driver.create_session_if_not_exists()?;
 
     if config.tui.unwrap_or(false) {
+        backends::logger::info("main: starting tui");
         let terminal = ratatui::init();
         let mut app =
             frontends::tui::app::App::new(Box::new(nested_driver), Box::new(parent_driver))?;
