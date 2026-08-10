@@ -60,13 +60,10 @@ pub fn parse_event(line: &str) -> Option<TmuxEvent> {
             let id = parts.next()?.strip_prefix('@')?;
             id.parse::<u32>().ok().map(|_| TmuxEvent::Refresh)
         }
-        // Activity / focus changes: keep notification_pending and the active
-        // window live.
-        "%session-changed"
-        | "%session-window-changed"
-        | "%window-pane-changed"
-        | "%output"
-        | "%extended-output" => Some(TmuxEvent::Refresh),
+        // Activity / focus changes: keep the active window live.
+        "%session-changed" | "%session-window-changed" | "%window-pane-changed" => {
+            Some(TmuxEvent::Refresh)
+        }
         command => {
             super::logger::debug(&format!("control_mode: {command}"));
             None
@@ -200,16 +197,13 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_output_triggers_refresh() {
-        assert_eq!(parse_event("%output %5 hello"), Some(TmuxEvent::Refresh));
+    fn test_parse_output_is_ignored() {
+        assert_eq!(parse_event("%output %5 hello"), None);
     }
 
     #[test]
-    fn test_parse_extended_output_triggers_refresh() {
-        assert_eq!(
-            parse_event("%extended-output %5 0 : hello"),
-            Some(TmuxEvent::Refresh)
-        );
+    fn test_parse_extended_output_is_ignored() {
+        assert_eq!(parse_event("%extended-output %5 0 : hello"), None);
     }
 
     #[test]
@@ -246,7 +240,6 @@ mod tests {
         let input = std::io::Cursor::new("%window-add @3\n%output %1 hi\n%exit\n");
         assert!(pump_events(input, &tx)); // saw %exit
         assert_eq!(rx.recv().unwrap(), TmuxEvent::Refresh);
-        assert_eq!(rx.recv().unwrap(), TmuxEvent::Refresh);
         assert_eq!(rx.recv().unwrap(), TmuxEvent::Exit);
     }
 
@@ -262,7 +255,7 @@ mod tests {
     fn test_pump_stops_when_receiver_dropped() {
         let (tx, rx) = mpsc::channel();
         drop(rx);
-        let input = std::io::Cursor::new("%window-add @3\n%output %1 hi\n");
+        let input = std::io::Cursor::new("%window-add @3\n%window-add @4\n");
         assert!(pump_events(input, &tx)); // receiver gone: stop for good
     }
 
