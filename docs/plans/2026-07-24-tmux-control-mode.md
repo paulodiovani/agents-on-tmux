@@ -782,3 +782,65 @@ Notes:
 ```bash
 rm -f docs/plans/2026-07-24-tmux-control-mode.md
 ```
+
+---
+
+## Appendix A: Remove Unused Notification Code
+
+`notification_pending` (tmux `window_activity_flag`) was designed to give a live
+"background window had activity" indicator, but the delivery mechanism never worked —
+`%output`-driven refresh caused a redraw storm (fixed by dropping it as a refresh
+trigger) and no viable event-driven replacement has been confirmed (see Appendix B).
+Since the field was never reliably live, removing it is a cleanup, not a regression.
+
+Steps:
+
+1. `src/backends/tmux.rs` — remove the `notification_pending: bool` field from
+   `Window`, the `#{window_activity_flag}` column from the `list_windows` format
+   string, and its parsing (`let notification_pending = parts[2] == "1";`).
+2. `src/frontends/tui/ui.rs` — remove the `is_notification` border/title logic in
+   the window-card rendering.
+3. `src/frontends/tui/theme.rs` — remove `card_border_notification`.
+4. Drop `notification_pending: ...` from every `Window { .. }` literal left over in
+   tests (`tmux.rs`, `ui.rs`, `app.rs`) and remove tests that only exist to cover
+   the removed field/rendering (e.g. `test_parse_window_line_with_notification`).
+5. `AGENTS.md` — drop `notification_pending` from the `Window` struct field list.
+6. This plan file — the protocol reference table/notes' mentions of
+   `notification_pending` liveness become historical context; leave as-is or note
+   as superseded, no need to rewrite.
+
+**Keep**: `%session-changed`/`%session-window-changed`/`%window-pane-changed` in
+`parse_event` — those drive active-window/tab sync (`is_active`), unrelated to
+`notification_pending`.
+
+---
+
+## Appendix B: Notification Alternatives (Reference)
+
+Options explored for a live "window had background activity" signal, for future
+reference — none implemented.
+
+- **WORKS — `monitor-activity`** — tmux option; sets `window_activity_flag`,
+  confirmed via `tmux list-windows -F '...#{window_activity_flag}...'`. No
+  corresponding control-mode notification (no `%window-activity`), so this
+  requires bringing back **list-windows polling** — the flag is only readable by
+  re-running `list_windows`, not pushed.
+- **WORKS (same mechanism) — `monitor-bell`** — same idea for bell
+  (`printf '\a'`), via `#{window_bell_flag}`; visual bell shows on inactive
+  windows. Same as `monitor-activity`: no control-mode notification, needs the
+  same polling to read the flag.
+- **DOES NOT WORK — Hook + `display-message` + monitor** — bind
+  `alert-activity`/`alert-bell` to `display-message`, hoping it surfaces as
+  `%message`. Tested: never fires — likely because `display-message` needs a
+  real client to show to, and aot's nested session only has a control-mode
+  client attached (no visual terminal target).
+- **UNTESTED — `refresh-client -B` (subscribe)** — control client issues
+  `refresh-client -B name:what:format` to subscribe to a format string (e.g.
+  `#{window_activity_flag}`); tmux pushes `%subscription-changed` when it
+  changes. Purpose-built for this. Exact `what` targeting syntax (per-pane vs
+  per-window, `%*` fan-out) unconfirmed.
+- **UNTESTED — Hook + direct IPC to aot** — bind `alert-activity`/`alert-bell`
+  to a `run-shell` command that writes directly to a socket/pipe aot listens on
+  (window id + kind), bypassing control mode entirely. Sidesteps all of the
+  above limitations but adds a new IPC backend and hook lifecycle management
+  (install on session create, matching the `window-size largest` pattern).
