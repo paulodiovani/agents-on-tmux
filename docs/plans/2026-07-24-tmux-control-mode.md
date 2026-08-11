@@ -785,37 +785,7 @@ rm -f docs/plans/2026-07-24-tmux-control-mode.md
 
 ---
 
-## Appendix A: Remove Unused Notification Code
-
-`notification_pending` (tmux `window_activity_flag`) was designed to give a live
-"background window had activity" indicator, but the delivery mechanism never worked —
-`%output`-driven refresh caused a redraw storm (fixed by dropping it as a refresh
-trigger) and no viable event-driven replacement has been confirmed (see Appendix B).
-Since the field was never reliably live, removing it is a cleanup, not a regression.
-
-Steps:
-
-1. `src/backends/tmux.rs` — remove the `notification_pending: bool` field from
-   `Window`, the `#{window_activity_flag}` column from the `list_windows` format
-   string, and its parsing (`let notification_pending = parts[2] == "1";`).
-2. `src/frontends/tui/ui.rs` — remove the `is_notification` border/title logic in
-   the window-card rendering.
-3. `src/frontends/tui/theme.rs` — remove `card_border_notification`.
-4. Drop `notification_pending: ...` from every `Window { .. }` literal left over in
-   tests (`tmux.rs`, `ui.rs`, `app.rs`) and remove tests that only exist to cover
-   the removed field/rendering (e.g. `test_parse_window_line_with_notification`).
-5. `AGENTS.md` — drop `notification_pending` from the `Window` struct field list.
-6. This plan file — the protocol reference table/notes' mentions of
-   `notification_pending` liveness become historical context; leave as-is or note
-   as superseded, no need to rewrite.
-
-**Keep**: `%session-changed`/`%session-window-changed`/`%window-pane-changed` in
-`parse_event` — those drive active-window/tab sync (`is_active`), unrelated to
-`notification_pending`.
-
----
-
-## Appendix B: Notification Alternatives (Reference)
+## Appendix: Notification Alternatives (Reference)
 
 Options explored for a live "window had background activity" signal, for future
 reference — none implemented.

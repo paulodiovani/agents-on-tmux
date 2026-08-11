@@ -41,3 +41,13 @@ bind -n M-S-down \
 By typing `Shift + Alt + Up` you _go into_ the nested session, and by `Shift + Alt + Down` you _go back_ to parent.
 This is a minimum config based on http://stahlke.org/dan/tmux-nested/ that hides the status bar instead of changing color.
 Change the prefix and adjust to your needs.
+
+### Window activity notification
+
+```tmux
+set-option -g monitor-activity on
+set-option -g visual-activity off
+set-option -g activity-action other
+```
+
+Marks windows with pending output from an inactive agent (`!` indicator in the TUI).
