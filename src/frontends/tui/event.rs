@@ -8,13 +8,6 @@ pub enum Tab {
 }
 
 impl Tab {
-    pub fn index(self) -> usize {
-        match self {
-            Tab::Agents => 0,
-            Tab::Windows => 1,
-        }
-    }
-
     pub fn title(self) -> &'static str {
         match self {
             Tab::Agents => "Agents",
@@ -167,12 +160,6 @@ mod tests {
             key_to_action(key_event(KeyCode::Char('l'))),
             Action::SwitchTabRight
         ));
-    }
-
-    #[test]
-    fn test_tab_index() {
-        assert_eq!(Tab::Agents.index(), 0);
-        assert_eq!(Tab::Windows.index(), 1);
     }
 
     #[test]

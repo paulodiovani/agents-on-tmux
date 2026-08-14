@@ -16,3 +16,4 @@ anyhow = "1.0"
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
 dirs = "6"
+unicode-width = "0.2"

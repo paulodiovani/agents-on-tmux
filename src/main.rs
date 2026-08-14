@@ -61,6 +61,9 @@ impl From<&Cli> for Config {
             nerd_font: cli.nerd_font,
             font_awesome: cli.font_awesome,
             debug: cli.debug,
+            // Colors are config-file only; there are no CLI flags for them.
+            accent_color: None,
+            selection_bg: None,
         }
     }
 }
@@ -109,7 +112,7 @@ fn main() -> anyhow::Result<()> {
         let terminal = ratatui::init();
         let mut app =
             frontends::tui::app::App::new(Box::new(nested_driver), Box::new(parent_driver))?;
-        app.run(terminal)?;
+        app.run(terminal, frontends::tui::theme::Theme::from_config(&config))?;
         ratatui::restore();
     } else {
         let exe = std::env::current_exe()?;

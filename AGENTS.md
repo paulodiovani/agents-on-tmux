@@ -33,10 +33,13 @@ Two top-level modules under `src/`:
   - `TmuxError` enum for error handling
   - Backend is fully wired and tested
 
-- `frontends/` — terminal UI (`tui/` with app, event, theme, ui)
+- `frontends/` — terminal UI (`tui/` with app, event, path, theme, ui)
   - `App` manages TUI state and user actions
   - `key_to_action` maps keyboard input to `Action` enum
-  - `Theme` defines visual styles
+  - `Theme` defines visual styles, built from `Config` and limited to the terminal's
+    own 16-color palette plus bold/dim attributes — never `Color::Rgb`/`Color::Indexed`,
+    so the UI follows the user's terminal theme
+  - `path::shorten_path` fits a directory path into the available columns
   - `ui::draw` renders the interface
 
 The `agents` module is planned but not yet implemented.

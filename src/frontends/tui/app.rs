@@ -57,9 +57,7 @@ impl App {
     /// Runs the main event loop, drawing the UI and handling input.
     /// Data refresh is event-driven (tmux control mode); the ~1s redraw tick
     /// only repaints so the uptime counters keep ticking.
-    pub fn run(&mut self, mut terminal: DefaultTerminal) -> anyhow::Result<()> {
-        let theme = Theme::default();
-
+    pub fn run(&mut self, mut terminal: DefaultTerminal, theme: Theme) -> anyhow::Result<()> {
         // Spawn control mode thread (only the session name crosses the thread boundary).
         let (event_tx, event_rx) = mpsc::channel();
         let session = self.nested_driver.session_name().to_string();

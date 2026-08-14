@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- `accent_color` and `selection_bg` config options, both taking a terminal color name
+
+### Changed
+- Redesigned the window list: borderless two-line rows (title with the active-window
+  marker and elapsed time, then agent icon, agent name, and directory) with the
+  selection highlighted edge to edge and padded with half blocks
+- Redesigned the tab bar: labels with dim counts, underlined by an accent segment
+  under the active tab
+- Directory paths now show the whole path, shortened progressively to the available
+  width (`~`, then fish-style ancestors, then a middle ellipsis) instead of `../basename`
+- All styling now uses the terminal's own 16-color palette plus bold/dim, so the UI
+  follows the terminal theme; agent icons fall back to text tags (`[cc]`, `[oc]`)
+  when no icon font is enabled
+
 ## [0.3.0] - 2026-08-09
 
 ### Added

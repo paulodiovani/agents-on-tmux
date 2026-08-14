@@ -90,9 +90,25 @@ tui = false
 no_tui = false
 nerd_font = true
 font_awesome = true
+accent_color = "blue"
+selection_bg = "bright_black"
 ```
 
-All fields are optional. Omitted fields use their defaults (`false`).
+All fields are optional. Omitted boolean fields use their defaults (`false`).
+
+#### Colors
+
+`aot` never picks absolute colors: it styles itself with your terminal's own
+16-color palette and with bold/dim attributes, so it follows your terminal theme.
+Only these two slots are configurable, and both take a color name:
+`black`, `red`, `green`, `yellow`, `blue`, `magenta`, `cyan`, `gray`,
+`dark_gray` (alias `bright_black`), `light_red`/`bright_red`, `light_green`,
+`light_yellow`, `light_blue`, `light_magenta`, `light_cyan`, `white`.
+
+| Option | Description |
+|--------|-------------|
+| `accent_color` | The active-window marker (`*`) and the tab underline. Defaults to `blue`. |
+| `selection_bg` | Background of the selected row. Unset by default, which reverses the row instead — the only highlight that is visible under every theme. |
 
 ### CLI Arguments
 

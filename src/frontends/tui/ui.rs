@@ -1,23 +1,37 @@
+use std::path::Path;
 use std::time::Instant;
 
 use ratatui::Frame;
-use ratatui::layout::{Constraint, Layout};
-use ratatui::style::Styled;
+use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Paragraph, Tabs};
+use ratatui::widgets::{List, ListItem, ListState, Paragraph};
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use crate::backends::agents::{Agent, is_agent};
+use crate::backends::agents::{Agent, is_agent, notification_icon, window_icon};
 use crate::backends::tmux::{SESSION_NAME, Window};
 use crate::frontends::tui::app::App;
 use crate::frontends::tui::event::{PendingAction, Tab};
+use crate::frontends::tui::path::shorten_path;
 use crate::frontends::tui::theme::Theme;
 
-/// Renders the complete TUI layout: header, tabs, cards, and footer.
+/// Rows one list item occupies: two content lines plus a blank separator.
+const ROW_HEIGHT: u16 = 3;
+/// Columns always reserved for the notification marker, so the elapsed times
+/// never shift sideways when a notification appears or clears.
+const NOTIFICATION_SLOT: usize = 2;
+const ELLIPSIS: &str = "\u{2026}"; // …
+const HALF_BLOCK_LOWER: &str = "\u{2584}"; // ▄
+const HALF_BLOCK_UPPER: &str = "\u{2580}"; // ▀
+const TAB_RULE: &str = "\u{2594}"; // ▔
+const TAB_GAP: &str = "   ";
+
+/// Renders the complete TUI layout: header, tab bar, window rows, and footer.
 pub fn draw(frame: &mut Frame, app: &mut App, theme: &Theme) {
     let footer_height = calculate_footer_height(frame.area().width, app);
     let chunks = Layout::vertical([
         Constraint::Length(1),
-        Constraint::Length(1),
+        Constraint::Length(2),
         Constraint::Min(0),
         Constraint::Length(footer_height),
     ])
@@ -25,154 +39,250 @@ pub fn draw(frame: &mut Frame, app: &mut App, theme: &Theme) {
 
     draw_header(frame, chunks[0], theme);
     draw_tab_bar(frame, app, chunks[1], theme);
-    draw_cards(frame, app, chunks[2], theme);
+    draw_list(frame, app, chunks[2], theme);
     draw_footer(frame, app, chunks[3], theme);
 }
 
 /// Renders the header bar with the session name.
-fn draw_header(frame: &mut Frame, area: ratatui::layout::Rect, theme: &Theme) {
-    let header = Paragraph::new(Span::styled(SESSION_NAME, theme.header_style));
+fn draw_header(frame: &mut Frame, area: Rect, theme: &Theme) {
+    let header = Paragraph::new(Span::styled(SESSION_NAME, theme.header));
     frame.render_widget(header, area);
 }
 
-/// Renders the tab bar showing Agents and Windows tabs.
-fn draw_tab_bar(frame: &mut Frame, app: &App, area: ratatui::layout::Rect, theme: &Theme) {
-    let titles: Vec<Line<'static>> = [Tab::Agents, Tab::Windows]
-        .iter()
-        .map(|tab| {
-            let title = if app.is_tab_empty(*tab) {
-                format!("{} (0)", tab.title())
-            } else {
-                let count = count_windows_for_tab(app, *tab);
-                format!("{} ({})", tab.title(), count)
-            };
-            Line::from(Span::raw(title))
-        })
-        .collect();
+/// Renders the two-line tab bar: labels with their counts, underlined by a rule
+/// whose accent segment sits under the active label.
+fn draw_tab_bar(frame: &mut Frame, app: &App, area: Rect, theme: &Theme) {
+    let mut labels: Vec<Span> = Vec::new();
+    let mut cursor = 0usize;
+    let mut accent_start = 0usize;
+    let mut accent_width = 0usize;
 
-    let tabs = Tabs::new(titles)
-        .style(theme.tab_style)
-        .highlight_style(theme.tab_highlight_style)
-        .select(app.active_tab().index())
-        .divider(" | ")
-        .padding("", "");
-    frame.render_widget(tabs, area);
+    for (index, tab) in [Tab::Agents, Tab::Windows].iter().enumerate() {
+        if index > 0 {
+            labels.push(Span::raw(TAB_GAP));
+            cursor += TAB_GAP.width();
+        }
+
+        let title = tab.title();
+        let count = count_windows_for_tab(app, *tab).to_string();
+        let is_active = app.active_tab() == *tab;
+        if is_active {
+            accent_start = cursor;
+            accent_width = title.width();
+        }
+
+        labels.push(Span::styled(
+            title,
+            if is_active {
+                theme.tab_active
+            } else {
+                theme.dim
+            },
+        ));
+        labels.push(Span::raw(" "));
+        cursor += title.width() + 1 + count.width();
+        labels.push(Span::styled(count, theme.dim));
+    }
+
+    let width = area.width as usize;
+    let lead = accent_start.min(width);
+    let accent = accent_width.min(width - lead);
+    let rest = width - lead - accent;
+    let rule = vec![
+        Span::styled(TAB_RULE.repeat(lead), theme.dim),
+        Span::styled(TAB_RULE.repeat(accent), theme.accent),
+        Span::styled(TAB_RULE.repeat(rest), theme.dim),
+    ];
+
+    let tab_bar = Paragraph::new(vec![Line::from(labels), Line::from(rule)]);
+    frame.render_widget(tab_bar, area);
 }
 
-/// Renders the window cards in the main content area.
-fn draw_cards(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect, theme: &Theme) {
-    let tab_len = app.current_tab_len();
-    if tab_len == 0 {
-        let empty = Paragraph::new("No windows").set_style(theme.card_detail);
-        frame.render_widget(empty, area);
+/// Renders the windows of the active tab as two-line rows.
+fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, theme: &Theme) {
+    // A blank leading row, so the selected item's top padding always has a row
+    // to live in, and the first item is not glued to the tab bar.
+    let list_area = Rect {
+        y: area.y.saturating_add(1),
+        height: area.height.saturating_sub(1),
+        ..area
+    };
+
+    if app.current_tab_len() == 0 {
+        let empty = Paragraph::new(Span::styled("No windows", theme.dim));
+        frame.render_widget(empty, list_area);
         return;
     }
 
-    let card_height = 4u16;
-    let visible_count = (area.height / card_height) as usize;
-
+    let visible_count = (list_area.height / ROW_HEIGHT) as usize;
     app.ensure_visible(visible_count);
 
-    let windows = app.current_tab_windows();
     let offset = app.list_state().offset();
-    let visible_windows: Vec<(usize, &Window)> = windows
+    let selected = app.current_selected();
+    let active_tab = app.active_tab();
+    let width = list_area.width as usize;
+
+    let items: Vec<ListItem> = app
+        .current_tab_windows()
         .iter()
-        .enumerate()
         .skip(offset)
         .take(visible_count)
-        .map(|(i, w)| (i, *w))
+        .map(|window| window_item(window, active_tab, theme, width))
         .collect();
 
-    let constraints: Vec<Constraint> = visible_windows
-        .iter()
-        .map(|_| Constraint::Length(card_height))
-        .collect();
-    let card_areas = Layout::vertical(constraints).split(area);
+    let selected_row = selected
+        .checked_sub(offset)
+        .filter(|row| *row < items.len());
+    let mut state = ListState::default().with_selected(selected_row);
 
-    for (idx, (i, window)) in visible_windows.iter().enumerate() {
-        let is_selected = *i == app.current_selected();
-        let is_notification = window.notification_pending;
+    let list = List::new(items).highlight_style(theme.highlight);
+    frame.render_stateful_widget(list, list_area, &mut state);
 
-        let (border_style, border_set) = match (is_selected, is_notification) {
-            (true, true) => (
-                theme
-                    .card_border_selected
-                    .patch(theme.card_border_notification),
-                theme.selected_border_set,
-            ),
-            (true, false) => (theme.card_border_selected, theme.selected_border_set),
-            (false, true) => (
-                theme.card_border_notification,
-                ratatui::symbols::border::PLAIN,
-            ),
-            (false, false) => (theme.card_border, ratatui::symbols::border::PLAIN),
-        };
-
-        let block = Block::bordered()
-            .border_style(border_style)
-            .border_set(border_set);
-        let inner = block.inner(card_areas[idx]);
-        frame.render_widget(block, card_areas[idx]);
-
-        let title = if is_notification {
-            let name_width = window.name.chars().count();
-            let inner_width = inner.width as usize;
-            let padding = inner_width.saturating_sub(name_width + 1);
-            Line::from(vec![
-                Span::styled(&window.name, theme.card_title),
-                Span::raw(" ".repeat(padding)),
-                Span::styled("!", theme.card_title),
-            ])
-        } else {
-            Line::from(Span::styled(&window.name, theme.card_title))
-        };
-        let time_str = format_elapsed(window.started_at);
-        let dirname = std::path::Path::new(&window.current_dir)
-            .file_name()
-            .and_then(|s| s.to_str())
-            .map(|s| format!("../{}", s))
-            .unwrap_or_else(|| "n/a".to_string());
-
-        let command_display = if let Some(agent) = is_agent(&window.running_command) {
-            let icon = agent.icon().to_string();
-            if icon.is_empty() {
-                agent.name().to_string()
-            } else {
-                format!("{} {}", icon, agent.name())
-            }
-        } else {
-            window.running_command.clone()
-        };
-
-        let mut parts = vec![dirname, command_display];
-        if !time_str.is_empty() {
-            parts.push(time_str);
-        }
-
-        let detail_text = parts.join(" · ");
-        let display_text = truncate_left(&detail_text, inner.width as usize);
-        let detail = Line::from(Span::styled(display_text, theme.card_detail));
-
-        let content = Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).split(inner);
-        frame.render_widget(Paragraph::new(title), content[0]);
-        frame.render_widget(Paragraph::new(detail), content[1]);
+    if let Some(row) = selected_row {
+        let first_line = list_area.y + row as u16 * ROW_HEIGHT;
+        draw_highlight_padding(frame, area, first_line, theme);
     }
 }
 
+/// Pads the highlighted block with half a cell above and below, by drawing half
+/// blocks in the highlight color on the blank rows around it. Row pitch is fixed,
+/// so nothing moves when the selection changes.
+fn draw_highlight_padding(frame: &mut Frame, bounds: Rect, first_line: u16, theme: &Theme) {
+    let width = bounds.width as usize;
+    let bottom = bounds.y + bounds.height;
+
+    let above = first_line.saturating_sub(1);
+    if first_line > bounds.y {
+        let pad = Paragraph::new(Span::styled(
+            HALF_BLOCK_LOWER.repeat(width),
+            theme.highlight_pad,
+        ));
+        frame.render_widget(
+            pad,
+            Rect {
+                y: above,
+                height: 1,
+                ..bounds
+            },
+        );
+    }
+
+    let below = first_line + 2;
+    if below < bottom {
+        let pad = Paragraph::new(Span::styled(
+            HALF_BLOCK_UPPER.repeat(width),
+            theme.highlight_pad,
+        ));
+        frame.render_widget(
+            pad,
+            Rect {
+                y: below,
+                height: 1,
+                ..bounds
+            },
+        );
+    }
+}
+
+/// Builds one list item: title line, detail line, and a blank separator. All
+/// three lines belong to the same item, so they highlight together.
+fn window_item<'a>(window: &Window, tab: Tab, theme: &Theme, width: usize) -> ListItem<'a> {
+    ListItem::new(vec![
+        title_line(window, theme, width),
+        detail_line(window, tab, theme, width),
+        Line::default(),
+    ])
+}
+
+/// Window title, an accent marker when this is the active window, then the
+/// elapsed time and the notification slot pinned to the right edge.
+fn title_line<'a>(window: &Window, theme: &Theme, width: usize) -> Line<'a> {
+    let time = format_elapsed(window.started_at);
+    let marker = if window.is_active { "*" } else { "" };
+    let right = time.width() + NOTIFICATION_SLOT;
+
+    let budget = width.saturating_sub(right + marker.width() + 1);
+    let title = truncate_end(&window.name, budget);
+    let gap = width.saturating_sub(title.width() + marker.width() + right);
+
+    let mut spans = vec![Span::styled(title, theme.title)];
+    if !marker.is_empty() {
+        spans.push(Span::styled(marker, theme.accent));
+    }
+    spans.push(Span::raw(" ".repeat(gap)));
+    spans.push(Span::styled(time, theme.dim));
+    spans.push(Span::raw(" "));
+
+    if window.notification_pending {
+        let icon = notification_icon().to_string();
+        // The plain-text fallback needs the extra weight to read as a marker.
+        let style = if icon == "!" {
+            theme.notification.add_modifier(Modifier::BOLD)
+        } else {
+            theme.notification
+        };
+        spans.push(Span::styled(icon, style));
+    } else {
+        spans.push(Span::raw(" "));
+    }
+
+    Line::from(spans)
+}
+
+/// Agent icon and name (or the window icon), then the directory path filling
+/// whatever width is left.
+fn detail_line<'a>(window: &Window, tab: Tab, theme: &Theme, width: usize) -> Line<'a> {
+    let mut spans: Vec<Span> = Vec::new();
+    let mut used = 0usize;
+
+    match tab {
+        Tab::Agents => {
+            if let Some(agent) = is_agent(&window.running_command) {
+                let icon = agent.icon().to_string();
+                if !icon.is_empty() {
+                    used += icon.width() + 1;
+                    spans.push(Span::styled(format!("{icon} "), theme.normal));
+                }
+                // A window that was never renamed already shows the agent name
+                // as its title; no need to repeat it here.
+                if window.name != agent.name() {
+                    let name = agent.name().to_string();
+                    used += name.width() + 2;
+                    spans.push(Span::styled(name, theme.normal));
+                    spans.push(Span::raw("  "));
+                }
+            }
+        }
+        Tab::Windows => {
+            let icon = window_icon().to_string();
+            used += icon.width() + 1;
+            spans.push(Span::styled(format!("{icon} "), theme.dim));
+        }
+    }
+
+    let path = shorten_path(
+        Path::new(&window.current_dir),
+        width.saturating_sub(used).saturating_sub(1),
+    );
+    spans.push(Span::styled(path, theme.dim));
+
+    Line::from(spans)
+}
+
 /// Renders the footer with keybinding hints or confirmation message.
-fn draw_footer(frame: &mut Frame, app: &mut App, area: ratatui::layout::Rect, theme: &Theme) {
+fn draw_footer(frame: &mut Frame, app: &mut App, area: Rect, theme: &Theme) {
     let footer = match app.pending_action() {
         Some(PendingAction::KillWindow) => {
             let msg = Line::from(vec![
-                Span::styled("d", theme.footer_key_style),
-                Span::styled(" kill this window", theme.footer_style),
+                Span::styled("d", theme.footer_key),
+                Span::styled(" kill this window", theme.dim),
             ]);
             Paragraph::new(msg)
         }
         Some(PendingAction::Quit) => {
             let msg = Line::from(vec![
-                Span::styled("q", theme.footer_key_style),
-                Span::styled(" quit", theme.footer_style),
+                Span::styled("q", theme.footer_key),
+                Span::styled(" quit", theme.dim),
             ]);
             Paragraph::new(msg)
         }
@@ -203,14 +313,14 @@ fn build_footer_entries(app: &App, theme: &Theme) -> Vec<(Vec<Span<'static>>, us
 
     keys.iter()
         .map(|(key, desc, enabled)| {
-            let (key_style, desc_style) = if *enabled {
-                (theme.footer_key_style, theme.footer_style)
+            let key_style = if *enabled {
+                theme.footer_key
             } else {
-                (theme.footer_style, theme.footer_style)
+                theme.dim
             };
             let spans = vec![
                 Span::styled(key.to_string(), key_style),
-                Span::styled(format!(" {}", desc), desc_style),
+                Span::styled(format!(" {}", desc), theme.dim),
             ];
             let width = key.chars().count() + 1 + desc.chars().count();
             (spans, width)
@@ -280,18 +390,27 @@ fn format_elapsed(started_at: Option<Instant>) -> String {
     }
 }
 
-/// Truncates text from the left, prepending ".." if needed.
-fn truncate_left(text: &str, max_width: usize) -> String {
-    let char_count = text.chars().count();
-    if char_count <= max_width {
-        text.to_string()
-    } else if max_width <= 2 {
-        "..".to_string()
-    } else {
-        let take = max_width - 2;
-        let truncated: String = text.chars().skip(char_count - take).collect();
-        format!("..{}", truncated)
+/// Truncates text to a display width, marking the cut with an ellipsis.
+fn truncate_end(text: &str, max_cols: usize) -> String {
+    if text.width() <= max_cols {
+        return text.to_string();
     }
+    if max_cols == 0 {
+        return String::new();
+    }
+
+    let mut truncated = String::new();
+    let mut used = 0usize;
+    for character in text.chars() {
+        let char_width = character.width().unwrap_or(0);
+        if used + char_width > max_cols - 1 {
+            break;
+        }
+        truncated.push(character);
+        used += char_width;
+    }
+    truncated.push_str(ELLIPSIS);
+    truncated
 }
 
 /// Calculates how many lines the footer needs for the given width.
@@ -345,6 +464,10 @@ fn count_windows_for_tab(app: &App, tab: Tab) -> usize {
 mod tests {
     use super::*;
     use crate::backends::tmux::{Tmux, TmuxError};
+    use ratatui::Terminal;
+    use ratatui::backend::TestBackend;
+    use ratatui::buffer::Buffer;
+    use ratatui::style::Color;
     use std::time::Duration;
 
     struct MockTmux {
@@ -354,28 +477,32 @@ mod tests {
 
     impl MockTmux {
         fn new() -> Self {
+            Self::with_windows(vec![
+                Window {
+                    current_dir: "/home/user".to_string(),
+                    id: 1,
+                    is_active: false,
+                    name: "w1".to_string(),
+                    notification_pending: false,
+                    running_command: "bash".to_string(),
+                    started_at: Some(Instant::now() - Duration::from_secs(125)),
+                },
+                Window {
+                    current_dir: "/home/user".to_string(),
+                    id: 2,
+                    is_active: false,
+                    name: "w2".to_string(),
+                    notification_pending: false,
+                    running_command: "claude".to_string(),
+                    started_at: Some(Instant::now() - Duration::from_secs(45)),
+                },
+            ])
+        }
+
+        fn with_windows(windows: Vec<Window>) -> Self {
             Self {
-                next_id: std::cell::RefCell::new(3),
-                windows: std::cell::RefCell::new(vec![
-                    Window {
-                        current_dir: "/home/user".to_string(),
-                        id: 1,
-                        is_active: false,
-                        name: "w1".to_string(),
-                        notification_pending: false,
-                        running_command: "bash".to_string(),
-                        started_at: Some(Instant::now() - Duration::from_secs(125)),
-                    },
-                    Window {
-                        current_dir: "/home/user".to_string(),
-                        id: 2,
-                        is_active: false,
-                        name: "w2".to_string(),
-                        notification_pending: false,
-                        running_command: "claude".to_string(),
-                        started_at: Some(Instant::now() - Duration::from_secs(45)),
-                    },
-                ]),
+                next_id: std::cell::RefCell::new(90),
+                windows: std::cell::RefCell::new(windows),
             }
         }
     }
@@ -430,6 +557,68 @@ mod tests {
         App::new(Box::new(nested_driver), Box::new(parent_driver)).unwrap()
     }
 
+    fn window(name: &str, command: &str, dir: &str, seconds: u64) -> Window {
+        Window {
+            current_dir: dir.to_string(),
+            id: name.len() as u32 + command.len() as u32 * 100,
+            is_active: false,
+            name: name.to_string(),
+            notification_pending: false,
+            running_command: command.to_string(),
+            started_at: Some(Instant::now() - Duration::from_secs(seconds)),
+        }
+    }
+
+    /// Three agent windows, the first one active, the second one notifying.
+    /// The directories deliberately sit outside any home directory, so the
+    /// rendering does not depend on whoever runs the tests.
+    fn agents_app() -> App {
+        let mut windows = vec![
+            window(
+                "fix-auth-bug",
+                "claude",
+                "/opt/work/Development/Rust/aot",
+                29,
+            ),
+            window("docs-review", "opencode", "/opt/work/Development/docs", 25),
+            window("billing-api", "pi", "/opt/clients/acme/billing-api", 17),
+        ];
+        windows[0].is_active = true;
+        windows[1].notification_pending = true;
+        app_with(windows)
+    }
+
+    fn app_with(windows: Vec<Window>) -> App {
+        let driver = MockTmux::with_windows(windows.clone());
+        App::new(Box::new(driver), Box::new(MockTmux::with_windows(windows))).unwrap()
+    }
+
+    /// The column holding the last digit of the elapsed time, which is the
+    /// right-most text before the reserved notification slot. App::refresh_windows
+    /// stamps its own start times, so tests assert on placement, never on duration.
+    fn time_column(row: &str) -> Option<usize> {
+        row.chars()
+            .enumerate()
+            .filter(|(_, character)| character.is_ascii_digit())
+            .map(|(column, _)| column)
+            .last()
+    }
+
+    fn render(app: &mut App, width: u16, height: u16) -> Buffer {
+        let mut terminal = Terminal::new(TestBackend::new(width, height)).unwrap();
+        let theme = Theme::default();
+        terminal.draw(|frame| draw(frame, app, &theme)).unwrap();
+        terminal.backend().buffer().clone()
+    }
+
+    fn row(buffer: &Buffer, y: u16) -> String {
+        (0..buffer.area.width)
+            .map(|x| buffer[(x, y)].symbol())
+            .collect::<String>()
+            .trim_end()
+            .to_string()
+    }
+
     #[test]
     fn test_format_elapsed_seconds_only() {
         let start = Instant::now() - Duration::from_secs(45);
@@ -478,28 +667,35 @@ mod tests {
     }
 
     #[test]
-    fn test_truncate_left_fits() {
-        assert_eq!(truncate_left("hello", 10), "hello");
+    fn test_truncate_end_fits() {
+        assert_eq!(truncate_end("hello", 10), "hello");
     }
 
     #[test]
-    fn test_truncate_left_exact_fit() {
-        assert_eq!(truncate_left("hello", 5), "hello");
+    fn test_truncate_end_exact_fit() {
+        assert_eq!(truncate_end("hello", 5), "hello");
     }
 
     #[test]
-    fn test_truncate_left_needs_truncation() {
-        assert_eq!(truncate_left("/home/user/project", 10), "../project");
+    fn test_truncate_end_needs_truncation() {
+        assert_eq!(truncate_end("fix-auth-bug", 6), "fix-a\u{2026}");
     }
 
     #[test]
-    fn test_truncate_left_very_narrow() {
-        assert_eq!(truncate_left("hello", 2), "..");
+    fn test_truncate_end_very_narrow() {
+        assert_eq!(truncate_end("hello", 1), "\u{2026}");
+        assert_eq!(truncate_end("hello", 0), "");
     }
 
     #[test]
-    fn test_truncate_left_empty() {
-        assert_eq!(truncate_left("", 5), "");
+    fn test_truncate_end_empty() {
+        assert_eq!(truncate_end("", 5), "");
+    }
+
+    #[test]
+    fn test_truncate_end_keeps_wide_characters_whole() {
+        // The wide character does not fit in the single remaining column.
+        assert_eq!(truncate_end("\u{6587}\u{4ef6}ab", 3), "\u{6587}\u{2026}");
     }
 
     #[test]
@@ -507,5 +703,255 @@ mod tests {
         let app = test_app();
         assert_eq!(count_windows_for_tab(&app, Tab::Agents), 1);
         assert_eq!(count_windows_for_tab(&app, Tab::Windows), 1);
+    }
+
+    #[test]
+    fn test_tab_bar_labels_and_counts() {
+        let mut app = agents_app();
+        let buffer = render(&mut app, 80, 24);
+        assert_eq!(row(&buffer, 0), "agents-on-tmux");
+        assert_eq!(row(&buffer, 1), "Agents 3   Windows 0");
+    }
+
+    #[test]
+    fn test_tab_bar_accent_sits_under_the_active_label() {
+        let mut app = agents_app();
+        let buffer = render(&mut app, 80, 24);
+
+        let accent = Theme::default().accent.fg;
+        // "Agents" is six columns wide and starts the line.
+        for x in 0..6 {
+            assert_eq!(buffer[(x, 2)].symbol(), TAB_RULE);
+            assert_eq!(buffer[(x, 2)].style().fg, accent, "column {x}");
+        }
+        for x in 6..80 {
+            assert_ne!(buffer[(x, 2)].style().fg, accent, "column {x}");
+        }
+        // The rule spans the whole width, dim outside the accent segment.
+        assert_eq!(buffer[(79, 2)].symbol(), TAB_RULE);
+    }
+
+    #[test]
+    fn test_tab_bar_accent_follows_the_active_tab() {
+        let mut app = app_with(vec![
+            window("fix-auth-bug", "claude", "/opt/work/aot", 29),
+            window("shell", "zsh", "/opt/work/aot", 5),
+        ]);
+        app.switch_tab(Tab::Windows);
+        assert_eq!(app.active_tab(), Tab::Windows);
+        let buffer = render(&mut app, 80, 24);
+        let accent = Theme::default().accent.fg;
+
+        // Windows starts after "Agents 3" plus the gap.
+        let start = "Agents 3".width() + TAB_GAP.width();
+        for x in 0..start {
+            assert_ne!(buffer[(x as u16, 2)].style().fg, accent, "column {x}");
+        }
+        for x in start..start + "Windows".width() {
+            assert_eq!(buffer[(x as u16, 2)].style().fg, accent, "column {x}");
+        }
+    }
+
+    #[test]
+    fn test_rows_are_two_lines_with_a_blank_separator() {
+        let mut app = agents_app();
+        let buffer = render(&mut app, 80, 24);
+
+        // Row 3 is the blank leading row; items start at row 4 with a 3-row pitch.
+        assert!(row(&buffer, 4).starts_with("fix-auth-bug*"));
+        assert!(row(&buffer, 5).ends_with("/opt/work/Development/Rust/aot"));
+        assert!(row(&buffer, 7).starts_with("docs-review"));
+        assert!(row(&buffer, 8).ends_with("/opt/work/Development/docs"));
+        assert_eq!(row(&buffer, 9), "");
+        assert!(row(&buffer, 10).starts_with("billing-api"));
+        assert!(row(&buffer, 11).ends_with("/opt/clients/acme/billing-api"));
+        assert_eq!(row(&buffer, 12), "");
+    }
+
+    #[test]
+    fn test_active_window_marker_uses_the_accent() {
+        let mut app = agents_app();
+        let buffer = render(&mut app, 80, 24);
+        let marker_x = "fix-auth-bug".width() as u16;
+        assert_eq!(buffer[(marker_x, 4)].symbol(), "*");
+        assert_eq!(buffer[(marker_x, 4)].style().fg, Theme::default().accent.fg);
+        // Only the active window gets one.
+        assert_ne!(buffer[("docs-review".width() as u16, 7)].symbol(), "*");
+    }
+
+    #[test]
+    fn test_notification_slot_keeps_the_time_column_fixed() {
+        let mut app = agents_app();
+        let buffer = render(&mut app, 80, 24);
+
+        let quiet = row(&buffer, 4); // no notification
+        let notifying = row(&buffer, 7); // notification pending
+        assert_eq!(time_column(&quiet), time_column(&notifying));
+
+        // The marker lives in the reserved slot at the right edge, and the slot
+        // is empty (not missing) on the quiet row.
+        assert_eq!(buffer[(79, 7)].symbol(), "!");
+        assert_eq!(buffer[(79, 7)].style().fg, Theme::default().notification.fg);
+        assert!(
+            buffer[(79, 7)]
+                .style()
+                .add_modifier
+                .contains(Modifier::BOLD)
+        );
+        assert_eq!(buffer[(79, 4)].symbol(), " ");
+        assert_eq!(buffer[(78, 4)].symbol(), " ");
+    }
+
+    #[test]
+    fn test_selection_highlights_both_content_lines_edge_to_edge() {
+        let mut app = agents_app();
+        let buffer = render(&mut app, 80, 24);
+
+        for y in [4u16, 5] {
+            for x in 0..80u16 {
+                assert!(
+                    buffer[(x, y)]
+                        .style()
+                        .add_modifier
+                        .contains(Modifier::REVERSED),
+                    "cell ({x}, {y}) is not highlighted"
+                );
+            }
+        }
+        // The row below the highlighted block is padding, not highlight.
+        assert!(
+            !buffer[(0, 6)]
+                .style()
+                .add_modifier
+                .contains(Modifier::REVERSED)
+        );
+    }
+
+    #[test]
+    fn test_highlight_padding_half_blocks() {
+        let mut app = agents_app();
+        let buffer = render(&mut app, 80, 24);
+
+        assert_eq!(row(&buffer, 3), HALF_BLOCK_LOWER.repeat(80));
+        assert_eq!(row(&buffer, 6), HALF_BLOCK_UPPER.repeat(80));
+        assert_eq!(buffer[(0, 3)].style().fg, Some(Color::Reset));
+        assert_eq!(buffer[(0, 6)].style().fg, Some(Color::Reset));
+    }
+
+    #[test]
+    fn test_selection_moves_without_shifting_rows() {
+        let mut app = agents_app();
+        let before = render(&mut app, 80, 24);
+        app.navigate_down();
+        let after = render(&mut app, 80, 24);
+
+        // Same rows, same titles: only the highlight moved.
+        for y in [4u16, 7, 10] {
+            assert_eq!(
+                row(&before, y).trim_start_matches(HALF_BLOCK_LOWER),
+                row(&after, y).trim_start_matches(HALF_BLOCK_LOWER),
+                "row {y} moved"
+            );
+        }
+        assert!(
+            after[(0, 7)]
+                .style()
+                .add_modifier
+                .contains(Modifier::REVERSED)
+        );
+        assert!(
+            !after[(0, 4)]
+                .style()
+                .add_modifier
+                .contains(Modifier::REVERSED)
+        );
+        assert_eq!(row(&after, 6), HALF_BLOCK_LOWER.repeat(80));
+        assert_eq!(row(&after, 9), HALF_BLOCK_UPPER.repeat(80));
+    }
+
+    #[test]
+    fn test_layout_is_identical_in_a_narrow_sidebar() {
+        let mut app = agents_app();
+        let buffer = render(&mut app, 30, 20);
+
+        assert_eq!(row(&buffer, 1), "Agents 3   Windows 0");
+        assert!(row(&buffer, 4).starts_with("fix-auth-bug*"));
+        assert_eq!(time_column(&row(&buffer, 4)), Some(26));
+        assert_eq!(row(&buffer, 6), HALF_BLOCK_UPPER.repeat(30));
+        assert!(row(&buffer, 7).starts_with("docs-review"));
+        // Only the path adapts: it is shortened to what is left.
+        assert!(
+            row(&buffer, 5).ends_with("/o/w/D/R/aot"),
+            "{:?}",
+            row(&buffer, 5)
+        );
+        assert!(row(&buffer, 5).width() <= 30);
+    }
+
+    #[test]
+    fn test_layout_is_identical_in_a_small_popup() {
+        let mut app = agents_app();
+        let buffer = render(&mut app, 40, 12);
+
+        assert_eq!(row(&buffer, 1), "Agents 3   Windows 0");
+        assert!(row(&buffer, 4).starts_with("fix-auth-bug*"));
+        assert_eq!(time_column(&row(&buffer, 4)), Some(36));
+        assert_eq!(row(&buffer, 6), HALF_BLOCK_UPPER.repeat(40));
+        assert!(row(&buffer, 7).starts_with("docs-review"));
+        assert!(row(&buffer, 8).ends_with("/o/w/D/docs"));
+    }
+
+    #[test]
+    fn test_agent_row_shows_icon_and_name() {
+        let mut app = agents_app();
+        let buffer = render(&mut app, 80, 24);
+        // Without icon fonts the agent shows its text tag, then its name.
+        assert!(row(&buffer, 5).starts_with("[cc] Claude"));
+        assert!(row(&buffer, 8).starts_with("[oc] OpenCode"));
+    }
+
+    #[test]
+    fn test_agent_name_is_suppressed_when_it_is_the_window_title() {
+        let mut app = app_with(vec![window("Claude", "claude", "/opt/project", 5)]);
+        let buffer = render(&mut app, 80, 24);
+        assert!(row(&buffer, 4).starts_with("Claude"));
+        assert_eq!(row(&buffer, 5), "[cc] /opt/project");
+    }
+
+    #[test]
+    fn test_windows_tab_uses_the_window_icon_and_no_agent_name() {
+        let mut app = app_with(vec![window("shell", "zsh", "/opt/work/aot", 240)]);
+        assert_eq!(app.active_tab(), Tab::Windows);
+
+        let buffer = render(&mut app, 80, 24);
+        assert!(row(&buffer, 4).starts_with("shell"));
+        assert_eq!(time_column(&row(&buffer, 4)), Some(76));
+        assert_eq!(row(&buffer, 5), "[w] /opt/work/aot");
+    }
+
+    #[test]
+    fn test_empty_tab_message() {
+        let mut app = app_with(vec![window("shell", "zsh", "/opt/work", 5)]);
+        app.kill_window();
+        assert_eq!(app.current_tab_len(), 0);
+
+        let buffer = render(&mut app, 80, 24);
+        assert_eq!(row(&buffer, 1), "Agents 0   Windows 0");
+        assert_eq!(row(&buffer, 4), "No windows");
+    }
+
+    #[test]
+    fn test_long_title_is_truncated_before_the_time() {
+        let mut app = app_with(vec![window(
+            "a-very-long-window-name-that-cannot-possibly-fit",
+            "claude",
+            "/opt/work",
+            5,
+        )]);
+        let buffer = render(&mut app, 30, 20);
+        let title_row = row(&buffer, 4);
+        assert!(title_row.contains(ELLIPSIS), "{title_row:?}");
+        assert_eq!(time_column(&title_row), Some(26));
+        assert!(title_row.width() <= 30);
     }
 }
