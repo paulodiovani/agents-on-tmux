@@ -9,6 +9,8 @@ pub struct Config {
     pub nerd_font: Option<bool>,
     #[serde(default)]
     pub font_awesome: Option<bool>,
+    #[serde(default)]
+    pub debug: Option<bool>,
 }
 
 /// Possible errors when reading config file
@@ -46,6 +48,7 @@ impl Config {
             no_tui: other.no_tui.or(self.no_tui),
             nerd_font: other.nerd_font.or(self.nerd_font),
             font_awesome: other.font_awesome.or(self.font_awesome),
+            debug: other.debug.or(self.debug),
         }
     }
 }
@@ -61,6 +64,7 @@ mod tests {
         assert_eq!(config.no_tui, None);
         assert_eq!(config.nerd_font, None);
         assert_eq!(config.font_awesome, None);
+        assert_eq!(config.debug, None);
     }
 
     #[test]
@@ -70,18 +74,21 @@ mod tests {
             nerd_font: Some(false),
             no_tui: None,
             font_awesome: None,
+            debug: Some(false),
         };
         let other = Config {
             tui: Some(true),
             nerd_font: None,
             no_tui: None,
             font_awesome: None,
+            debug: Some(true),
         };
         let merged = base.merge(other);
         assert_eq!(merged.tui, Some(true));
         assert_eq!(merged.nerd_font, Some(false));
         assert_eq!(merged.no_tui, None);
         assert_eq!(merged.font_awesome, None);
+        assert_eq!(merged.debug, Some(true));
     }
 
     #[test]
@@ -91,11 +98,13 @@ mod tests {
             no_tui: None,
             nerd_font: Some(true),
             font_awesome: Some(true),
+            debug: Some(true),
         };
         let other = Config::default();
         let merged = base.merge(other);
         assert_eq!(merged.nerd_font, Some(true));
         assert_eq!(merged.font_awesome, Some(true));
+        assert_eq!(merged.debug, Some(true));
     }
 
     #[test]
@@ -105,6 +114,7 @@ mod tests {
         assert_eq!(merged.no_tui, None);
         assert_eq!(merged.nerd_font, None);
         assert_eq!(merged.font_awesome, None);
+        assert_eq!(merged.debug, None);
     }
 
     #[test]
@@ -112,7 +122,7 @@ mod tests {
         let dir = std::env::temp_dir().join("aot_test_config");
         let _ = std::fs::create_dir_all(&dir);
         let path = dir.join("aot.conf");
-        std::fs::write(&path, "tui = true\nnerd_font = true\n").unwrap();
+        std::fs::write(&path, "tui = true\nnerd_font = true\ndebug = true\n").unwrap();
 
         let content = std::fs::read_to_string(&path).unwrap();
         let config: Config = toml::from_str(&content).unwrap();
@@ -120,6 +130,7 @@ mod tests {
         assert_eq!(config.nerd_font, Some(true));
         assert_eq!(config.no_tui, None);
         assert_eq!(config.font_awesome, None);
+        assert_eq!(config.debug, Some(true));
 
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -131,6 +142,7 @@ mod tests {
         assert_eq!(config.no_tui, None);
         assert_eq!(config.nerd_font, None);
         assert_eq!(config.font_awesome, None);
+        assert_eq!(config.debug, None);
     }
 
     #[test]

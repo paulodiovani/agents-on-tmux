@@ -24,6 +24,10 @@ struct Cli {
     /// Enable Font Awesome icons
     #[arg(long, env = "FONT_AWESOME", value_parser = parse_bool, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
     font_awesome: Option<bool>,
+
+    /// Enable debug logging to a file
+    #[arg(long, env = "AOT_DEBUG", value_parser = parse_bool, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
+    debug: Option<bool>,
 }
 
 impl Display for Cli {
@@ -40,6 +44,11 @@ impl Display for Cli {
         if let Some(font_awesome) = self.font_awesome {
             write!(f, " --font-awesome={}", font_awesome)?;
         }
+        // Forwarding --debug matters: the TUI runs in a child process launched
+        // via split_window, and the flag must survive that hop.
+        if let Some(debug) = self.debug {
+            write!(f, " --debug={}", debug)?;
+        }
         Ok(())
     }
 }
@@ -51,6 +60,7 @@ impl From<&Cli> for Config {
             no_tui: cli.no_tui,
             nerd_font: cli.nerd_font,
             font_awesome: cli.font_awesome,
+            debug: cli.debug,
         }
     }
 }
@@ -69,6 +79,17 @@ fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let config = config.merge(&cli);
 
+    // Initialize before ratatui takes over the screen; the logger only ever
+    // writes to this file, never to stdout/stderr.
+    if config.debug.unwrap_or(false) {
+        let path = dirs::cache_dir()
+            .unwrap_or_else(std::env::temp_dir)
+            .join("aot");
+        let _ = std::fs::create_dir_all(&path);
+        let _ = backends::logger::init(&path.join("aot.log"));
+        backends::logger::info("main: starting aot");
+    }
+
     backends::agents::set_icon_fonts(
         config.nerd_font.unwrap_or(false),
         config.font_awesome.unwrap_or(false),
@@ -84,6 +105,7 @@ fn main() -> anyhow::Result<()> {
     nested_driver.create_session_if_not_exists()?;
 
     if config.tui.unwrap_or(false) {
+        backends::logger::info("main: starting tui");
         let terminal = ratatui::init();
         let mut app =
             frontends::tui::app::App::new(Box::new(nested_driver), Box::new(parent_driver))?;
@@ -127,6 +149,9 @@ mod tests {
             } else {
                 std::env::remove_var("FONT_AWESOME");
             }
+
+            // Ambient AOT_DEBUG would leak into Cli parsing and Display output.
+            std::env::remove_var("AOT_DEBUG");
         }
 
         let result = test();
@@ -205,5 +230,28 @@ mod tests {
         assert_eq!(config.no_tui, None);
         assert_eq!(config.nerd_font, Some(true));
         assert_eq!(config.font_awesome, None);
+        assert_eq!(config.debug, None);
+    }
+
+    #[test]
+    fn test_debug_flag() {
+        let cli = with_icon_env(None, None, || Cli::parse_from(["aot", "--debug"]));
+        assert_eq!(cli.debug, Some(true));
+    }
+
+    #[test]
+    fn test_debug_env_var() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        unsafe { std::env::set_var("AOT_DEBUG", "1") };
+        let cli = Cli::parse_from(["aot"]);
+        let config = Config::from(&cli);
+        unsafe { std::env::remove_var("AOT_DEBUG") };
+        assert_eq!(config.debug, Some(true));
+    }
+
+    #[test]
+    fn test_cli_display_with_debug_flag() {
+        let cli = with_icon_env(None, None, || Cli::parse_from(["aot", "--debug"]));
+        assert_eq!(format!("{}", cli), " --debug=true");
     }
 }
