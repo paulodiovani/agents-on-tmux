@@ -80,7 +80,6 @@ fn draw_tab_bar(frame: &mut Frame, app: &App, area: Rect, theme: &Theme) {
         let title = tab.title();
         let count = format!("({})", count_windows_for_tab(app, *tab));
         let is_active = app.active_tab() == *tab;
-        // The count belongs to its label: it is emphasized and underlined with it.
         let label_width = title.width() + 1 + count.width();
         if is_active {
             accent_start = cursor;
@@ -98,8 +97,6 @@ fn draw_tab_bar(frame: &mut Frame, app: &App, area: Rect, theme: &Theme) {
         cursor += label_width;
     }
 
-    // The labels are inset, the rule is not: it spans the whole width, with its
-    // accent segment aligned to the label above it.
     let width = area.width as usize;
     let lead = (accent_start + PANEL_PADDING).min(width);
     let accent = accent_width.min(width - lead);
@@ -115,7 +112,9 @@ fn draw_tab_bar(frame: &mut Frame, app: &App, area: Rect, theme: &Theme) {
     frame.render_widget(Paragraph::new(Line::from(rule)), rows[1]);
 }
 
-/// Renders the windows of the active tab as two-line rows.
+/// Renders the windows of the active tab as two-line rows. The selection is built
+/// into each row's spans, not applied with `highlight_style`, which can only add
+/// modifiers and so cannot drop the DIM the dim tier carries.
 fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, theme: &Theme) {
     let list_area = area;
 
@@ -149,8 +148,6 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, theme: &Theme) {
         .checked_sub(offset)
         .filter(|row| *row < items.len());
 
-    // No highlight_style: the selection is baked into the spans, which is the
-    // only way to drop the DIM modifier the dim tier carries.
     frame.render_widget(List::new(items), list_area);
 
     if let Some(row) = selected_row {
@@ -159,9 +156,9 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, theme: &Theme) {
     }
 }
 
-/// Pads the selected block with half a cell above and below, by drawing half
-/// blocks in the selection color on the blank rows around it. Row pitch is fixed,
-/// so nothing moves when the selection changes.
+/// Pads the selected block with half a cell above and below, by drawing half blocks
+/// in the selection color on the blank rows around it. The first item has no blank
+/// row above, so the tab rule takes the selection instead.
 fn draw_selection_padding(frame: &mut Frame, bounds: Rect, first_line: u16, theme: &Theme) {
     let width = bounds.width as usize;
     let bottom = bounds.y + bounds.height;
@@ -180,9 +177,6 @@ fn draw_selection_padding(frame: &mut Frame, bounds: Rect, first_line: u16, them
             },
         );
     } else if first_line > 0 {
-        // The first item has no blank row above it: the tab rule sits there, so
-        // it takes the selection itself. Its ▔ glyphs leave the cell's lower part
-        // colored, which is the same half-cell of padding the blocks give.
         let rule = Rect {
             y: first_line - 1,
             height: 1,
@@ -208,12 +202,8 @@ fn draw_selection_padding(frame: &mut Frame, bounds: Rect, first_line: u16, them
     }
 }
 
-/// Styles of one row, resolved for its selection state.
-///
-/// The selection cannot be layered on top afterwards: ratatui's `highlight_style`
-/// only adds modifiers, and the dim tier has to *lose* its DIM to stay readable on
-/// the selection background. So every span is built with the selection already in
-/// it, and each line is filled to the full width for a continuous background.
+/// Styles of one row, resolved for its selection state. A selected row loses the
+/// dim tier and fills its full width, for a continuous background.
 struct RowStyles {
     accent: Style,
     dim: Style,
@@ -239,8 +229,6 @@ impl RowStyles {
         let selection = theme.selection;
         Self {
             accent: theme.accent.patch(selection),
-            // Promoted out of the dim tier: dimmed text over the selection reads
-            // as washed out rather than secondary.
             dim: theme.normal.patch(selection),
             fill: selection,
             normal: theme.normal.patch(selection),
@@ -285,7 +273,6 @@ fn title_line<'a>(window: &Window, styles: &RowStyles, width: usize) -> Line<'a>
 
     if window.notification_pending {
         let icon = notification_icon().to_string();
-        // The plain-text fallback needs the extra weight to read as a marker.
         let style = if icon == "!" {
             styles.notification.add_modifier(Modifier::BOLD)
         } else {
@@ -300,8 +287,8 @@ fn title_line<'a>(window: &Window, styles: &RowStyles, width: usize) -> Line<'a>
     Line::from(spans)
 }
 
-/// Agent icon and name (or the window icon), then the directory path filling
-/// whatever width is left.
+/// Agent icon and name (or the window icon), then the directory path, right-aligned
+/// on the column where the elapsed time above it ends.
 fn detail_line<'a>(window: &Window, tab: Tab, styles: &RowStyles, width: usize) -> Line<'a> {
     let text_width = width.saturating_sub(PANEL_PADDING * 2);
     let mut spans = vec![Span::styled(" ".repeat(PANEL_PADDING), styles.fill)];
@@ -315,8 +302,6 @@ fn detail_line<'a>(window: &Window, tab: Tab, styles: &RowStyles, width: usize) 
                     used += icon.width() + 1;
                     spans.push(Span::styled(format!("{icon} "), styles.normal));
                 }
-                // A window that was never renamed already shows the agent name
-                // as its title; no need to repeat it here.
                 if window.name != agent.name() {
                     let name = agent.name().to_string();
                     used += name.width() + 2;
@@ -332,8 +317,6 @@ fn detail_line<'a>(window: &Window, tab: Tab, styles: &RowStyles, width: usize) 
         }
     }
 
-    // The path is right-aligned, and stops short of the notification slot so it
-    // ends on the same column as the elapsed time above it.
     let right = text_width.saturating_sub(NOTIFICATION_SLOT);
     let path = shorten_path(Path::new(&window.current_dir), right.saturating_sub(used));
     let gap = right.saturating_sub(used + path.width());
@@ -787,7 +770,6 @@ mod tests {
 
     #[test]
     fn test_truncate_end_keeps_wide_characters_whole() {
-        // The wide character does not fit in the single remaining column.
         assert_eq!(truncate_end("\u{6587}\u{4ef6}ab", 3), "\u{6587}\u{2026}");
     }
 
@@ -812,7 +794,6 @@ mod tests {
         let buffer = render(&mut app, 80, 24);
 
         let accent = Theme::default().accent.fg;
-        // The accent covers the label and its count, after the panel padding.
         let end = PANEL_PADDING + "Agents (3)".width();
         for x in PANEL_PADDING..end {
             assert_eq!(buffer[(x as u16, 2)].symbol(), TAB_RULE);
@@ -821,7 +802,6 @@ mod tests {
         for x in (0..PANEL_PADDING).chain(end..80) {
             assert_ne!(buffer[(x as u16, 2)].style().fg, accent, "column {x}");
         }
-        // The rule spans the whole width, dim outside the accent segment.
         assert_eq!(buffer[(79, 2)].symbol(), TAB_RULE);
     }
 
@@ -830,7 +810,6 @@ mod tests {
         let mut app = agents_app();
         let buffer = render(&mut app, 80, 24);
 
-        // The active label and its count share the same weight...
         let active_count = (PANEL_PADDING + "Agents (".width()) as u16;
         assert_eq!(buffer[(active_count, 1)].symbol(), "3");
         assert!(
@@ -840,7 +819,6 @@ mod tests {
                 .contains(Modifier::BOLD)
         );
 
-        // ...and the inactive one stays dim with its label.
         let idle_count =
             (PANEL_PADDING + "Agents (3)".width() + TAB_GAP.width() + "Windows (".width()) as u16;
         assert_eq!(buffer[(idle_count, 1)].symbol(), "0");
@@ -863,7 +841,6 @@ mod tests {
         let buffer = render(&mut app, 80, 24);
         let accent = Theme::default().accent.fg;
 
-        // Windows starts after the padding, "Agents (3)", and the gap.
         let start = PANEL_PADDING + "Agents (3)".width() + TAB_GAP.width();
         for x in 0..start {
             assert_ne!(buffer[(x as u16, 2)].style().fg, accent, "column {x}");
@@ -878,7 +855,6 @@ mod tests {
         let mut app = agents_app();
         let buffer = render(&mut app, 80, 24);
 
-        // Every path ends on the same column, which is where the times end too.
         assert_eq!(path_end(&buffer, 4), path_end(&buffer, 7));
         assert_eq!(path_end(&buffer, 7), path_end(&buffer, 10));
         assert_eq!(
@@ -892,7 +868,6 @@ mod tests {
         let mut app = agents_app();
         let buffer = render(&mut app, 80, 24);
 
-        // Items start right under the tab rule, with a 3-row pitch.
         assert!(text(&buffer, 3).starts_with("fix-auth-bug*"));
         assert!(text(&buffer, 4).ends_with("/opt/work/Development/Rust/aot"));
         assert!(text(&buffer, 6).starts_with("docs-review"));
@@ -910,7 +885,6 @@ mod tests {
         let marker_x = (PANEL_PADDING + "fix-auth-bug".width()) as u16;
         assert_eq!(buffer[(marker_x, 3)].symbol(), "*");
         assert_eq!(buffer[(marker_x, 3)].style().fg, Theme::default().accent.fg);
-        // Only the active window gets one.
         assert_ne!(
             buffer[((PANEL_PADDING + "docs-review".width()) as u16, 6)].symbol(),
             "*"
@@ -926,8 +900,6 @@ mod tests {
         let notifying = row(&buffer, 6); // notification pending
         assert_eq!(time_column(&quiet), time_column(&notifying));
 
-        // The marker lives in the reserved slot at the right edge, just inside the
-        // panel padding, and the slot is empty (not missing) on the quiet row.
         assert_eq!(buffer[(78, 6)].symbol(), "!");
         assert_eq!(buffer[(78, 6)].style().fg, Theme::default().notification.fg);
         assert!(
@@ -953,12 +925,9 @@ mod tests {
                 );
             }
         }
-        // Above, the tab rule carries the selection instead of a blank row.
         assert!(selection_bg(&buffer, 0, 2));
-        // Below, the padding paints the color as foreground.
         assert!(!selection_bg(&buffer, 0, 5));
         assert_eq!(buffer[(0, 5)].style().fg, Some(Color::DarkGray));
-        // Nothing is inverted: reversing every span reads as harsh.
         assert!(
             !buffer[(1, 3)]
                 .style()
@@ -972,7 +941,6 @@ mod tests {
         let mut app = agents_app();
         let buffer = render(&mut app, 80, 24);
 
-        // Same column on both rows: the elapsed time, which is dim when idle.
         let time = time_column(&row(&buffer, 3)).unwrap() as u16;
         assert!(
             !buffer[(time, 3)]
@@ -987,7 +955,6 @@ mod tests {
                 .contains(Modifier::DIM)
         );
 
-        // And the last column of the path on the second line of each row.
         let selected_path = path_end(&buffer, 4);
         let other_path = path_end(&buffer, 7);
         assert!(
@@ -1003,7 +970,6 @@ mod tests {
                 .contains(Modifier::DIM)
         );
 
-        // The title keeps its weight, the accent marker its color.
         assert!(buffer[(1, 3)].style().add_modifier.contains(Modifier::BOLD));
         let marker = (PANEL_PADDING + "fix-auth-bug".width()) as u16;
         assert_eq!(buffer[(marker, 3)].style().fg, Theme::default().accent.fg);
@@ -1014,16 +980,11 @@ mod tests {
         let mut app = agents_app();
         let buffer = render(&mut app, 80, 24);
 
-        // The first item has no blank row above it: the tab rule takes the
-        // selection, its glyphs leaving the lower part of the cells colored.
         assert_eq!(row(&buffer, 2), TAB_RULE.repeat(80));
         assert!(selection_bg(&buffer, 0, 2));
-        // Tinting the rule keeps it a rule: the accent segment survives.
         assert_eq!(buffer[(1, 2)].style().fg, Theme::default().accent.fg);
         assert!(selection_bg(&buffer, 1, 2));
 
-        // Below, a half block in the selection color over the terminal's own
-        // background.
         assert_eq!(row(&buffer, 5), HALF_BLOCK_UPPER.repeat(80));
         assert_eq!(buffer[(0, 5)].style().fg, Some(Color::DarkGray));
         assert_eq!(buffer[(0, 5)].style().bg, Some(Color::Reset));
@@ -1036,7 +997,6 @@ mod tests {
         app.navigate_down();
         let after = render(&mut app, 80, 24);
 
-        // Same rows, same titles: only the highlight moved.
         for y in [3u16, 6, 9] {
             assert_eq!(
                 row(&before, y).trim_start_matches(HALF_BLOCK_LOWER),
@@ -1048,7 +1008,6 @@ mod tests {
         assert!(!selection_bg(&after, 0, 3));
         assert_eq!(row(&after, 5), HALF_BLOCK_LOWER.repeat(80));
         assert_eq!(row(&after, 8), HALF_BLOCK_UPPER.repeat(80));
-        // The tab rule is only tinted while the first item is selected.
         assert!(selection_bg(&before, 0, 2));
         assert!(!selection_bg(&after, 0, 2));
     }
@@ -1063,7 +1022,6 @@ mod tests {
         assert_eq!(time_column(&row(&buffer, 3)), Some(25));
         assert_eq!(row(&buffer, 5), HALF_BLOCK_UPPER.repeat(30));
         assert!(text(&buffer, 6).starts_with("docs-review"));
-        // Only the path adapts: it is shortened to what is left.
         assert!(
             text(&buffer, 4).ends_with("/o/w/D/R/aot"),
             "{:?}",
@@ -1089,7 +1047,6 @@ mod tests {
     fn test_agent_row_shows_icon_and_name() {
         let mut app = agents_app();
         let buffer = render(&mut app, 80, 24);
-        // Without icon fonts the agent shows its text tag, then its name.
         assert!(text(&buffer, 4).starts_with("[cc] Claude"));
         assert!(text(&buffer, 7).starts_with("[oc] OpenCode"));
     }

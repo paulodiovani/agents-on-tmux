@@ -22,8 +22,7 @@ static WINDOW_ICON: LazyLock<Icon> = LazyLock::new(|| Icon::new("\u{e795}", "\u{
 static NOTIFICATION_ICON: LazyLock<Icon> = LazyLock::new(|| Icon::new("\u{f0f3}", "\u{f0f3}", "!"));
 
 /// How each agent is drawn, keyed by the command the backend identifies it by.
-/// Icons are a decision of this interface, not a property of the agent, so they
-/// live here rather than in the agent registry.
+/// Every agent in the registry needs an entry here.
 static AGENT_ICONS: LazyLock<HashMap<&str, Icon>> = LazyLock::new(|| {
     HashMap::from([
         ("aider", Icon::new("\u{e669}", "\u{f544}", "[ai]")), //  
@@ -95,8 +94,8 @@ pub fn set_icon_fonts(nerd_font: bool, font_awesome: bool) {
     FONT_AWESOME_ENABLED.store(font_awesome, Ordering::Relaxed);
 }
 
-/// Runs `test` with the icon fonts toggled. The enabled fonts are global, so
-/// every test that depends on them has to go through this lock.
+/// Runs `test` with the icon fonts toggled. They are global, so every test that
+/// depends on them has to go through this lock.
 #[cfg(test)]
 fn with_icon_fonts<T>(nerd_font: bool, font_awesome: bool, test: impl FnOnce() -> T) -> T {
     use std::sync::Mutex;
@@ -166,8 +165,6 @@ mod tests {
 
     #[test]
     fn test_every_agent_has_an_icon() {
-        // The agent registry and this table live in different modules; nothing
-        // but this test keeps them in sync.
         for agent in agents() {
             assert!(
                 AGENT_ICONS.contains_key(agent.command()),
@@ -187,7 +184,6 @@ mod tests {
 
     #[test]
     fn test_agent_icons_have_unique_text_fallbacks() {
-        // Without icon fonts every agent must still be identifiable.
         let mut tags: Vec<String> = with_icon_fonts(false, false, || {
             agents()
                 .iter()
@@ -229,7 +225,6 @@ mod tests {
             with_icon_fonts(false, true, || notification_icon().to_string()),
             "\u{f0f3}"
         );
-        // Both fonts enabled: the two glyphs are identical, so either arm is correct.
         assert_eq!(
             with_icon_fonts(true, true, || notification_icon().to_string()),
             "\u{f0f3}"

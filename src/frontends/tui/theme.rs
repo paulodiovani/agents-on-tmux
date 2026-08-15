@@ -6,12 +6,9 @@ const ACCENT: Color = Color::Blue;
 /// renders as a shade of its background.
 const SELECTION: Color = Color::DarkGray;
 
-/// Visual theme for the TUI.
-///
-/// Every style is expressed with the terminal's own palette (named ANSI colors)
-/// or plain attributes, never absolute colors, so the UI recolors itself when the
-/// user changes the terminal theme. Three brightness tiers carry the hierarchy:
-/// `title` (bold) > `normal` (default foreground) > `dim`.
+/// Visual theme for the TUI, expressed with the terminal's own palette (named ANSI
+/// colors) and attributes only, so it follows the user's terminal theme. Three
+/// tiers carry the hierarchy: `title` (bold) > `normal` > `dim`.
 pub struct Theme {
     pub accent: Style,
     pub dim: Style,
@@ -20,6 +17,8 @@ pub struct Theme {
     pub normal: Style,
     pub notification: Style,
     pub selection: Style,
+    /// The half-block rows padding the selection: its color as foreground, over the
+    /// terminal's own background.
     pub selection_pad: Style,
     pub tab_active: Style,
     pub title: Style,
@@ -35,9 +34,8 @@ impl Default for Theme {
             normal: Style::default(),
             notification: Style::default().fg(Color::Yellow),
             selection: Style::default().bg(SELECTION),
-            // The padding half blocks are drawn on rows the selection does not
-            // reach, so they carry its color as their foreground, over the
-            // terminal's own background, and clear whatever was on the row.
+            // Drawn over a row the selection already styled, so it has to clear
+            // what was left there.
             selection_pad: Style::default()
                 .fg(SELECTION)
                 .bg(Color::Reset)
@@ -102,7 +100,6 @@ mod tests {
         let theme = Theme::default();
         assert_eq!(theme.selection_pad.fg, theme.selection.bg);
         assert_eq!(theme.selection_pad.bg, Some(Color::Reset));
-        // The padding rows are drawn over rows the selection may have styled.
         assert!(theme.selection_pad.sub_modifier.contains(Modifier::DIM));
     }
 

@@ -110,7 +110,6 @@ fn shorten_path_with_home(path: &Path, home: Option<&Path>, max_cols: usize) -> 
         return short;
     }
 
-    // Drop ancestors from the right, keeping the head, until it fits.
     let last = abbreviated.len() - 1;
     for kept in (0..last).rev() {
         let mut candidate: Vec<String> = abbreviated[..kept].to_vec();
@@ -122,7 +121,6 @@ fn shorten_path_with_home(path: &Path, home: Option<&Path>, max_cols: usize) -> 
         }
     }
 
-    // The last component is never truncated; the renderer clips it if need be.
     abbreviated[last].clone()
 }
 
@@ -226,7 +224,6 @@ mod tests {
     #[test]
     fn test_short_path_is_untouched() {
         assert_eq!(shorten("/tmp", 4), "/tmp");
-        // Nothing left to abbreviate: only the leaf survives.
         assert_eq!(shorten("/tmp", 3), "tmp");
     }
 
@@ -275,7 +272,6 @@ mod tests {
 
     #[test]
     fn test_wide_characters_are_measured_by_display_width() {
-        // Each CJK character occupies two columns, so this path is 15 columns wide.
         let path = "/home/user/\u{6587}\u{4ef6}";
         assert_eq!(shorten(path, 15), path);
         assert_eq!(shorten(path, 14), "~/\u{6587}\u{4ef6}");
@@ -289,7 +285,6 @@ mod tests {
 
     #[test]
     fn test_shorten_path_uses_the_real_home() {
-        // Anything short enough is returned untouched, whatever HOME is.
         assert_eq!(shorten_path(Path::new("/tmp"), 40), "/tmp");
     }
 }

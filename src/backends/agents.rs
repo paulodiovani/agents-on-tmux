@@ -46,8 +46,8 @@ impl Agent for GenericAgent {
     }
 }
 
-/// Returns every known agent. Only the tests that check the frontend's icon
-/// table against this registry need the whole list.
+/// Returns every known agent. Gated while nothing in the running app needs the
+/// whole list.
 #[cfg(test)]
 pub fn agents() -> &'static [GenericAgent] {
     &AGENTS
