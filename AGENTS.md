@@ -31,23 +31,14 @@ Two top-level modules under `src/`:
   - `CommandExecutor` trait abstracts tmux command execution (real `ShellCommandExecutor` + mock for tests)
   - `Window` struct represents tmux window state (id, name, running_command, started_at, notification_pending, is_active, current_dir)
   - `TmuxError` enum for error handling
-  - `agents.rs` identifies agents by name and command only; how they are drawn is
-    the frontend's business
+  - `agents.rs` identifies agents by name and command
   - Backend is fully wired and tested
 
 - `frontends/` — terminal UI (`tui/` with app, event, icons, path, theme, ui)
   - `App` manages TUI state and user actions
   - `key_to_action` maps keyboard input to `Action` enum
-  - `icons.rs` owns the `Icon` type and every glyph the UI draws, with the
-    Nerd Font / Font Awesome / plain-text precedence. Agent icons are keyed by the
-    agent's command; a test keeps that table in sync with the agent registry
-  - `Theme` defines visual styles, limited to the terminal's own 16-color palette
-    plus bold/dim attributes — never `Color::Rgb`/`Color::Indexed`, so the UI
-    follows the user's terminal theme
-  - `path::shorten_path` fits a directory path into the available columns
+  - `Theme` defines visual styles
   - `ui::draw` renders the interface
-
-The `agents` module is planned but not yet implemented.
 
 `backends/logger.rs` is a std-only global file logger (`init`/`debug`/`error`) — no logging
 crates; it never writes to stdout/stderr, which would corrupt the ratatui alternate screen.
@@ -62,3 +53,7 @@ Entry point: `main.rs` parses CLI args with clap, detects the parent tmux sessio
 - All public structs must implement a trait; inter-module communication follows trait contracts
 - Private by default; only expose what external modules actually use
 - Module item order (top to bottom): traits → constants → enums → structs. Within each category: private before public
+- Presentation belongs to the frontend: backends never carry icons, colors, or any
+  other display data
+- Colors are named ANSI slots (0-15) or `Color::Reset` only — never `Color::Rgb` or
+  `Color::Indexed`, so the UI follows the user's terminal theme

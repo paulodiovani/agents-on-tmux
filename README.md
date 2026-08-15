@@ -94,9 +94,6 @@ font_awesome = true
 
 All fields are optional. Omitted fields use their defaults (`false`).
 
-`aot` never picks absolute colors: it styles itself with your terminal's own
-16-color palette and with bold/dim attributes, so it follows your terminal theme.
-
 ### CLI Arguments
 
 | Flag | Description |
