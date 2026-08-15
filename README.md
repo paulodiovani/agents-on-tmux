@@ -91,7 +91,7 @@ no_tui = false
 nerd_font = true
 font_awesome = true
 accent_color = "blue"
-selection_bg = "bright_black"
+selection_bg = "dark_gray"
 ```
 
 All fields are optional. Omitted boolean fields use their defaults (`false`).
@@ -108,7 +108,7 @@ Only these two slots are configurable, and both take a color name:
 | Option | Description |
 |--------|-------------|
 | `accent_color` | The active-window marker (`*`) and the tab underline. Defaults to `blue`. |
-| `selection_bg` | Background of the selected row. Unset by default, which reverses the row instead — the only highlight that is visible under every theme. |
+| `selection_bg` | Background of the selected row. Defaults to `dark_gray` (bright black). Set it to `"reversed"` to invert the row instead, for themes where bright black is indistinguishable from the background. |
 
 ### CLI Arguments
 

@@ -8,12 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- `accent_color` and `selection_bg` config options, both taking a terminal color name
+- `accent_color` and `selection_bg` config options, taking a terminal color name
+  (`selection_bg` also accepts `"reversed"`)
 
 ### Changed
 - Redesigned the window list: borderless two-line rows (title with the active-window
   marker and elapsed time, then agent icon, agent name, and directory) with the
-  selection highlighted edge to edge and padded with half blocks
+  selected row on a bright-black background, edge to edge and padded with half blocks
+- Panel text now keeps one column of padding on both sides
 - Redesigned the tab bar: labels with dim counts, underlined by an accent segment
   under the active tab
 - Directory paths now show the whole path, shortened progressively to the available

@@ -3,9 +3,9 @@ use std::time::Instant;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
-use ratatui::style::Modifier;
+use ratatui::style::{Modifier, Style};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{List, ListItem, ListState, Paragraph};
+use ratatui::widgets::{List, ListItem, Paragraph};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 use crate::backends::agents::{Agent, is_agent, notification_icon, window_icon};
@@ -17,6 +17,9 @@ use crate::frontends::tui::theme::Theme;
 
 /// Rows one list item occupies: two content lines plus a blank separator.
 const ROW_HEIGHT: u16 = 3;
+/// Columns of breathing room kept on both sides, so text never touches the pane
+/// border. Full-width decorations (the tab rule, the selection) ignore it.
+const PANEL_PADDING: usize = 1;
 /// Columns always reserved for the notification marker, so the elapsed times
 /// never shift sideways when a notification appears or clears.
 const NOTIFICATION_SLOT: usize = 2;
@@ -26,9 +29,19 @@ const HALF_BLOCK_UPPER: &str = "\u{2580}"; // ▀
 const TAB_RULE: &str = "\u{2594}"; // ▔
 const TAB_GAP: &str = "   ";
 
+/// Shrinks an area horizontally by the panel padding.
+fn padded(area: Rect) -> Rect {
+    let padding = (PANEL_PADDING as u16).min(area.width / 2);
+    Rect {
+        x: area.x + padding,
+        width: area.width - padding * 2,
+        ..area
+    }
+}
+
 /// Renders the complete TUI layout: header, tab bar, window rows, and footer.
 pub fn draw(frame: &mut Frame, app: &mut App, theme: &Theme) {
-    let footer_height = calculate_footer_height(frame.area().width, app);
+    let footer_height = calculate_footer_height(padded(frame.area()).width, app);
     let chunks = Layout::vertical([
         Constraint::Length(1),
         Constraint::Length(2),
@@ -46,7 +59,7 @@ pub fn draw(frame: &mut Frame, app: &mut App, theme: &Theme) {
 /// Renders the header bar with the session name.
 fn draw_header(frame: &mut Frame, area: Rect, theme: &Theme) {
     let header = Paragraph::new(Span::styled(SESSION_NAME, theme.header));
-    frame.render_widget(header, area);
+    frame.render_widget(header, padded(area));
 }
 
 /// Renders the two-line tab bar: labels with their counts, underlined by a rule
@@ -84,8 +97,10 @@ fn draw_tab_bar(frame: &mut Frame, app: &App, area: Rect, theme: &Theme) {
         labels.push(Span::styled(count, theme.dim));
     }
 
+    // The labels are inset, the rule is not: it spans the whole width, with its
+    // accent segment aligned to the label above it.
     let width = area.width as usize;
-    let lead = accent_start.min(width);
+    let lead = (accent_start + PANEL_PADDING).min(width);
     let accent = accent_width.min(width - lead);
     let rest = width - lead - accent;
     let rule = vec![
@@ -94,8 +109,9 @@ fn draw_tab_bar(frame: &mut Frame, app: &App, area: Rect, theme: &Theme) {
         Span::styled(TAB_RULE.repeat(rest), theme.dim),
     ];
 
-    let tab_bar = Paragraph::new(vec![Line::from(labels), Line::from(rule)]);
-    frame.render_widget(tab_bar, area);
+    let rows = Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).split(area);
+    frame.render_widget(Paragraph::new(Line::from(labels)), padded(rows[0]));
+    frame.render_widget(Paragraph::new(Line::from(rule)), rows[1]);
 }
 
 /// Renders the windows of the active tab as two-line rows.
@@ -110,7 +126,7 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, theme: &Theme) {
 
     if app.current_tab_len() == 0 {
         let empty = Paragraph::new(Span::styled("No windows", theme.dim));
-        frame.render_widget(empty, list_area);
+        frame.render_widget(empty, padded(list_area));
         return;
     }
 
@@ -125,42 +141,45 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, theme: &Theme) {
     let items: Vec<ListItem> = app
         .current_tab_windows()
         .iter()
+        .enumerate()
         .skip(offset)
         .take(visible_count)
-        .map(|window| window_item(window, active_tab, theme, width))
+        .map(|(index, window)| {
+            let styles = RowStyles::new(theme, index == selected);
+            window_item(window, active_tab, &styles, width)
+        })
         .collect();
 
     let selected_row = selected
         .checked_sub(offset)
         .filter(|row| *row < items.len());
-    let mut state = ListState::default().with_selected(selected_row);
 
-    let list = List::new(items).highlight_style(theme.highlight);
-    frame.render_stateful_widget(list, list_area, &mut state);
+    // No highlight_style: the selection is baked into the spans, which is the
+    // only way to drop the DIM modifier the dim tier carries.
+    frame.render_widget(List::new(items), list_area);
 
     if let Some(row) = selected_row {
         let first_line = list_area.y + row as u16 * ROW_HEIGHT;
-        draw_highlight_padding(frame, area, first_line, theme);
+        draw_selection_padding(frame, area, first_line, theme);
     }
 }
 
-/// Pads the highlighted block with half a cell above and below, by drawing half
-/// blocks in the highlight color on the blank rows around it. Row pitch is fixed,
+/// Pads the selected block with half a cell above and below, by drawing half
+/// blocks in the selection color on the blank rows around it. Row pitch is fixed,
 /// so nothing moves when the selection changes.
-fn draw_highlight_padding(frame: &mut Frame, bounds: Rect, first_line: u16, theme: &Theme) {
+fn draw_selection_padding(frame: &mut Frame, bounds: Rect, first_line: u16, theme: &Theme) {
     let width = bounds.width as usize;
     let bottom = bounds.y + bounds.height;
 
-    let above = first_line.saturating_sub(1);
     if first_line > bounds.y {
         let pad = Paragraph::new(Span::styled(
             HALF_BLOCK_LOWER.repeat(width),
-            theme.highlight_pad,
+            theme.selection_pad,
         ));
         frame.render_widget(
             pad,
             Rect {
-                y: above,
+                y: first_line - 1,
                 height: 1,
                 ..bounds
             },
@@ -171,7 +190,7 @@ fn draw_highlight_padding(frame: &mut Frame, bounds: Rect, first_line: u16, them
     if below < bottom {
         let pad = Paragraph::new(Span::styled(
             HALF_BLOCK_UPPER.repeat(width),
-            theme.highlight_pad,
+            theme.selection_pad,
         ));
         frame.render_widget(
             pad,
@@ -184,55 +203,103 @@ fn draw_highlight_padding(frame: &mut Frame, bounds: Rect, first_line: u16, them
     }
 }
 
-/// Builds one list item: title line, detail line, and a blank separator. All
-/// three lines belong to the same item, so they highlight together.
-fn window_item<'a>(window: &Window, tab: Tab, theme: &Theme, width: usize) -> ListItem<'a> {
+/// Styles of one row, resolved for its selection state.
+///
+/// The selection cannot be layered on top afterwards: ratatui's `highlight_style`
+/// only adds modifiers, and the dim tier has to *lose* its DIM to stay readable on
+/// the selection background. So every span is built with the selection already in
+/// it, and each line is filled to the full width for a continuous background.
+struct RowStyles {
+    accent: Style,
+    dim: Style,
+    fill: Style,
+    normal: Style,
+    notification: Style,
+    title: Style,
+}
+
+impl RowStyles {
+    fn new(theme: &Theme, selected: bool) -> Self {
+        if !selected {
+            return Self {
+                accent: theme.accent,
+                dim: theme.dim,
+                fill: Style::default(),
+                normal: theme.normal,
+                notification: theme.notification,
+                title: theme.title,
+            };
+        }
+
+        let selection = theme.selection;
+        Self {
+            accent: theme.accent.patch(selection),
+            // Promoted out of the dim tier: dimmed text over the selection reads
+            // as washed out rather than secondary.
+            dim: theme.normal.patch(selection),
+            fill: selection,
+            normal: theme.normal.patch(selection),
+            notification: theme.notification.patch(selection),
+            title: theme.title.patch(selection),
+        }
+    }
+}
+
+/// Builds one list item: title line, detail line, and a blank separator. The
+/// separator stays unstyled: it is where the selection padding is drawn.
+fn window_item<'a>(window: &Window, tab: Tab, styles: &RowStyles, width: usize) -> ListItem<'a> {
     ListItem::new(vec![
-        title_line(window, theme, width),
-        detail_line(window, tab, theme, width),
+        title_line(window, styles, width),
+        detail_line(window, tab, styles, width),
         Line::default(),
     ])
 }
 
 /// Window title, an accent marker when this is the active window, then the
 /// elapsed time and the notification slot pinned to the right edge.
-fn title_line<'a>(window: &Window, theme: &Theme, width: usize) -> Line<'a> {
+fn title_line<'a>(window: &Window, styles: &RowStyles, width: usize) -> Line<'a> {
+    let text_width = width.saturating_sub(PANEL_PADDING * 2);
     let time = format_elapsed(window.started_at);
     let marker = if window.is_active { "*" } else { "" };
     let right = time.width() + NOTIFICATION_SLOT;
 
-    let budget = width.saturating_sub(right + marker.width() + 1);
+    let budget = text_width.saturating_sub(right + marker.width() + 1);
     let title = truncate_end(&window.name, budget);
-    let gap = width.saturating_sub(title.width() + marker.width() + right);
+    let gap = text_width.saturating_sub(title.width() + marker.width() + right);
 
-    let mut spans = vec![Span::styled(title, theme.title)];
+    let mut spans = vec![
+        Span::styled(" ".repeat(PANEL_PADDING), styles.fill),
+        Span::styled(title, styles.title),
+    ];
     if !marker.is_empty() {
-        spans.push(Span::styled(marker, theme.accent));
+        spans.push(Span::styled(marker, styles.accent));
     }
-    spans.push(Span::raw(" ".repeat(gap)));
-    spans.push(Span::styled(time, theme.dim));
-    spans.push(Span::raw(" "));
+    spans.push(Span::styled(" ".repeat(gap), styles.fill));
+    spans.push(Span::styled(time, styles.dim));
+    spans.push(Span::styled(" ", styles.fill));
 
     if window.notification_pending {
         let icon = notification_icon().to_string();
         // The plain-text fallback needs the extra weight to read as a marker.
         let style = if icon == "!" {
-            theme.notification.add_modifier(Modifier::BOLD)
+            styles.notification.add_modifier(Modifier::BOLD)
         } else {
-            theme.notification
+            styles.notification
         };
         spans.push(Span::styled(icon, style));
     } else {
-        spans.push(Span::raw(" "));
+        spans.push(Span::styled(" ", styles.fill));
     }
 
+    spans.push(Span::styled(" ".repeat(PANEL_PADDING), styles.fill));
     Line::from(spans)
 }
 
 /// Agent icon and name (or the window icon), then the directory path filling
 /// whatever width is left.
-fn detail_line<'a>(window: &Window, tab: Tab, theme: &Theme, width: usize) -> Line<'a> {
-    let mut spans: Vec<Span> = Vec::new();
+fn detail_line<'a>(window: &Window, tab: Tab, styles: &RowStyles, width: usize) -> Line<'a> {
+    let text_width = width.saturating_sub(PANEL_PADDING * 2);
+    let mut spans = vec![Span::styled(" ".repeat(PANEL_PADDING), styles.fill)];
     let mut used = 0usize;
 
     match tab {
@@ -241,30 +308,35 @@ fn detail_line<'a>(window: &Window, tab: Tab, theme: &Theme, width: usize) -> Li
                 let icon = agent.icon().to_string();
                 if !icon.is_empty() {
                     used += icon.width() + 1;
-                    spans.push(Span::styled(format!("{icon} "), theme.normal));
+                    spans.push(Span::styled(format!("{icon} "), styles.normal));
                 }
                 // A window that was never renamed already shows the agent name
                 // as its title; no need to repeat it here.
                 if window.name != agent.name() {
                     let name = agent.name().to_string();
                     used += name.width() + 2;
-                    spans.push(Span::styled(name, theme.normal));
-                    spans.push(Span::raw("  "));
+                    spans.push(Span::styled(name, styles.normal));
+                    spans.push(Span::styled("  ", styles.fill));
                 }
             }
         }
         Tab::Windows => {
             let icon = window_icon().to_string();
             used += icon.width() + 1;
-            spans.push(Span::styled(format!("{icon} "), theme.dim));
+            spans.push(Span::styled(format!("{icon} "), styles.dim));
         }
     }
 
     let path = shorten_path(
         Path::new(&window.current_dir),
-        width.saturating_sub(used).saturating_sub(1),
+        text_width.saturating_sub(used),
     );
-    spans.push(Span::styled(path, theme.dim));
+    used += path.width();
+    spans.push(Span::styled(path, styles.dim));
+
+    // Fill to the panel width, so the selection background is continuous.
+    let fill = text_width.saturating_sub(used) + PANEL_PADDING;
+    spans.push(Span::styled(" ".repeat(fill), styles.fill));
 
     Line::from(spans)
 }
@@ -288,11 +360,11 @@ fn draw_footer(frame: &mut Frame, app: &mut App, area: Rect, theme: &Theme) {
         }
         None => {
             let entries = build_footer_entries(app, theme);
-            let lines = wrap_entries(&entries, area.width as usize);
+            let lines = wrap_entries(&entries, padded(area).width as usize);
             Paragraph::new(lines)
         }
     };
-    frame.render_widget(footer, area);
+    frame.render_widget(footer, padded(area));
 }
 
 /// Builds styled footer keybinding entries based on the active tab.
@@ -611,12 +683,27 @@ mod tests {
         terminal.backend().buffer().clone()
     }
 
+    /// The row as rendered, keeping leading columns so positions stay meaningful.
     fn row(buffer: &Buffer, y: u16) -> String {
         (0..buffer.area.width)
             .map(|x| buffer[(x, y)].symbol())
             .collect::<String>()
             .trim_end()
             .to_string()
+    }
+
+    /// The row's text, without the panel padding around it.
+    fn text(buffer: &Buffer, y: u16) -> String {
+        row(buffer, y).trim().to_string()
+    }
+
+    fn selection_bg(buffer: &Buffer, x: u16, y: u16) -> bool {
+        buffer[(x, y)].style().bg == Some(Color::DarkGray)
+    }
+
+    /// Column of the last path character on a detail line.
+    fn path_end(buffer: &Buffer, y: u16) -> u16 {
+        row(buffer, y).width() as u16 - 1
     }
 
     #[test]
@@ -709,8 +796,8 @@ mod tests {
     fn test_tab_bar_labels_and_counts() {
         let mut app = agents_app();
         let buffer = render(&mut app, 80, 24);
-        assert_eq!(row(&buffer, 0), "agents-on-tmux");
-        assert_eq!(row(&buffer, 1), "Agents 3   Windows 0");
+        assert_eq!(text(&buffer, 0), "agents-on-tmux");
+        assert_eq!(text(&buffer, 1), "Agents 3   Windows 0");
     }
 
     #[test]
@@ -719,12 +806,12 @@ mod tests {
         let buffer = render(&mut app, 80, 24);
 
         let accent = Theme::default().accent.fg;
-        // "Agents" is six columns wide and starts the line.
-        for x in 0..6 {
+        // "Agents" is six columns wide and starts after the panel padding.
+        for x in 1..7 {
             assert_eq!(buffer[(x, 2)].symbol(), TAB_RULE);
             assert_eq!(buffer[(x, 2)].style().fg, accent, "column {x}");
         }
-        for x in 6..80 {
+        for x in (0..1).chain(7..80) {
             assert_ne!(buffer[(x, 2)].style().fg, accent, "column {x}");
         }
         // The rule spans the whole width, dim outside the accent segment.
@@ -742,8 +829,8 @@ mod tests {
         let buffer = render(&mut app, 80, 24);
         let accent = Theme::default().accent.fg;
 
-        // Windows starts after "Agents 3" plus the gap.
-        let start = "Agents 3".width() + TAB_GAP.width();
+        // Windows starts after the padding, "Agents 3", and the gap.
+        let start = PANEL_PADDING + "Agents 3".width() + TAB_GAP.width();
         for x in 0..start {
             assert_ne!(buffer[(x as u16, 2)].style().fg, accent, "column {x}");
         }
@@ -758,25 +845,28 @@ mod tests {
         let buffer = render(&mut app, 80, 24);
 
         // Row 3 is the blank leading row; items start at row 4 with a 3-row pitch.
-        assert!(row(&buffer, 4).starts_with("fix-auth-bug*"));
-        assert!(row(&buffer, 5).ends_with("/opt/work/Development/Rust/aot"));
-        assert!(row(&buffer, 7).starts_with("docs-review"));
-        assert!(row(&buffer, 8).ends_with("/opt/work/Development/docs"));
-        assert_eq!(row(&buffer, 9), "");
-        assert!(row(&buffer, 10).starts_with("billing-api"));
-        assert!(row(&buffer, 11).ends_with("/opt/clients/acme/billing-api"));
-        assert_eq!(row(&buffer, 12), "");
+        assert!(text(&buffer, 4).starts_with("fix-auth-bug*"));
+        assert!(text(&buffer, 5).ends_with("/opt/work/Development/Rust/aot"));
+        assert!(text(&buffer, 7).starts_with("docs-review"));
+        assert!(text(&buffer, 8).ends_with("/opt/work/Development/docs"));
+        assert_eq!(text(&buffer, 9), "");
+        assert!(text(&buffer, 10).starts_with("billing-api"));
+        assert!(text(&buffer, 11).ends_with("/opt/clients/acme/billing-api"));
+        assert_eq!(text(&buffer, 12), "");
     }
 
     #[test]
     fn test_active_window_marker_uses_the_accent() {
         let mut app = agents_app();
         let buffer = render(&mut app, 80, 24);
-        let marker_x = "fix-auth-bug".width() as u16;
+        let marker_x = (PANEL_PADDING + "fix-auth-bug".width()) as u16;
         assert_eq!(buffer[(marker_x, 4)].symbol(), "*");
         assert_eq!(buffer[(marker_x, 4)].style().fg, Theme::default().accent.fg);
         // Only the active window gets one.
-        assert_ne!(buffer[("docs-review".width() as u16, 7)].symbol(), "*");
+        assert_ne!(
+            buffer[((PANEL_PADDING + "docs-review".width()) as u16, 7)].symbol(),
+            "*"
+        );
     }
 
     #[test]
@@ -788,39 +878,41 @@ mod tests {
         let notifying = row(&buffer, 7); // notification pending
         assert_eq!(time_column(&quiet), time_column(&notifying));
 
-        // The marker lives in the reserved slot at the right edge, and the slot
-        // is empty (not missing) on the quiet row.
-        assert_eq!(buffer[(79, 7)].symbol(), "!");
-        assert_eq!(buffer[(79, 7)].style().fg, Theme::default().notification.fg);
+        // The marker lives in the reserved slot at the right edge, just inside the
+        // panel padding, and the slot is empty (not missing) on the quiet row.
+        assert_eq!(buffer[(78, 7)].symbol(), "!");
+        assert_eq!(buffer[(78, 7)].style().fg, Theme::default().notification.fg);
         assert!(
-            buffer[(79, 7)]
+            buffer[(78, 7)]
                 .style()
                 .add_modifier
                 .contains(Modifier::BOLD)
         );
-        assert_eq!(buffer[(79, 4)].symbol(), " ");
         assert_eq!(buffer[(78, 4)].symbol(), " ");
+        assert_eq!(buffer[(77, 4)].symbol(), " ");
     }
 
     #[test]
-    fn test_selection_highlights_both_content_lines_edge_to_edge() {
+    fn test_selection_covers_both_content_lines_edge_to_edge() {
         let mut app = agents_app();
         let buffer = render(&mut app, 80, 24);
 
         for y in [4u16, 5] {
             for x in 0..80u16 {
                 assert!(
-                    buffer[(x, y)]
-                        .style()
-                        .add_modifier
-                        .contains(Modifier::REVERSED),
-                    "cell ({x}, {y}) is not highlighted"
+                    selection_bg(&buffer, x, y),
+                    "cell ({x}, {y}) is not selected"
                 );
             }
         }
-        // The row below the highlighted block is padding, not highlight.
+        // The rows around it are padding, which paints the color as foreground.
+        for y in [3u16, 6] {
+            assert!(!selection_bg(&buffer, 0, y));
+            assert_eq!(buffer[(0, y)].style().fg, Some(Color::DarkGray));
+        }
+        // Nothing is inverted: reversing every span reads as harsh.
         assert!(
-            !buffer[(0, 6)]
+            !buffer[(1, 4)]
                 .style()
                 .add_modifier
                 .contains(Modifier::REVERSED)
@@ -828,14 +920,59 @@ mod tests {
     }
 
     #[test]
-    fn test_highlight_padding_half_blocks() {
+    fn test_selected_row_drops_the_dim_tier() {
+        let mut app = agents_app();
+        let buffer = render(&mut app, 80, 24);
+
+        // Same column on both rows: the elapsed time, which is dim when idle.
+        let time = time_column(&row(&buffer, 4)).unwrap() as u16;
+        assert!(
+            !buffer[(time, 4)]
+                .style()
+                .add_modifier
+                .contains(Modifier::DIM)
+        );
+        assert!(
+            buffer[(time, 7)]
+                .style()
+                .add_modifier
+                .contains(Modifier::DIM)
+        );
+
+        // And the last column of the path on the second line of each row.
+        let selected_path = path_end(&buffer, 5);
+        let other_path = path_end(&buffer, 8);
+        assert!(
+            !buffer[(selected_path, 5)]
+                .style()
+                .add_modifier
+                .contains(Modifier::DIM)
+        );
+        assert!(
+            buffer[(other_path, 8)]
+                .style()
+                .add_modifier
+                .contains(Modifier::DIM)
+        );
+
+        // The title keeps its weight, the accent marker its color.
+        assert!(buffer[(1, 4)].style().add_modifier.contains(Modifier::BOLD));
+        let marker = (PANEL_PADDING + "fix-auth-bug".width()) as u16;
+        assert_eq!(buffer[(marker, 4)].style().fg, Theme::default().accent.fg);
+    }
+
+    #[test]
+    fn test_selection_padding_half_blocks() {
         let mut app = agents_app();
         let buffer = render(&mut app, 80, 24);
 
         assert_eq!(row(&buffer, 3), HALF_BLOCK_LOWER.repeat(80));
         assert_eq!(row(&buffer, 6), HALF_BLOCK_UPPER.repeat(80));
-        assert_eq!(buffer[(0, 3)].style().fg, Some(Color::Reset));
-        assert_eq!(buffer[(0, 6)].style().fg, Some(Color::Reset));
+        // Selection color as foreground, over the terminal's own background.
+        for y in [3u16, 6] {
+            assert_eq!(buffer[(0, y)].style().fg, Some(Color::DarkGray));
+            assert_eq!(buffer[(0, y)].style().bg, Some(Color::Reset));
+        }
     }
 
     #[test]
@@ -853,18 +990,8 @@ mod tests {
                 "row {y} moved"
             );
         }
-        assert!(
-            after[(0, 7)]
-                .style()
-                .add_modifier
-                .contains(Modifier::REVERSED)
-        );
-        assert!(
-            !after[(0, 4)]
-                .style()
-                .add_modifier
-                .contains(Modifier::REVERSED)
-        );
+        assert!(selection_bg(&after, 0, 7));
+        assert!(!selection_bg(&after, 0, 4));
         assert_eq!(row(&after, 6), HALF_BLOCK_LOWER.repeat(80));
         assert_eq!(row(&after, 9), HALF_BLOCK_UPPER.repeat(80));
     }
@@ -874,16 +1001,16 @@ mod tests {
         let mut app = agents_app();
         let buffer = render(&mut app, 30, 20);
 
-        assert_eq!(row(&buffer, 1), "Agents 3   Windows 0");
-        assert!(row(&buffer, 4).starts_with("fix-auth-bug*"));
-        assert_eq!(time_column(&row(&buffer, 4)), Some(26));
+        assert_eq!(text(&buffer, 1), "Agents 3   Windows 0");
+        assert!(text(&buffer, 4).starts_with("fix-auth-bug*"));
+        assert_eq!(time_column(&row(&buffer, 4)), Some(25));
         assert_eq!(row(&buffer, 6), HALF_BLOCK_UPPER.repeat(30));
-        assert!(row(&buffer, 7).starts_with("docs-review"));
+        assert!(text(&buffer, 7).starts_with("docs-review"));
         // Only the path adapts: it is shortened to what is left.
         assert!(
-            row(&buffer, 5).ends_with("/o/w/D/R/aot"),
+            text(&buffer, 5).ends_with("/o/w/D/R/aot"),
             "{:?}",
-            row(&buffer, 5)
+            text(&buffer, 5)
         );
         assert!(row(&buffer, 5).width() <= 30);
     }
@@ -893,12 +1020,12 @@ mod tests {
         let mut app = agents_app();
         let buffer = render(&mut app, 40, 12);
 
-        assert_eq!(row(&buffer, 1), "Agents 3   Windows 0");
-        assert!(row(&buffer, 4).starts_with("fix-auth-bug*"));
-        assert_eq!(time_column(&row(&buffer, 4)), Some(36));
+        assert_eq!(text(&buffer, 1), "Agents 3   Windows 0");
+        assert!(text(&buffer, 4).starts_with("fix-auth-bug*"));
+        assert_eq!(time_column(&row(&buffer, 4)), Some(35));
         assert_eq!(row(&buffer, 6), HALF_BLOCK_UPPER.repeat(40));
-        assert!(row(&buffer, 7).starts_with("docs-review"));
-        assert!(row(&buffer, 8).ends_with("/o/w/D/docs"));
+        assert!(text(&buffer, 7).starts_with("docs-review"));
+        assert!(text(&buffer, 8).ends_with("/o/w/D/docs"));
     }
 
     #[test]
@@ -906,16 +1033,16 @@ mod tests {
         let mut app = agents_app();
         let buffer = render(&mut app, 80, 24);
         // Without icon fonts the agent shows its text tag, then its name.
-        assert!(row(&buffer, 5).starts_with("[cc] Claude"));
-        assert!(row(&buffer, 8).starts_with("[oc] OpenCode"));
+        assert!(text(&buffer, 5).starts_with("[cc] Claude"));
+        assert!(text(&buffer, 8).starts_with("[oc] OpenCode"));
     }
 
     #[test]
     fn test_agent_name_is_suppressed_when_it_is_the_window_title() {
         let mut app = app_with(vec![window("Claude", "claude", "/opt/project", 5)]);
         let buffer = render(&mut app, 80, 24);
-        assert!(row(&buffer, 4).starts_with("Claude"));
-        assert_eq!(row(&buffer, 5), "[cc] /opt/project");
+        assert!(text(&buffer, 4).starts_with("Claude"));
+        assert_eq!(text(&buffer, 5), "[cc] /opt/project");
     }
 
     #[test]
@@ -924,9 +1051,9 @@ mod tests {
         assert_eq!(app.active_tab(), Tab::Windows);
 
         let buffer = render(&mut app, 80, 24);
-        assert!(row(&buffer, 4).starts_with("shell"));
-        assert_eq!(time_column(&row(&buffer, 4)), Some(76));
-        assert_eq!(row(&buffer, 5), "[w] /opt/work/aot");
+        assert!(text(&buffer, 4).starts_with("shell"));
+        assert_eq!(time_column(&row(&buffer, 4)), Some(75));
+        assert_eq!(text(&buffer, 5), "[w] /opt/work/aot");
     }
 
     #[test]
@@ -936,8 +1063,8 @@ mod tests {
         assert_eq!(app.current_tab_len(), 0);
 
         let buffer = render(&mut app, 80, 24);
-        assert_eq!(row(&buffer, 1), "Agents 0   Windows 0");
-        assert_eq!(row(&buffer, 4), "No windows");
+        assert_eq!(text(&buffer, 1), "Agents 0   Windows 0");
+        assert_eq!(text(&buffer, 4), "No windows");
     }
 
     #[test]
@@ -951,7 +1078,7 @@ mod tests {
         let buffer = render(&mut app, 30, 20);
         let title_row = row(&buffer, 4);
         assert!(title_row.contains(ELLIPSIS), "{title_row:?}");
-        assert_eq!(time_column(&title_row), Some(26));
+        assert_eq!(time_column(&title_row), Some(25));
         assert!(title_row.width() <= 30);
     }
 }

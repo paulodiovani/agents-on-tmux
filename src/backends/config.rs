@@ -30,6 +30,17 @@ pub enum AnsiColor {
     Yellow,
 }
 
+/// How the selected row is highlighted.
+#[derive(serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum Selection {
+    /// Invert the row instead of coloring it: the fallback for themes where the
+    /// chosen background is indistinguishable from the terminal's own.
+    Reversed,
+    #[serde(untagged)]
+    Background(AnsiColor),
+}
+
 /// Application configuration options
 #[derive(serde::Deserialize, Clone, Copy, Default)]
 pub struct Config {
@@ -46,7 +57,7 @@ pub struct Config {
     #[serde(default)]
     pub accent_color: Option<AnsiColor>,
     #[serde(default)]
-    pub selection_bg: Option<AnsiColor>,
+    pub selection_bg: Option<Selection>,
 }
 
 /// Possible errors when reading config file
@@ -145,7 +156,7 @@ mod tests {
             font_awesome: Some(true),
             debug: Some(true),
             accent_color: Some(AnsiColor::Red),
-            selection_bg: Some(AnsiColor::DarkGray),
+            selection_bg: Some(Selection::Background(AnsiColor::DarkGray)),
         };
         let other = Config::default();
         let merged = base.merge(other);
@@ -153,7 +164,10 @@ mod tests {
         assert_eq!(merged.font_awesome, Some(true));
         assert_eq!(merged.debug, Some(true));
         assert_eq!(merged.accent_color, Some(AnsiColor::Red));
-        assert_eq!(merged.selection_bg, Some(AnsiColor::DarkGray));
+        assert_eq!(
+            merged.selection_bg,
+            Some(Selection::Background(AnsiColor::DarkGray))
+        );
     }
 
     #[test]
@@ -173,13 +187,31 @@ mod tests {
         let config: Config =
             toml::from_str("accent_color = \"magenta\"\nselection_bg = \"dark_gray\"\n").unwrap();
         assert_eq!(config.accent_color, Some(AnsiColor::Magenta));
-        assert_eq!(config.selection_bg, Some(AnsiColor::DarkGray));
+        assert_eq!(
+            config.selection_bg,
+            Some(Selection::Background(AnsiColor::DarkGray))
+        );
     }
 
     #[test]
     fn test_parse_color_aliases() {
         let config: Config = toml::from_str("selection_bg = \"bright_black\"\n").unwrap();
-        assert_eq!(config.selection_bg, Some(AnsiColor::DarkGray));
+        assert_eq!(
+            config.selection_bg,
+            Some(Selection::Background(AnsiColor::DarkGray))
+        );
+    }
+
+    #[test]
+    fn test_parse_reversed_selection() {
+        let config: Config = toml::from_str("selection_bg = \"reversed\"\n").unwrap();
+        assert_eq!(config.selection_bg, Some(Selection::Reversed));
+    }
+
+    #[test]
+    fn test_parse_unknown_selection_returns_error() {
+        let result: Result<Config, _> = toml::from_str("selection_bg = \"inverted\"\n");
+        assert!(result.is_err());
     }
 
     #[test]
