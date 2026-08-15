@@ -116,13 +116,7 @@ fn draw_tab_bar(frame: &mut Frame, app: &App, area: Rect, theme: &Theme) {
 
 /// Renders the windows of the active tab as two-line rows.
 fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, theme: &Theme) {
-    // A blank leading row, so the selected item's top padding always has a row
-    // to live in, and the first item is not glued to the tab bar.
-    let list_area = Rect {
-        y: area.y.saturating_add(1),
-        height: area.height.saturating_sub(1),
-        ..area
-    };
+    let list_area = area;
 
     if app.current_tab_len() == 0 {
         let empty = Paragraph::new(Span::styled("No windows", theme.dim));
@@ -184,6 +178,16 @@ fn draw_selection_padding(frame: &mut Frame, bounds: Rect, first_line: u16, them
                 ..bounds
             },
         );
+    } else if first_line > 0 {
+        // The first item has no blank row above it: the tab rule sits there, so
+        // it takes the selection itself. Its ▔ glyphs leave the cell's lower part
+        // colored, which is the same half-cell of padding the blocks give.
+        let rule = Rect {
+            y: first_line - 1,
+            height: 1,
+            ..bounds
+        };
+        frame.buffer_mut().set_style(rule, theme.selection);
     }
 
     let below = first_line + 2;
@@ -327,16 +331,17 @@ fn detail_line<'a>(window: &Window, tab: Tab, styles: &RowStyles, width: usize) 
         }
     }
 
-    let path = shorten_path(
-        Path::new(&window.current_dir),
-        text_width.saturating_sub(used),
-    );
-    used += path.width();
+    // The path is right-aligned, and stops short of the notification slot so it
+    // ends on the same column as the elapsed time above it.
+    let right = text_width.saturating_sub(NOTIFICATION_SLOT);
+    let path = shorten_path(Path::new(&window.current_dir), right.saturating_sub(used));
+    let gap = right.saturating_sub(used + path.width());
+    spans.push(Span::styled(" ".repeat(gap), styles.fill));
     spans.push(Span::styled(path, styles.dim));
-
-    // Fill to the panel width, so the selection background is continuous.
-    let fill = text_width.saturating_sub(used) + PANEL_PADDING;
-    spans.push(Span::styled(" ".repeat(fill), styles.fill));
+    spans.push(Span::styled(
+        " ".repeat(NOTIFICATION_SLOT + PANEL_PADDING),
+        styles.fill,
+    ));
 
     Line::from(spans)
 }
@@ -868,19 +873,33 @@ mod tests {
     }
 
     #[test]
+    fn test_paths_are_right_aligned_with_the_elapsed_times() {
+        let mut app = agents_app();
+        let buffer = render(&mut app, 80, 24);
+
+        // Every path ends on the same column, which is where the times end too.
+        assert_eq!(path_end(&buffer, 4), path_end(&buffer, 7));
+        assert_eq!(path_end(&buffer, 7), path_end(&buffer, 10));
+        assert_eq!(
+            Some(path_end(&buffer, 4) as usize),
+            time_column(&row(&buffer, 3)).map(|column| column + 1)
+        );
+    }
+
+    #[test]
     fn test_rows_are_two_lines_with_a_blank_separator() {
         let mut app = agents_app();
         let buffer = render(&mut app, 80, 24);
 
-        // Row 3 is the blank leading row; items start at row 4 with a 3-row pitch.
-        assert!(text(&buffer, 4).starts_with("fix-auth-bug*"));
-        assert!(text(&buffer, 5).ends_with("/opt/work/Development/Rust/aot"));
-        assert!(text(&buffer, 7).starts_with("docs-review"));
-        assert!(text(&buffer, 8).ends_with("/opt/work/Development/docs"));
-        assert_eq!(text(&buffer, 9), "");
-        assert!(text(&buffer, 10).starts_with("billing-api"));
-        assert!(text(&buffer, 11).ends_with("/opt/clients/acme/billing-api"));
-        assert_eq!(text(&buffer, 12), "");
+        // Items start right under the tab rule, with a 3-row pitch.
+        assert!(text(&buffer, 3).starts_with("fix-auth-bug*"));
+        assert!(text(&buffer, 4).ends_with("/opt/work/Development/Rust/aot"));
+        assert!(text(&buffer, 6).starts_with("docs-review"));
+        assert!(text(&buffer, 7).ends_with("/opt/work/Development/docs"));
+        assert_eq!(text(&buffer, 8), "");
+        assert!(text(&buffer, 9).starts_with("billing-api"));
+        assert!(text(&buffer, 10).ends_with("/opt/clients/acme/billing-api"));
+        assert_eq!(text(&buffer, 11), "");
     }
 
     #[test]
@@ -888,11 +907,11 @@ mod tests {
         let mut app = agents_app();
         let buffer = render(&mut app, 80, 24);
         let marker_x = (PANEL_PADDING + "fix-auth-bug".width()) as u16;
-        assert_eq!(buffer[(marker_x, 4)].symbol(), "*");
-        assert_eq!(buffer[(marker_x, 4)].style().fg, Theme::default().accent.fg);
+        assert_eq!(buffer[(marker_x, 3)].symbol(), "*");
+        assert_eq!(buffer[(marker_x, 3)].style().fg, Theme::default().accent.fg);
         // Only the active window gets one.
         assert_ne!(
-            buffer[((PANEL_PADDING + "docs-review".width()) as u16, 7)].symbol(),
+            buffer[((PANEL_PADDING + "docs-review".width()) as u16, 6)].symbol(),
             "*"
         );
     }
@@ -902,22 +921,22 @@ mod tests {
         let mut app = agents_app();
         let buffer = render(&mut app, 80, 24);
 
-        let quiet = row(&buffer, 4); // no notification
-        let notifying = row(&buffer, 7); // notification pending
+        let quiet = row(&buffer, 3); // no notification
+        let notifying = row(&buffer, 6); // notification pending
         assert_eq!(time_column(&quiet), time_column(&notifying));
 
         // The marker lives in the reserved slot at the right edge, just inside the
         // panel padding, and the slot is empty (not missing) on the quiet row.
-        assert_eq!(buffer[(78, 7)].symbol(), "!");
-        assert_eq!(buffer[(78, 7)].style().fg, Theme::default().notification.fg);
+        assert_eq!(buffer[(78, 6)].symbol(), "!");
+        assert_eq!(buffer[(78, 6)].style().fg, Theme::default().notification.fg);
         assert!(
-            buffer[(78, 7)]
+            buffer[(78, 6)]
                 .style()
                 .add_modifier
                 .contains(Modifier::BOLD)
         );
-        assert_eq!(buffer[(78, 4)].symbol(), " ");
-        assert_eq!(buffer[(77, 4)].symbol(), " ");
+        assert_eq!(buffer[(78, 3)].symbol(), " ");
+        assert_eq!(buffer[(77, 3)].symbol(), " ");
     }
 
     #[test]
@@ -925,7 +944,7 @@ mod tests {
         let mut app = agents_app();
         let buffer = render(&mut app, 80, 24);
 
-        for y in [4u16, 5] {
+        for y in [3u16, 4] {
             for x in 0..80u16 {
                 assert!(
                     selection_bg(&buffer, x, y),
@@ -933,14 +952,14 @@ mod tests {
                 );
             }
         }
-        // The rows around it are padding, which paints the color as foreground.
-        for y in [3u16, 6] {
-            assert!(!selection_bg(&buffer, 0, y));
-            assert_eq!(buffer[(0, y)].style().fg, Some(Color::DarkGray));
-        }
+        // Above, the tab rule carries the selection instead of a blank row.
+        assert!(selection_bg(&buffer, 0, 2));
+        // Below, the padding paints the color as foreground.
+        assert!(!selection_bg(&buffer, 0, 5));
+        assert_eq!(buffer[(0, 5)].style().fg, Some(Color::DarkGray));
         // Nothing is inverted: reversing every span reads as harsh.
         assert!(
-            !buffer[(1, 4)]
+            !buffer[(1, 3)]
                 .style()
                 .add_modifier
                 .contains(Modifier::REVERSED)
@@ -953,40 +972,40 @@ mod tests {
         let buffer = render(&mut app, 80, 24);
 
         // Same column on both rows: the elapsed time, which is dim when idle.
-        let time = time_column(&row(&buffer, 4)).unwrap() as u16;
+        let time = time_column(&row(&buffer, 3)).unwrap() as u16;
         assert!(
-            !buffer[(time, 4)]
+            !buffer[(time, 3)]
                 .style()
                 .add_modifier
                 .contains(Modifier::DIM)
         );
         assert!(
-            buffer[(time, 7)]
+            buffer[(time, 6)]
                 .style()
                 .add_modifier
                 .contains(Modifier::DIM)
         );
 
         // And the last column of the path on the second line of each row.
-        let selected_path = path_end(&buffer, 5);
-        let other_path = path_end(&buffer, 8);
+        let selected_path = path_end(&buffer, 4);
+        let other_path = path_end(&buffer, 7);
         assert!(
-            !buffer[(selected_path, 5)]
+            !buffer[(selected_path, 4)]
                 .style()
                 .add_modifier
                 .contains(Modifier::DIM)
         );
         assert!(
-            buffer[(other_path, 8)]
+            buffer[(other_path, 7)]
                 .style()
                 .add_modifier
                 .contains(Modifier::DIM)
         );
 
         // The title keeps its weight, the accent marker its color.
-        assert!(buffer[(1, 4)].style().add_modifier.contains(Modifier::BOLD));
+        assert!(buffer[(1, 3)].style().add_modifier.contains(Modifier::BOLD));
         let marker = (PANEL_PADDING + "fix-auth-bug".width()) as u16;
-        assert_eq!(buffer[(marker, 4)].style().fg, Theme::default().accent.fg);
+        assert_eq!(buffer[(marker, 3)].style().fg, Theme::default().accent.fg);
     }
 
     #[test]
@@ -994,13 +1013,19 @@ mod tests {
         let mut app = agents_app();
         let buffer = render(&mut app, 80, 24);
 
-        assert_eq!(row(&buffer, 3), HALF_BLOCK_LOWER.repeat(80));
-        assert_eq!(row(&buffer, 6), HALF_BLOCK_UPPER.repeat(80));
-        // Selection color as foreground, over the terminal's own background.
-        for y in [3u16, 6] {
-            assert_eq!(buffer[(0, y)].style().fg, Some(Color::DarkGray));
-            assert_eq!(buffer[(0, y)].style().bg, Some(Color::Reset));
-        }
+        // The first item has no blank row above it: the tab rule takes the
+        // selection, its glyphs leaving the lower part of the cells colored.
+        assert_eq!(row(&buffer, 2), TAB_RULE.repeat(80));
+        assert!(selection_bg(&buffer, 0, 2));
+        // Tinting the rule keeps it a rule: the accent segment survives.
+        assert_eq!(buffer[(1, 2)].style().fg, Theme::default().accent.fg);
+        assert!(selection_bg(&buffer, 1, 2));
+
+        // Below, a half block in the selection color over the terminal's own
+        // background.
+        assert_eq!(row(&buffer, 5), HALF_BLOCK_UPPER.repeat(80));
+        assert_eq!(buffer[(0, 5)].style().fg, Some(Color::DarkGray));
+        assert_eq!(buffer[(0, 5)].style().bg, Some(Color::Reset));
     }
 
     #[test]
@@ -1011,17 +1036,20 @@ mod tests {
         let after = render(&mut app, 80, 24);
 
         // Same rows, same titles: only the highlight moved.
-        for y in [4u16, 7, 10] {
+        for y in [3u16, 6, 9] {
             assert_eq!(
                 row(&before, y).trim_start_matches(HALF_BLOCK_LOWER),
                 row(&after, y).trim_start_matches(HALF_BLOCK_LOWER),
                 "row {y} moved"
             );
         }
-        assert!(selection_bg(&after, 0, 7));
-        assert!(!selection_bg(&after, 0, 4));
-        assert_eq!(row(&after, 6), HALF_BLOCK_LOWER.repeat(80));
-        assert_eq!(row(&after, 9), HALF_BLOCK_UPPER.repeat(80));
+        assert!(selection_bg(&after, 0, 6));
+        assert!(!selection_bg(&after, 0, 3));
+        assert_eq!(row(&after, 5), HALF_BLOCK_LOWER.repeat(80));
+        assert_eq!(row(&after, 8), HALF_BLOCK_UPPER.repeat(80));
+        // The tab rule is only tinted while the first item is selected.
+        assert!(selection_bg(&before, 0, 2));
+        assert!(!selection_bg(&after, 0, 2));
     }
 
     #[test]
@@ -1030,17 +1058,17 @@ mod tests {
         let buffer = render(&mut app, 30, 20);
 
         assert_eq!(text(&buffer, 1), "Agents (3)   Windows (0)");
-        assert!(text(&buffer, 4).starts_with("fix-auth-bug*"));
-        assert_eq!(time_column(&row(&buffer, 4)), Some(25));
-        assert_eq!(row(&buffer, 6), HALF_BLOCK_UPPER.repeat(30));
-        assert!(text(&buffer, 7).starts_with("docs-review"));
+        assert!(text(&buffer, 3).starts_with("fix-auth-bug*"));
+        assert_eq!(time_column(&row(&buffer, 3)), Some(25));
+        assert_eq!(row(&buffer, 5), HALF_BLOCK_UPPER.repeat(30));
+        assert!(text(&buffer, 6).starts_with("docs-review"));
         // Only the path adapts: it is shortened to what is left.
         assert!(
-            text(&buffer, 5).ends_with("/o/w/D/R/aot"),
+            text(&buffer, 4).ends_with("/o/w/D/R/aot"),
             "{:?}",
-            text(&buffer, 5)
+            text(&buffer, 4)
         );
-        assert!(row(&buffer, 5).width() <= 30);
+        assert!(row(&buffer, 4).width() <= 30);
     }
 
     #[test]
@@ -1049,11 +1077,11 @@ mod tests {
         let buffer = render(&mut app, 40, 12);
 
         assert_eq!(text(&buffer, 1), "Agents (3)   Windows (0)");
-        assert!(text(&buffer, 4).starts_with("fix-auth-bug*"));
-        assert_eq!(time_column(&row(&buffer, 4)), Some(35));
-        assert_eq!(row(&buffer, 6), HALF_BLOCK_UPPER.repeat(40));
-        assert!(text(&buffer, 7).starts_with("docs-review"));
-        assert!(text(&buffer, 8).ends_with("/o/w/D/docs"));
+        assert!(text(&buffer, 3).starts_with("fix-auth-bug*"));
+        assert_eq!(time_column(&row(&buffer, 3)), Some(35));
+        assert_eq!(row(&buffer, 5), HALF_BLOCK_UPPER.repeat(40));
+        assert!(text(&buffer, 6).starts_with("docs-review"));
+        assert!(text(&buffer, 7).ends_with("/o/w/D/docs"));
     }
 
     #[test]
@@ -1061,16 +1089,17 @@ mod tests {
         let mut app = agents_app();
         let buffer = render(&mut app, 80, 24);
         // Without icon fonts the agent shows its text tag, then its name.
-        assert!(text(&buffer, 5).starts_with("[cc] Claude"));
-        assert!(text(&buffer, 8).starts_with("[oc] OpenCode"));
+        assert!(text(&buffer, 4).starts_with("[cc] Claude"));
+        assert!(text(&buffer, 7).starts_with("[oc] OpenCode"));
     }
 
     #[test]
     fn test_agent_name_is_suppressed_when_it_is_the_window_title() {
         let mut app = app_with(vec![window("Claude", "claude", "/opt/project", 5)]);
         let buffer = render(&mut app, 80, 24);
-        assert!(text(&buffer, 4).starts_with("Claude"));
-        assert_eq!(text(&buffer, 5), "[cc] /opt/project");
+        assert!(text(&buffer, 3).starts_with("Claude"));
+        assert!(text(&buffer, 4).starts_with("[cc]"));
+        assert!(text(&buffer, 4).ends_with("/opt/project"));
     }
 
     #[test]
@@ -1079,9 +1108,10 @@ mod tests {
         assert_eq!(app.active_tab(), Tab::Windows);
 
         let buffer = render(&mut app, 80, 24);
-        assert!(text(&buffer, 4).starts_with("shell"));
-        assert_eq!(time_column(&row(&buffer, 4)), Some(75));
-        assert_eq!(text(&buffer, 5), "[w] /opt/work/aot");
+        assert!(text(&buffer, 3).starts_with("shell"));
+        assert_eq!(time_column(&row(&buffer, 3)), Some(75));
+        assert!(text(&buffer, 4).starts_with("[w]"));
+        assert!(text(&buffer, 4).ends_with("/opt/work/aot"));
     }
 
     #[test]
@@ -1092,7 +1122,7 @@ mod tests {
 
         let buffer = render(&mut app, 80, 24);
         assert_eq!(text(&buffer, 1), "Agents (0)   Windows (0)");
-        assert_eq!(text(&buffer, 4), "No windows");
+        assert_eq!(text(&buffer, 3), "No windows");
     }
 
     #[test]
@@ -1104,7 +1134,7 @@ mod tests {
             5,
         )]);
         let buffer = render(&mut app, 30, 20);
-        let title_row = row(&buffer, 4);
+        let title_row = row(&buffer, 3);
         assert!(title_row.contains(ELLIPSIS), "{title_row:?}");
         assert_eq!(time_column(&title_row), Some(25));
         assert!(title_row.width() <= 30);
