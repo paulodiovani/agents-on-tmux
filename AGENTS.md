@@ -31,11 +31,16 @@ Two top-level modules under `src/`:
   - `CommandExecutor` trait abstracts tmux command execution (real `ShellCommandExecutor` + mock for tests)
   - `Window` struct represents tmux window state (id, name, running_command, started_at, notification_pending, is_active, current_dir)
   - `TmuxError` enum for error handling
+  - `agents.rs` identifies agents by name and command only; how they are drawn is
+    the frontend's business
   - Backend is fully wired and tested
 
-- `frontends/` — terminal UI (`tui/` with app, event, path, theme, ui)
+- `frontends/` — terminal UI (`tui/` with app, event, icons, path, theme, ui)
   - `App` manages TUI state and user actions
   - `key_to_action` maps keyboard input to `Action` enum
+  - `icons.rs` owns the `Icon` type and every glyph the UI draws, with the
+    Nerd Font / Font Awesome / plain-text precedence. Agent icons are keyed by the
+    agent's command; a test keeps that table in sync with the agent registry
   - `Theme` defines visual styles, limited to the terminal's own 16-color palette
     plus bold/dim attributes — never `Color::Rgb`/`Color::Indexed`, so the UI
     follows the user's terminal theme

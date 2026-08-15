@@ -8,10 +8,11 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem, Paragraph};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use crate::backends::agents::{Agent, is_agent, notification_icon, window_icon};
+use crate::backends::agents::{Agent, is_agent};
 use crate::backends::tmux::{SESSION_NAME, Window};
 use crate::frontends::tui::app::App;
 use crate::frontends::tui::event::{PendingAction, Tab};
+use crate::frontends::tui::icons::{agent_icon, notification_icon, window_icon};
 use crate::frontends::tui::path::shorten_path;
 use crate::frontends::tui::theme::Theme;
 
@@ -309,7 +310,7 @@ fn detail_line<'a>(window: &Window, tab: Tab, styles: &RowStyles, width: usize) 
     match tab {
         Tab::Agents => {
             if let Some(agent) = is_agent(&window.running_command) {
-                let icon = agent.icon().to_string();
+                let icon = agent_icon(agent.command()).to_string();
                 if !icon.is_empty() {
                     used += icon.width() + 1;
                     spans.push(Span::styled(format!("{icon} "), styles.normal));
