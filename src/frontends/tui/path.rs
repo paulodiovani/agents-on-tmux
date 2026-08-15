@@ -4,88 +4,78 @@ use unicode_width::UnicodeWidthStr;
 
 const ELLIPSIS: &str = "\u{2026}"; // …
 
-/// Splits a path into joinable parts. The first part is `~` when the path lives
-/// under `home`, an empty string for an absolute path (so joining with `/` yields
-/// the leading slash), or the first component of a relative path.
+/// Splits a path into joinable parts, the first being `~` under `home` or an empty
+/// string when absolute, so that joining with `/` restores the leading slash.
 fn to_parts(path: &Path, home: Option<&Path>) -> Vec<String> {
-    let relative_to_home = home
+    let under_home = home
         .filter(|home| !home.as_os_str().is_empty())
         .and_then(|home| path.strip_prefix(home).ok());
 
-    let mut parts: Vec<String> = Vec::new();
-    match relative_to_home {
-        Some(rest) => {
-            parts.push("~".to_string());
-            parts.extend(components(rest));
-        }
-        None => {
-            if path.is_absolute() {
-                parts.push(String::new());
-            }
-            parts.extend(components(path));
-        }
-    }
+    let root = match (under_home.is_some(), path.is_absolute()) {
+        (true, _) => Some("~".to_string()),
+        (false, true) => Some(String::new()),
+        (false, false) => None,
+    };
+    let named = under_home
+        .unwrap_or(path)
+        .components()
+        .filter_map(|component| match component {
+            Component::Normal(name) => Some(name.to_string_lossy().into_owned()),
+            Component::ParentDir => Some("..".to_string()),
+            Component::CurDir | Component::RootDir | Component::Prefix(_) => None,
+        });
 
+    let mut parts: Vec<String> = root.into_iter().chain(named).collect();
     if parts.is_empty() {
         parts.push(path.to_string_lossy().into_owned());
     }
     // The filesystem root has no components of its own.
-    if path.is_absolute() && parts.len() == 1 && parts[0].is_empty() {
+    if path.is_absolute() && parts == [""] {
         parts[0] = "/".to_string();
     }
     parts
 }
 
-/// Returns the named components of a path, dropping the root and `.` segments.
-fn components(path: &Path) -> Vec<String> {
-    path.components()
-        .filter_map(|component| match component {
-            Component::Normal(name) => Some(name.to_string_lossy().into_owned()),
-            Component::ParentDir => Some("..".to_string()),
-            Component::CurDir | Component::RootDir | Component::Prefix(_) => None,
-        })
-        .collect()
-}
-
 /// Collapses a component to its first character, fish style. Dotfiles keep the
 /// dot plus the following character, so `.config` becomes `.c`.
 fn initial(part: &str) -> String {
-    let mut chars = part.chars();
-    match chars.next() {
-        Some('.') => match chars.next() {
-            Some(next) => format!(".{next}"),
-            None => ".".to_string(),
-        },
-        Some(first) => first.to_string(),
-        None => String::new(),
-    }
+    let keep = if part.starts_with('.') { 2 } else { 1 };
+    part.chars().take(keep).collect()
 }
 
 /// Collapses every ancestor to its initial, keeping the last component whole.
 fn abbreviate(parts: &[String]) -> Vec<String> {
-    let last = parts.len() - 1;
+    let leaf = parts.len() - 1;
     parts
         .iter()
         .enumerate()
-        .map(|(index, part)| {
-            if index == last || part == "~" || part == ".." || part == "/" || part.is_empty() {
-                part.clone()
-            } else {
-                initial(part)
-            }
+        .map(|(index, part)| match index {
+            index if index == leaf => part.clone(),
+            _ => initial(part),
         })
         .collect()
 }
 
-fn join(parts: &[String]) -> String {
-    match parts {
-        [only] => only.clone(),
-        _ => parts.join("/"),
-    }
-}
+/// The path written progressively shorter, widest first, down to the last component
+/// on its own. Never empty, and the last component is never cut.
+fn candidates(path: &Path, home: Option<&Path>) -> Vec<String> {
+    let parts = to_parts(path, home);
+    let abbreviated = abbreviate(&parts);
+    let leaf = abbreviated.len() - 1;
 
-fn fits(text: &str, max_cols: usize) -> bool {
-    text.width() <= max_cols
+    let mut candidates = vec![
+        path.to_string_lossy().into_owned(),
+        parts.join("/"),
+        abbreviated.join("/"),
+    ];
+    candidates.extend((0..leaf).rev().map(|kept| {
+        let mut shortened = abbreviated[..kept].to_vec();
+        shortened.push(ELLIPSIS.to_string());
+        shortened.push(abbreviated[leaf].clone());
+        shortened.join("/")
+    }));
+    candidates.push(abbreviated[leaf].clone());
+    candidates
 }
 
 fn shorten_path_with_home(path: &Path, home: Option<&Path>, max_cols: usize) -> String {
@@ -93,40 +83,17 @@ fn shorten_path_with_home(path: &Path, home: Option<&Path>, max_cols: usize) -> 
         return String::new();
     }
 
-    let full = path.to_string_lossy().into_owned();
-    if fits(&full, max_cols) {
-        return full;
-    }
-
-    let parts = to_parts(path, home);
-    let with_tilde = join(&parts);
-    if fits(&with_tilde, max_cols) {
-        return with_tilde;
-    }
-
-    let abbreviated = abbreviate(&parts);
-    let short = join(&abbreviated);
-    if fits(&short, max_cols) {
-        return short;
-    }
-
-    let last = abbreviated.len() - 1;
-    for kept in (0..last).rev() {
-        let mut candidate: Vec<String> = abbreviated[..kept].to_vec();
-        candidate.push(ELLIPSIS.to_string());
-        candidate.push(abbreviated[last].clone());
-        let text = join(&candidate);
-        if fits(&text, max_cols) {
-            return text;
-        }
-    }
-
-    abbreviated[last].clone()
+    let candidates = candidates(path, home);
+    candidates
+        .iter()
+        .find(|candidate| candidate.width() <= max_cols)
+        .or_else(|| candidates.last())
+        .cloned()
+        .unwrap_or_default()
 }
 
-/// Shortens a directory path to at most `max_cols` display columns, trying, in
-/// order: the full path, `~` for the home directory, fish-style abbreviated
-/// ancestors, and finally a middle ellipsis. The last component is never cut.
+/// Shortens a directory path to at most `max_cols` display columns: `~`, then
+/// fish-style ancestors, then a middle ellipsis. The last component is never cut.
 pub fn shorten_path(path: &Path, max_cols: usize) -> String {
     shorten_path_with_home(path, dirs::home_dir().as_deref(), max_cols)
 }

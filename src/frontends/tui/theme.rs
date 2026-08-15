@@ -6,9 +6,8 @@ const ACCENT: Color = Color::Blue;
 /// renders as a shade of its background.
 const SELECTION: Color = Color::DarkGray;
 
-/// Visual theme for the TUI, expressed with the terminal's own palette (named ANSI
-/// colors) and attributes only, so it follows the user's terminal theme. Three
-/// tiers carry the hierarchy: `title` (bold) > `normal` > `dim`.
+/// Visual theme for the TUI, using the terminal's own palette and attributes only.
+/// Three tiers carry the hierarchy: `title` (bold) > `normal` > `dim`.
 pub struct Theme {
     pub accent: Style,
     pub dim: Style,

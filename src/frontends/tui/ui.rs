@@ -112,9 +112,8 @@ fn draw_tab_bar(frame: &mut Frame, app: &App, area: Rect, theme: &Theme) {
     frame.render_widget(Paragraph::new(Line::from(rule)), rows[1]);
 }
 
-/// Renders the windows of the active tab as two-line rows. The selection is built
-/// into each row's spans, not applied with `highlight_style`, which can only add
-/// modifiers and so cannot drop the DIM the dim tier carries.
+/// Renders the windows of the active tab as two-line rows. The selection lives in
+/// each row's spans, as `highlight_style` cannot drop the dim tier's DIM.
 fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, theme: &Theme) {
     let list_area = area;
 
@@ -156,9 +155,8 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, theme: &Theme) {
     }
 }
 
-/// Pads the selected block with half a cell above and below, by drawing half blocks
-/// in the selection color on the blank rows around it. The first item has no blank
-/// row above, so the tab rule takes the selection instead.
+/// Pads the selected block with half a cell above and below. The first item has no
+/// blank row above it, so the tab rule takes the selection instead.
 fn draw_selection_padding(frame: &mut Frame, bounds: Rect, first_line: u16, theme: &Theme) {
     let width = bounds.width as usize;
     let bottom = bounds.y + bounds.height;
@@ -630,9 +628,8 @@ mod tests {
         }
     }
 
-    /// Three agent windows, the first one active, the second one notifying.
-    /// The directories deliberately sit outside any home directory, so the
-    /// rendering does not depend on whoever runs the tests.
+    /// Three agent windows, the first active, the second notifying. The directories
+    /// sit outside any home, so rendering does not depend on who runs the tests.
     fn agents_app() -> App {
         let mut windows = vec![
             window(
@@ -654,9 +651,8 @@ mod tests {
         App::new(Box::new(driver), Box::new(MockTmux::with_windows(windows))).unwrap()
     }
 
-    /// The column holding the last digit of the elapsed time, which is the
-    /// right-most text before the reserved notification slot. App::refresh_windows
-    /// stamps its own start times, so tests assert on placement, never on duration.
+    /// Column of the elapsed time's last digit. Start times are re-stamped on refresh,
+    /// so tests assert on placement, never on duration.
     fn time_column(row: &str) -> Option<usize> {
         row.chars()
             .enumerate()
