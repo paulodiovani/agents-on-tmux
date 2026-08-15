@@ -77,24 +77,24 @@ fn draw_tab_bar(frame: &mut Frame, app: &App, area: Rect, theme: &Theme) {
         }
 
         let title = tab.title();
-        let count = count_windows_for_tab(app, *tab).to_string();
+        let count = format!("({})", count_windows_for_tab(app, *tab));
         let is_active = app.active_tab() == *tab;
+        // The count belongs to its label: it is emphasized and underlined with it.
+        let label_width = title.width() + 1 + count.width();
         if is_active {
             accent_start = cursor;
-            accent_width = title.width();
+            accent_width = label_width;
         }
 
-        labels.push(Span::styled(
-            title,
-            if is_active {
-                theme.tab_active
-            } else {
-                theme.dim
-            },
-        ));
+        let style = if is_active {
+            theme.tab_active
+        } else {
+            theme.dim
+        };
+        labels.push(Span::styled(title, style));
         labels.push(Span::raw(" "));
-        cursor += title.width() + 1 + count.width();
-        labels.push(Span::styled(count, theme.dim));
+        labels.push(Span::styled(count, style));
+        cursor += label_width;
     }
 
     // The labels are inset, the rule is not: it spans the whole width, with its
@@ -797,7 +797,7 @@ mod tests {
         let mut app = agents_app();
         let buffer = render(&mut app, 80, 24);
         assert_eq!(text(&buffer, 0), "agents-on-tmux");
-        assert_eq!(text(&buffer, 1), "Agents 3   Windows 0");
+        assert_eq!(text(&buffer, 1), "Agents (3)   Windows (0)");
     }
 
     #[test]
@@ -806,16 +806,44 @@ mod tests {
         let buffer = render(&mut app, 80, 24);
 
         let accent = Theme::default().accent.fg;
-        // "Agents" is six columns wide and starts after the panel padding.
-        for x in 1..7 {
-            assert_eq!(buffer[(x, 2)].symbol(), TAB_RULE);
-            assert_eq!(buffer[(x, 2)].style().fg, accent, "column {x}");
+        // The accent covers the label and its count, after the panel padding.
+        let end = PANEL_PADDING + "Agents (3)".width();
+        for x in PANEL_PADDING..end {
+            assert_eq!(buffer[(x as u16, 2)].symbol(), TAB_RULE);
+            assert_eq!(buffer[(x as u16, 2)].style().fg, accent, "column {x}");
         }
-        for x in (0..1).chain(7..80) {
-            assert_ne!(buffer[(x, 2)].style().fg, accent, "column {x}");
+        for x in (0..PANEL_PADDING).chain(end..80) {
+            assert_ne!(buffer[(x as u16, 2)].style().fg, accent, "column {x}");
         }
         // The rule spans the whole width, dim outside the accent segment.
         assert_eq!(buffer[(79, 2)].symbol(), TAB_RULE);
+    }
+
+    #[test]
+    fn test_tab_count_is_emphasized_with_its_label() {
+        let mut app = agents_app();
+        let buffer = render(&mut app, 80, 24);
+
+        // The active label and its count share the same weight...
+        let active_count = (PANEL_PADDING + "Agents (".width()) as u16;
+        assert_eq!(buffer[(active_count, 1)].symbol(), "3");
+        assert!(
+            buffer[(active_count, 1)]
+                .style()
+                .add_modifier
+                .contains(Modifier::BOLD)
+        );
+
+        // ...and the inactive one stays dim with its label.
+        let idle_count =
+            (PANEL_PADDING + "Agents (3)".width() + TAB_GAP.width() + "Windows (".width()) as u16;
+        assert_eq!(buffer[(idle_count, 1)].symbol(), "0");
+        assert!(
+            buffer[(idle_count, 1)]
+                .style()
+                .add_modifier
+                .contains(Modifier::DIM)
+        );
     }
 
     #[test]
@@ -829,12 +857,12 @@ mod tests {
         let buffer = render(&mut app, 80, 24);
         let accent = Theme::default().accent.fg;
 
-        // Windows starts after the padding, "Agents 3", and the gap.
-        let start = PANEL_PADDING + "Agents 3".width() + TAB_GAP.width();
+        // Windows starts after the padding, "Agents (3)", and the gap.
+        let start = PANEL_PADDING + "Agents (3)".width() + TAB_GAP.width();
         for x in 0..start {
             assert_ne!(buffer[(x as u16, 2)].style().fg, accent, "column {x}");
         }
-        for x in start..start + "Windows".width() {
+        for x in start..start + "Windows (1)".width() {
             assert_eq!(buffer[(x as u16, 2)].style().fg, accent, "column {x}");
         }
     }
@@ -1001,7 +1029,7 @@ mod tests {
         let mut app = agents_app();
         let buffer = render(&mut app, 30, 20);
 
-        assert_eq!(text(&buffer, 1), "Agents 3   Windows 0");
+        assert_eq!(text(&buffer, 1), "Agents (3)   Windows (0)");
         assert!(text(&buffer, 4).starts_with("fix-auth-bug*"));
         assert_eq!(time_column(&row(&buffer, 4)), Some(25));
         assert_eq!(row(&buffer, 6), HALF_BLOCK_UPPER.repeat(30));
@@ -1020,7 +1048,7 @@ mod tests {
         let mut app = agents_app();
         let buffer = render(&mut app, 40, 12);
 
-        assert_eq!(text(&buffer, 1), "Agents 3   Windows 0");
+        assert_eq!(text(&buffer, 1), "Agents (3)   Windows (0)");
         assert!(text(&buffer, 4).starts_with("fix-auth-bug*"));
         assert_eq!(time_column(&row(&buffer, 4)), Some(35));
         assert_eq!(row(&buffer, 6), HALF_BLOCK_UPPER.repeat(40));
@@ -1063,7 +1091,7 @@ mod tests {
         assert_eq!(app.current_tab_len(), 0);
 
         let buffer = render(&mut app, 80, 24);
-        assert_eq!(text(&buffer, 1), "Agents 0   Windows 0");
+        assert_eq!(text(&buffer, 1), "Agents (0)   Windows (0)");
         assert_eq!(text(&buffer, 4), "No windows");
     }
 
