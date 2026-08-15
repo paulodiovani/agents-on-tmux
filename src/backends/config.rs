@@ -1,46 +1,3 @@
-/// The 16 colors of the terminal's own palette, the only ones aot ever names.
-/// Colors are never chosen absolutely: the terminal theme decides what each slot
-/// looks like, so aot recolors itself when the user changes the theme.
-#[derive(serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum AnsiColor {
-    Black,
-    Blue,
-    Cyan,
-    #[serde(alias = "bright_black")]
-    DarkGray,
-    Gray,
-    Green,
-    #[serde(alias = "bright_blue")]
-    LightBlue,
-    #[serde(alias = "bright_cyan")]
-    LightCyan,
-    #[serde(alias = "bright_green")]
-    LightGreen,
-    #[serde(alias = "bright_magenta")]
-    LightMagenta,
-    #[serde(alias = "bright_red")]
-    LightRed,
-    #[serde(alias = "bright_yellow")]
-    LightYellow,
-    Magenta,
-    Red,
-    #[serde(alias = "bright_white")]
-    White,
-    Yellow,
-}
-
-/// How the selected row is highlighted.
-#[derive(serde::Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum Selection {
-    /// Invert the row instead of coloring it: the fallback for themes where the
-    /// chosen background is indistinguishable from the terminal's own.
-    Reversed,
-    #[serde(untagged)]
-    Background(AnsiColor),
-}
-
 /// Application configuration options
 #[derive(serde::Deserialize, Clone, Copy, Default)]
 pub struct Config {
@@ -54,10 +11,6 @@ pub struct Config {
     pub font_awesome: Option<bool>,
     #[serde(default)]
     pub debug: Option<bool>,
-    #[serde(default)]
-    pub accent_color: Option<AnsiColor>,
-    #[serde(default)]
-    pub selection_bg: Option<Selection>,
 }
 
 /// Possible errors when reading config file
@@ -96,8 +49,6 @@ impl Config {
             nerd_font: other.nerd_font.or(self.nerd_font),
             font_awesome: other.font_awesome.or(self.font_awesome),
             debug: other.debug.or(self.debug),
-            accent_color: other.accent_color.or(self.accent_color),
-            selection_bg: other.selection_bg.or(self.selection_bg),
         }
     }
 }
@@ -114,8 +65,6 @@ mod tests {
         assert_eq!(config.nerd_font, None);
         assert_eq!(config.font_awesome, None);
         assert_eq!(config.debug, None);
-        assert_eq!(config.accent_color, None);
-        assert_eq!(config.selection_bg, None);
     }
 
     #[test]
@@ -126,8 +75,6 @@ mod tests {
             no_tui: None,
             font_awesome: None,
             debug: Some(false),
-            accent_color: Some(AnsiColor::Blue),
-            selection_bg: None,
         };
         let other = Config {
             tui: Some(true),
@@ -135,8 +82,6 @@ mod tests {
             no_tui: None,
             font_awesome: None,
             debug: Some(true),
-            accent_color: Some(AnsiColor::Magenta),
-            selection_bg: None,
         };
         let merged = base.merge(other);
         assert_eq!(merged.tui, Some(true));
@@ -144,7 +89,6 @@ mod tests {
         assert_eq!(merged.no_tui, None);
         assert_eq!(merged.font_awesome, None);
         assert_eq!(merged.debug, Some(true));
-        assert_eq!(merged.accent_color, Some(AnsiColor::Magenta));
     }
 
     #[test]
@@ -155,19 +99,12 @@ mod tests {
             nerd_font: Some(true),
             font_awesome: Some(true),
             debug: Some(true),
-            accent_color: Some(AnsiColor::Red),
-            selection_bg: Some(Selection::Background(AnsiColor::DarkGray)),
         };
         let other = Config::default();
         let merged = base.merge(other);
         assert_eq!(merged.nerd_font, Some(true));
         assert_eq!(merged.font_awesome, Some(true));
         assert_eq!(merged.debug, Some(true));
-        assert_eq!(merged.accent_color, Some(AnsiColor::Red));
-        assert_eq!(
-            merged.selection_bg,
-            Some(Selection::Background(AnsiColor::DarkGray))
-        );
     }
 
     #[test]
@@ -178,46 +115,6 @@ mod tests {
         assert_eq!(merged.nerd_font, None);
         assert_eq!(merged.font_awesome, None);
         assert_eq!(merged.debug, None);
-        assert_eq!(merged.accent_color, None);
-        assert_eq!(merged.selection_bg, None);
-    }
-
-    #[test]
-    fn test_parse_colors_from_toml() {
-        let config: Config =
-            toml::from_str("accent_color = \"magenta\"\nselection_bg = \"dark_gray\"\n").unwrap();
-        assert_eq!(config.accent_color, Some(AnsiColor::Magenta));
-        assert_eq!(
-            config.selection_bg,
-            Some(Selection::Background(AnsiColor::DarkGray))
-        );
-    }
-
-    #[test]
-    fn test_parse_color_aliases() {
-        let config: Config = toml::from_str("selection_bg = \"bright_black\"\n").unwrap();
-        assert_eq!(
-            config.selection_bg,
-            Some(Selection::Background(AnsiColor::DarkGray))
-        );
-    }
-
-    #[test]
-    fn test_parse_reversed_selection() {
-        let config: Config = toml::from_str("selection_bg = \"reversed\"\n").unwrap();
-        assert_eq!(config.selection_bg, Some(Selection::Reversed));
-    }
-
-    #[test]
-    fn test_parse_unknown_selection_returns_error() {
-        let result: Result<Config, _> = toml::from_str("selection_bg = \"inverted\"\n");
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn test_parse_unknown_color_returns_error() {
-        let result: Result<Config, _> = toml::from_str("accent_color = \"#ff8800\"\n");
-        assert!(result.is_err());
     }
 
     #[test]
@@ -234,8 +131,6 @@ mod tests {
         assert_eq!(config.no_tui, None);
         assert_eq!(config.font_awesome, None);
         assert_eq!(config.debug, Some(true));
-        assert_eq!(config.accent_color, None);
-        assert_eq!(config.selection_bg, None);
 
         std::fs::remove_dir_all(&dir).unwrap();
     }

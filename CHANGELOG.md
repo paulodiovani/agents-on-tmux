@@ -7,10 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-- `accent_color` and `selection_bg` config options, taking a terminal color name
-  (`selection_bg` also accepts `"reversed"`)
-
 ### Changed
 - Redesigned the window list: borderless two-line rows (title with the active-window
   marker and elapsed time, then agent icon, agent name, and directory) with the
