@@ -1,47 +1,46 @@
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::symbols;
 
-/// Visual theme configuration for the TUI.
+/// Accent slot: the active-window marker and the tab underline.
+const ACCENT: Color = Color::Blue;
+/// Selection background: the terminal's own bright black, which every theme
+/// renders as a shade of its background.
+const SELECTION: Color = Color::DarkGray;
+
+/// Visual theme for the TUI, using the terminal's own palette and attributes only.
+/// Three tiers carry the hierarchy: `title` (bold) > `normal` > `dim`.
 pub struct Theme {
-    pub card_border: Style,
-    pub card_border_notification: Style,
-    pub card_border_selected: Style,
-    pub card_detail: Style,
-    pub card_title: Style,
-    pub footer_key_style: Style,
-    pub footer_style: Style,
-    pub header_style: Style,
-    pub selected_border_set: symbols::border::Set,
-    pub tab_highlight_style: Style,
-    pub tab_style: Style,
+    pub accent: Style,
+    pub dim: Style,
+    pub footer_key: Style,
+    pub header: Style,
+    pub normal: Style,
+    pub notification: Style,
+    pub selection: Style,
+    /// The half-block rows padding the selection: its color as foreground, over the
+    /// terminal's own background.
+    pub selection_pad: Style,
+    pub tab_active: Style,
+    pub title: Style,
 }
 
 impl Default for Theme {
     fn default() -> Self {
         Self {
-            card_border: Style::default().fg(Color::DarkGray),
-            card_border_notification: Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-            card_border_selected: Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-            card_detail: Style::default().fg(Color::DarkGray),
-            card_title: Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-            footer_key_style: Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-            footer_style: Style::default().fg(Color::DarkGray),
-            header_style: Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-            selected_border_set: symbols::border::DOUBLE,
-            tab_highlight_style: Style::default()
-                .fg(Color::White)
-                .add_modifier(Modifier::BOLD),
-            tab_style: Style::default().fg(Color::DarkGray),
+            accent: Style::default().fg(ACCENT),
+            dim: Style::default().add_modifier(Modifier::DIM),
+            footer_key: Style::default().add_modifier(Modifier::BOLD),
+            header: Style::default().add_modifier(Modifier::BOLD),
+            normal: Style::default(),
+            notification: Style::default().fg(Color::Yellow),
+            selection: Style::default().bg(SELECTION),
+            // Drawn over a row the selection already styled, so it has to clear
+            // what was left there.
+            selection_pad: Style::default()
+                .fg(SELECTION)
+                .bg(Color::Reset)
+                .remove_modifier(Modifier::all()),
+            tab_active: Style::default().add_modifier(Modifier::BOLD),
+            title: Style::default().add_modifier(Modifier::BOLD),
         }
     }
 }
@@ -50,19 +49,68 @@ impl Default for Theme {
 mod tests {
     use super::*;
 
+    fn styles(theme: &Theme) -> Vec<Style> {
+        vec![
+            theme.accent,
+            theme.dim,
+            theme.footer_key,
+            theme.header,
+            theme.normal,
+            theme.notification,
+            theme.selection,
+            theme.selection_pad,
+            theme.tab_active,
+            theme.title,
+        ]
+    }
+
     #[test]
-    fn test_default_theme() {
+    fn test_theme_tiers() {
         let theme = Theme::default();
-        assert_eq!(theme.header_style.fg, Some(Color::White));
-        assert_eq!(theme.tab_style.fg, Some(Color::DarkGray));
-        assert_eq!(theme.tab_highlight_style.fg, Some(Color::White));
-        assert_eq!(theme.footer_style.fg, Some(Color::DarkGray));
-        assert_eq!(theme.footer_key_style.fg, Some(Color::White));
-        assert_eq!(theme.card_border.fg, Some(Color::DarkGray));
-        assert_eq!(theme.card_border_selected.fg, Some(Color::White));
-        assert_eq!(theme.card_border_notification.fg, Some(Color::White));
-        assert_eq!(theme.selected_border_set, symbols::border::DOUBLE);
-        assert_eq!(theme.card_title.fg, Some(Color::White));
-        assert_eq!(theme.card_detail.fg, Some(Color::DarkGray));
+        assert!(theme.title.add_modifier.contains(Modifier::BOLD));
+        assert_eq!(theme.title.fg, None);
+        assert_eq!(theme.normal, Style::default());
+        assert!(theme.dim.add_modifier.contains(Modifier::DIM));
+        assert_eq!(theme.dim.fg, None);
+        assert!(theme.header.add_modifier.contains(Modifier::BOLD));
+        assert!(theme.footer_key.add_modifier.contains(Modifier::BOLD));
+        assert!(theme.tab_active.add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn test_accent_is_blue() {
+        assert_eq!(Theme::default().accent.fg, Some(Color::Blue));
+    }
+
+    #[test]
+    fn test_notification_is_yellow() {
+        assert_eq!(Theme::default().notification.fg, Some(Color::Yellow));
+    }
+
+    #[test]
+    fn test_selection_is_a_bright_black_background() {
+        let theme = Theme::default();
+        assert_eq!(theme.selection.bg, Some(Color::DarkGray));
+        assert!(!theme.selection.add_modifier.contains(Modifier::REVERSED));
+    }
+
+    #[test]
+    fn test_selection_padding_matches_the_selection() {
+        let theme = Theme::default();
+        assert_eq!(theme.selection_pad.fg, theme.selection.bg);
+        assert_eq!(theme.selection_pad.bg, Some(Color::Reset));
+        assert!(theme.selection_pad.sub_modifier.contains(Modifier::DIM));
+    }
+
+    #[test]
+    fn test_theme_only_uses_terminal_palette_colors() {
+        for style in styles(&Theme::default()) {
+            for color in [style.fg, style.bg].into_iter().flatten() {
+                assert!(
+                    !matches!(color, Color::Rgb(..) | Color::Indexed(_)),
+                    "absolute color {color:?} would ignore the terminal theme"
+                );
+            }
+        }
     }
 }

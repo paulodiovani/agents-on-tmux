@@ -90,7 +90,7 @@ fn main() -> anyhow::Result<()> {
         backends::logger::info("main: starting aot");
     }
 
-    backends::agents::set_icon_fonts(
+    frontends::tui::icons::set_icon_fonts(
         config.nerd_font.unwrap_or(false),
         config.font_awesome.unwrap_or(false),
     );

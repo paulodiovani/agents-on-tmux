@@ -282,7 +282,7 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
                 "-h",
                 "-b",
                 "-l",
-                "30",
+                "35",
                 "-d",
                 "-P",
                 "-F",
@@ -613,7 +613,7 @@ mod tests {
         assert!(split_cmd.contains(&"-h".to_string()));
         assert!(split_cmd.contains(&"-b".to_string()));
         assert!(split_cmd.contains(&"-l".to_string()));
-        assert!(split_cmd.contains(&"30".to_string()));
+        assert!(split_cmd.contains(&"35".to_string()));
         assert!(split_cmd.contains(&"-d".to_string()));
         assert!(split_cmd.contains(&"-t".to_string()));
         assert!(split_cmd.contains(&SESSION_NAME.to_string()));
