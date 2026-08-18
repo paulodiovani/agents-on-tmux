@@ -28,8 +28,11 @@ pub trait Tmux {
     fn select_window(&self, id: u32) -> Result<(), TmuxError>;
     /// Switches to the last-active pane in the session.
     fn last_pane(&self) -> Result<(), TmuxError>;
-    /// Sends keys to the specified window.
-    fn split_window(&self, command: &str) -> Result<String, TmuxError>;
+    /// Splits the current window horizontally, creating a side pane of the
+    /// given width in columns, and returns its pane id.
+    fn split_window(&self, command: &str, width: u16) -> Result<String, TmuxError>;
+    /// Resizes a pane to an absolute width in columns.
+    fn resize_pane(&self, pane_id: &str, width: u16) -> Result<(), TmuxError>;
 }
 
 pub const SESSION_NAME: &str = "agents-on-tmux";
@@ -274,16 +277,22 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
         Ok(())
     }
 
-    /// Splits the current window horizontally, creating a side pane.
-    fn split_window(&self, command: &str) -> Result<String, TmuxError> {
+    /// Splits the current window horizontally, creating a side pane. The pane
+    /// is told its width via AOT_PANEL_WIDTH so a TUI running in it can
+    /// re-assert the width after tmux rescales the layout.
+    fn split_window(&self, command: &str, width: u16) -> Result<String, TmuxError> {
+        let width = width.to_string();
+        let env = format!("AOT_PANEL_WIDTH={width}");
         self.executor
             .execute(&[
                 "split-window",
                 "-h",
                 "-b",
                 "-l",
-                "35",
+                &width,
                 "-d",
+                "-e",
+                &env,
                 "-P",
                 "-F",
                 "#{pane_id}",
@@ -292,6 +301,14 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
                 command,
             ])
             .map(|s| s.trim().to_string())
+    }
+
+    /// Resizes a pane to an absolute width in columns.
+    fn resize_pane(&self, pane_id: &str, width: u16) -> Result<(), TmuxError> {
+        let width = width.to_string();
+        self.executor
+            .execute(&["resize-pane", "-t", pane_id, "-x", &width])?;
+        Ok(())
     }
 }
 
@@ -400,6 +417,7 @@ mod tests {
                 Some(&"last-pane") => Ok(String::new()),
                 Some(&"send-keys") => Ok(String::new()),
                 Some(&"set-option") => Ok(String::new()),
+                Some(&"resize-pane") => Ok(String::new()),
                 Some(&"split-window") => Ok(self.pane_id.borrow().clone()),
                 _ => Err(TmuxError::CommandFailed {
                     message: format!("unknown command: {:?}", args),
@@ -594,7 +612,7 @@ mod tests {
     fn test_split_window() {
         let executor = MockCommandExecutor::with_session();
         let driver = TmuxDriver::with_executor(executor);
-        let pane_id = driver.split_window("aot --tui").unwrap();
+        let pane_id = driver.split_window("aot --tui", 35).unwrap();
         assert_eq!(pane_id, "%99");
     }
 
@@ -602,7 +620,7 @@ mod tests {
     fn test_split_window_command_args() {
         let executor = MockCommandExecutor::with_session();
         let driver = TmuxDriver::with_executor(executor);
-        let _ = driver.split_window("aot --tui");
+        let _ = driver.split_window("aot --tui", 35);
 
         let commands = driver.executor.commands.borrow();
         let split_cmd = commands
@@ -615,9 +633,45 @@ mod tests {
         assert!(split_cmd.contains(&"-l".to_string()));
         assert!(split_cmd.contains(&"35".to_string()));
         assert!(split_cmd.contains(&"-d".to_string()));
+        assert!(split_cmd.contains(&"-e".to_string()));
+        assert!(split_cmd.contains(&"AOT_PANEL_WIDTH=35".to_string()));
         assert!(split_cmd.contains(&"-t".to_string()));
         assert!(split_cmd.contains(&SESSION_NAME.to_string()));
         assert!(split_cmd.contains(&"aot --tui".to_string()));
+    }
+
+    #[test]
+    fn test_split_window_custom_width() {
+        let executor = MockCommandExecutor::with_session();
+        let driver = TmuxDriver::with_executor(executor);
+        let _ = driver.split_window("aot --tui", 50);
+
+        let commands = driver.executor.commands.borrow();
+        let split_cmd = commands
+            .iter()
+            .find(|cmd| cmd.first().map(|s| s.as_str()) == Some("split-window"))
+            .unwrap();
+
+        assert!(split_cmd.contains(&"50".to_string()));
+        assert!(split_cmd.contains(&"AOT_PANEL_WIDTH=50".to_string()));
+    }
+
+    #[test]
+    fn test_resize_pane_command_args() {
+        let executor = MockCommandExecutor::with_session();
+        let driver = TmuxDriver::with_executor(executor);
+        driver.resize_pane("%5", 35).unwrap();
+
+        let commands = driver.executor.commands.borrow();
+        let resize_cmd = commands
+            .iter()
+            .find(|cmd| cmd.first().map(|s| s.as_str()) == Some("resize-pane"))
+            .unwrap();
+
+        assert!(resize_cmd.contains(&"-t".to_string()));
+        assert!(resize_cmd.contains(&"%5".to_string()));
+        assert!(resize_cmd.contains(&"-x".to_string()));
+        assert!(resize_cmd.contains(&"35".to_string()));
     }
 
     #[test]

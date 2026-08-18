@@ -605,8 +605,11 @@ mod tests {
         fn last_pane(&self) -> Result<(), TmuxError> {
             Ok(())
         }
-        fn split_window(&self, _command: &str) -> Result<String, TmuxError> {
+        fn split_window(&self, _command: &str, _width: u16) -> Result<String, TmuxError> {
             Ok("%99".to_string())
+        }
+        fn resize_pane(&self, _pane_id: &str, _width: u16) -> Result<(), TmuxError> {
+            Ok(())
         }
     }
 

@@ -3,7 +3,7 @@ mod frontends;
 
 use std::fmt::Display;
 
-use backends::config::Config;
+use backends::config::{Config, DEFAULT_PANEL_WIDTH};
 use clap::Parser;
 
 #[derive(Parser)]
@@ -28,8 +28,13 @@ struct Cli {
     /// Enable debug logging to a file
     #[arg(long, env = "AOT_DEBUG", value_parser = parse_bool, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
     debug: Option<bool>,
+
+    /// Side panel width in columns, only when the panel is split (default: 35)
+    #[arg(long, value_parser = clap::value_parser!(u16).range(1..))]
+    panel_width: Option<u16>,
 }
 
+// Implement Display so we can extract the cli options to forward to TUI side-panel
 impl Display for Cli {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some(tui) = self.tui {
@@ -44,11 +49,12 @@ impl Display for Cli {
         if let Some(font_awesome) = self.font_awesome {
             write!(f, " --font-awesome={}", font_awesome)?;
         }
-        // Forwarding --debug matters: the TUI runs in a child process launched
-        // via split_window, and the flag must survive that hop.
         if let Some(debug) = self.debug {
             write!(f, " --debug={}", debug)?;
         }
+        // --panel-width is deliberately not forwarded: the width reaches the
+        // TUI child through split-window's -e (pane processes are spawned by
+        // the tmux server, not by aot).
         Ok(())
     }
 }
@@ -61,6 +67,7 @@ impl From<&Cli> for Config {
             nerd_font: cli.nerd_font,
             font_awesome: cli.font_awesome,
             debug: cli.debug,
+            panel_width: cli.panel_width,
         }
     }
 }
@@ -115,7 +122,10 @@ fn main() -> anyhow::Result<()> {
         let exe = std::env::current_exe()?;
         if !config.no_tui.unwrap_or(false) {
             let command = format!("{} --tui=true{}", exe.to_string_lossy(), cli);
-            parent_driver.split_window(&command)?;
+            backends::logger::debug(&format!("main: started tui with command {}", command));
+
+            let width = config.panel_width.unwrap_or(DEFAULT_PANEL_WIDTH);
+            parent_driver.split_window(&command, width)?;
         }
         nested_driver.attach_session()?;
     }
@@ -223,7 +233,7 @@ mod tests {
     #[test]
     fn test_from_cli_to_config() {
         let cli = with_icon_env(None, None, || {
-            Cli::parse_from(["aot", "--tui", "--nerd-font"])
+            Cli::parse_from(["aot", "--tui", "--nerd-font", "--panel-width", "50"])
         });
         let config: Config = (&cli).into();
         assert_eq!(config.tui, Some(true));
@@ -231,6 +241,38 @@ mod tests {
         assert_eq!(config.nerd_font, Some(true));
         assert_eq!(config.font_awesome, None);
         assert_eq!(config.debug, None);
+        assert_eq!(config.panel_width, Some(50));
+    }
+
+    #[test]
+    fn test_panel_width_flag() {
+        let cli = with_icon_env(None, None, || {
+            Cli::parse_from(["aot", "--panel-width", "50"])
+        });
+        assert_eq!(cli.panel_width, Some(50));
+    }
+
+    #[test]
+    fn test_panel_width_rejects_zero() {
+        assert!(Cli::try_parse_from(["aot", "--panel-width", "0"]).is_err());
+    }
+
+    #[test]
+    fn test_panel_width_not_forwarded_to_tui_command() {
+        // The width reaches the TUI child via split-window -e, not CLI args:
+        // pane processes are spawned by the tmux server, not by aot.
+        let cli = with_icon_env(None, None, || {
+            Cli::parse_from(["aot", "--panel-width", "50"])
+        });
+        assert_eq!(format!("{}", cli), "");
+    }
+
+    #[test]
+    fn test_panel_width_help_shows_default() {
+        use clap::CommandFactory;
+        let help = Cli::command().render_long_help().to_string();
+        assert!(help.contains("--panel-width"));
+        assert!(help.contains("default: 35"));
     }
 
     #[test]

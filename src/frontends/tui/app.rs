@@ -22,6 +22,7 @@ pub struct App {
     last_focused_id: Option<u32>,
     list_state: ListState,
     nested_driver: Box<dyn Tmux>,
+    panel: Option<(String, u16)>,
     parent_driver: Box<dyn Tmux>,
     pending_action: Option<PendingAction>,
     running: bool,
@@ -40,6 +41,7 @@ impl App {
             last_focused_id: None,
             list_state: ListState::default(),
             nested_driver,
+            panel: Self::panel_from_env(),
             parent_driver,
             pending_action: None,
             running: true,
@@ -52,6 +54,30 @@ impl App {
             app.active_tab = Tab::Agents;
         }
         Ok(app)
+    }
+
+    /// Reads the side-panel identity (pane id, target width) from the
+    /// environment. AOT_PANEL_WIDTH is injected via split-window -e only into
+    /// the panel pane, so its presence means "this TUI is the side panel".
+    fn panel_from_env() -> Option<(String, u16)> {
+        let width = std::env::var("AOT_PANEL_WIDTH").ok()?.parse().ok()?;
+        let pane_id = std::env::var("TMUX_PANE").ok()?;
+        Some((pane_id, width))
+    }
+
+    /// Re-asserts the side panel width after tmux rescaled the layout. No-op
+    /// outside panel mode or when the width already matches, which makes the
+    /// enforcement converge without loops or redundant tmux calls. Failures
+    /// (e.g. terminal narrower than the panel) are logged and ignored.
+    fn enforce_panel_width(&self, current_width: u16) {
+        if let Some((pane_id, target)) = &self.panel
+            && current_width != *target
+        {
+            logger::debug(&format!(
+                "app: enforce panel width {target} (was {current_width})"
+            ));
+            let _ = self.parent_driver.resize_pane(pane_id, *target);
+        }
     }
 
     /// Runs the main event loop, drawing the UI and handling input.
@@ -69,6 +95,11 @@ impl App {
         });
         self.event_rx = Some(event_rx);
 
+        // The terminal may have been resized between the split and TUI
+        // startup; re-assert the panel width before the first draw.
+        let initial_width = terminal.size()?.width;
+        self.enforce_panel_width(initial_width);
+
         let redraw_tick = Duration::from_secs(1);
         let mut last_draw = Instant::now() - redraw_tick;
         while self.running {
@@ -77,13 +108,20 @@ impl App {
                 last_draw = Instant::now();
             }
 
-            // Poll keyboard (100ms). A keypress forces an immediate redraw next iteration.
-            if event::poll(Duration::from_millis(100))?
-                && let event::Event::Key(key) = event::read()?
-                && key.kind == event::KeyEventKind::Press
-            {
-                self.handle_action(key_to_action(key));
-                last_draw = Instant::now() - redraw_tick;
+            // Poll terminal events (100ms). A keypress or a resize forces an
+            // immediate redraw next iteration.
+            if event::poll(Duration::from_millis(100))? {
+                match event::read()? {
+                    event::Event::Key(key) if key.kind == event::KeyEventKind::Press => {
+                        self.handle_action(key_to_action(key));
+                        last_draw = Instant::now() - redraw_tick;
+                    }
+                    event::Event::Resize(width, _) => {
+                        self.enforce_panel_width(width);
+                        last_draw = Instant::now() - redraw_tick;
+                    }
+                    _ => {}
+                }
             }
 
             // Drain tmux events (non-blocking). A refresh forces an immediate redraw.
@@ -555,8 +593,15 @@ mod tests {
             Ok(())
         }
 
-        fn split_window(&self, _command: &str) -> Result<String, TmuxError> {
+        fn split_window(&self, _command: &str, _width: u16) -> Result<String, TmuxError> {
             Ok("%99".to_string())
+        }
+
+        fn resize_pane(&self, pane_id: &str, width: u16) -> Result<(), TmuxError> {
+            self.calls
+                .borrow_mut()
+                .push(format!("resize_pane {pane_id} {width}"));
+            Ok(())
         }
     }
 
@@ -1047,5 +1092,93 @@ mod tests {
 
         app.ensure_visible(0);
         assert_eq!(app.list_state().offset(), 0);
+    }
+
+    static PANEL_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn test_panel_from_env_set() {
+        let _guard = PANEL_ENV_LOCK.lock().unwrap();
+        unsafe {
+            std::env::set_var("AOT_PANEL_WIDTH", "42");
+            std::env::set_var("TMUX_PANE", "%5");
+        }
+        let panel = App::panel_from_env();
+        unsafe {
+            std::env::remove_var("AOT_PANEL_WIDTH");
+            std::env::remove_var("TMUX_PANE");
+        }
+        assert_eq!(panel, Some(("%5".to_string(), 42)));
+    }
+
+    #[test]
+    fn test_panel_from_env_missing_width_marker() {
+        let _guard = PANEL_ENV_LOCK.lock().unwrap();
+        unsafe {
+            std::env::remove_var("AOT_PANEL_WIDTH");
+            std::env::set_var("TMUX_PANE", "%5");
+        }
+        let panel = App::panel_from_env();
+        unsafe { std::env::remove_var("TMUX_PANE") };
+        assert_eq!(panel, None);
+    }
+
+    #[test]
+    fn test_panel_from_env_unparsable_width() {
+        let _guard = PANEL_ENV_LOCK.lock().unwrap();
+        unsafe {
+            std::env::set_var("AOT_PANEL_WIDTH", "wide");
+            std::env::set_var("TMUX_PANE", "%5");
+        }
+        let panel = App::panel_from_env();
+        unsafe {
+            std::env::remove_var("AOT_PANEL_WIDTH");
+            std::env::remove_var("TMUX_PANE");
+        }
+        assert_eq!(panel, None);
+    }
+
+    #[test]
+    fn test_enforce_panel_width_resizes_when_width_differs() {
+        let parent = MockTmux::new();
+        let parent_calls = parent.calls_rc();
+        let mut app = App::new(Box::new(MockTmux::new()), Box::new(parent)).unwrap();
+        app.panel = Some(("%5".to_string(), 35));
+
+        app.enforce_panel_width(50);
+
+        assert_eq!(
+            parent_calls.borrow().as_slice(),
+            ["resize_pane %5 35".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_enforce_panel_width_noop_when_width_matches() {
+        let parent = MockTmux::new();
+        let parent_calls = parent.calls_rc();
+        let mut app = App::new(Box::new(MockTmux::new()), Box::new(parent)).unwrap();
+        app.panel = Some(("%5".to_string(), 35));
+
+        app.enforce_panel_width(35);
+
+        assert!(parent_calls.borrow().is_empty());
+    }
+
+    #[test]
+    fn test_enforce_panel_width_noop_outside_panel_mode() {
+        let _guard = PANEL_ENV_LOCK.lock().unwrap();
+        unsafe {
+            std::env::remove_var("AOT_PANEL_WIDTH");
+            std::env::remove_var("TMUX_PANE");
+        }
+        let parent = MockTmux::new();
+        let parent_calls = parent.calls_rc();
+        let app = App::new(Box::new(MockTmux::new()), Box::new(parent)).unwrap();
+        assert_eq!(app.panel, None);
+
+        app.enforce_panel_width(50);
+
+        assert!(parent_calls.borrow().is_empty());
     }
 }
