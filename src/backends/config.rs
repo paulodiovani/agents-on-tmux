@@ -1,5 +1,5 @@
 /// Default width in columns of the TUI side panel.
-pub const DEFAULT_PANEL_WIDTH: u16 = 35;
+pub const DEFAULT_TUI_WIDTH: u16 = 35;
 
 /// Application configuration options
 #[derive(serde::Deserialize, Clone, Copy, Default)]
@@ -9,13 +9,13 @@ pub struct Config {
     #[serde(default)]
     pub no_tui: Option<bool>,
     #[serde(default)]
+    pub tui_width: Option<u16>,
+    #[serde(default)]
     pub nerd_font: Option<bool>,
     #[serde(default)]
     pub font_awesome: Option<bool>,
     #[serde(default)]
     pub debug: Option<bool>,
-    #[serde(default)]
-    pub panel_width: Option<u16>,
 }
 
 /// Possible errors when reading config file
@@ -51,10 +51,10 @@ impl Config {
         Self {
             tui: other.tui.or(self.tui),
             no_tui: other.no_tui.or(self.no_tui),
+            tui_width: other.tui_width.or(self.tui_width),
             nerd_font: other.nerd_font.or(self.nerd_font),
             font_awesome: other.font_awesome.or(self.font_awesome),
             debug: other.debug.or(self.debug),
-            panel_width: other.panel_width.or(self.panel_width),
         }
     }
 }
@@ -71,7 +71,7 @@ mod tests {
         assert_eq!(config.nerd_font, None);
         assert_eq!(config.font_awesome, None);
         assert_eq!(config.debug, None);
-        assert_eq!(config.panel_width, None);
+        assert_eq!(config.tui_width, None);
     }
 
     #[test]
@@ -82,7 +82,7 @@ mod tests {
             no_tui: None,
             font_awesome: None,
             debug: Some(false),
-            panel_width: Some(20),
+            tui_width: Some(20),
         };
         let other = Config {
             tui: Some(true),
@@ -90,7 +90,7 @@ mod tests {
             no_tui: None,
             font_awesome: None,
             debug: Some(true),
-            panel_width: Some(50),
+            tui_width: Some(50),
         };
         let merged = base.merge(other);
         assert_eq!(merged.tui, Some(true));
@@ -98,7 +98,7 @@ mod tests {
         assert_eq!(merged.no_tui, None);
         assert_eq!(merged.font_awesome, None);
         assert_eq!(merged.debug, Some(true));
-        assert_eq!(merged.panel_width, Some(50));
+        assert_eq!(merged.tui_width, Some(50));
     }
 
     #[test]
@@ -109,14 +109,14 @@ mod tests {
             nerd_font: Some(true),
             font_awesome: Some(true),
             debug: Some(true),
-            panel_width: Some(50),
+            tui_width: Some(50),
         };
         let other = Config::default();
         let merged = base.merge(other);
         assert_eq!(merged.nerd_font, Some(true));
         assert_eq!(merged.font_awesome, Some(true));
         assert_eq!(merged.debug, Some(true));
-        assert_eq!(merged.panel_width, Some(50));
+        assert_eq!(merged.tui_width, Some(50));
     }
 
     #[test]
@@ -127,7 +127,7 @@ mod tests {
         assert_eq!(merged.nerd_font, None);
         assert_eq!(merged.font_awesome, None);
         assert_eq!(merged.debug, None);
-        assert_eq!(merged.panel_width, None);
+        assert_eq!(merged.tui_width, None);
     }
 
     #[test]
@@ -137,7 +137,7 @@ mod tests {
         let path = dir.join("aot.conf");
         std::fs::write(
             &path,
-            "tui = true\nnerd_font = true\ndebug = true\npanel_width = 50\n",
+            "tui = true\nnerd_font = true\ndebug = true\ntui_width = 50\n",
         )
         .unwrap();
 
@@ -148,7 +148,7 @@ mod tests {
         assert_eq!(config.no_tui, None);
         assert_eq!(config.font_awesome, None);
         assert_eq!(config.debug, Some(true));
-        assert_eq!(config.panel_width, Some(50));
+        assert_eq!(config.tui_width, Some(50));
 
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -161,7 +161,7 @@ mod tests {
         assert_eq!(config.nerd_font, None);
         assert_eq!(config.font_awesome, None);
         assert_eq!(config.debug, None);
-        assert_eq!(config.panel_width, None);
+        assert_eq!(config.tui_width, None);
     }
 
     #[test]
