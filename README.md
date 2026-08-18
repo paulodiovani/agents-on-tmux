@@ -88,6 +88,7 @@ Create `~/.config/aot/aot.conf` to set default values:
 ```toml
 tui = false
 no_tui = false
+tui_width = 35
 nerd_font = true
 font_awesome = true
 ```
@@ -100,6 +101,7 @@ All fields are optional. Omitted fields use their defaults (`false`).
 |------|-------------|
 | `--tui` | Launch only the terminal UI |
 | `--no-tui` | Do not launch the terminal UI pane |
+| `--tui-width <N>` | TUI panel width in columns (default: 35) |
 | `--nerd-font[=true\|false]` | Enable Nerd Font icons |
 | `--font-awesome[=true\|false]` | Enable Font Awesome icons |
 
@@ -115,7 +117,7 @@ All fields are optional. Omitted fields use their defaults (`false`).
 1. Start the application with `aot`.
 1. The application checks if a parent TMUX session is running or stops if not.
 1. Start a new dedicated TMUX session named `agents-on-tmux`, this is the session that will host the agents.
-1. The TUI control panel is started by default on a left panel. Can also be started with `aot --tui` or skipped with `aot --no-tui`.
+1. The TUI control panel is started by default on a left panel. Can also be started with `aot --tui` or skipped with `aot --no-tui`. The panel retains its width (`tui_width`, 35 columns by default) when the terminal is resized.
 1. User can interact with the dedicated session using the TUI control or standard TMUX bindings.
 
 ## Screencast

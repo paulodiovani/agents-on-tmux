@@ -7,8 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `--tui-width` CLI flag and `tui_width` config option to set the TUI side panel width in columns (default: 35)
+
 ### Changed
 - Redesigned the TUI with compact two-line rows, a new tab bar, full-width background selection, and right-aligned paths
+
+### Fixed
+- The side panel now retains its width when the terminal or window is resized (only when started in normal mode, with both the TUI pane and the nested session)
 
 ## [0.3.0] - 2026-08-09
 

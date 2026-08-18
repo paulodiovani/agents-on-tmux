@@ -605,15 +605,18 @@ mod tests {
         fn last_pane(&self) -> Result<(), TmuxError> {
             Ok(())
         }
-        fn split_window(&self, _command: &str) -> Result<String, TmuxError> {
+        fn split_window(&self, _command: &str, _width: u16) -> Result<String, TmuxError> {
             Ok("%99".to_string())
+        }
+        fn resize_pane(&self, _pane_id: &str, _width: u16) -> Result<(), TmuxError> {
+            Ok(())
         }
     }
 
     fn test_app() -> App {
         let nested_driver = MockTmux::new();
         let parent_driver = MockTmux::new();
-        App::new(Box::new(nested_driver), Box::new(parent_driver)).unwrap()
+        App::new(Box::new(nested_driver), Box::new(parent_driver), None).unwrap()
     }
 
     fn window(name: &str, command: &str, dir: &str, seconds: u64) -> Window {
@@ -648,7 +651,12 @@ mod tests {
 
     fn app_with(windows: Vec<Window>) -> App {
         let driver = MockTmux::with_windows(windows.clone());
-        App::new(Box::new(driver), Box::new(MockTmux::with_windows(windows))).unwrap()
+        App::new(
+            Box::new(driver),
+            Box::new(MockTmux::with_windows(windows)),
+            None,
+        )
+        .unwrap()
     }
 
     /// Column of the elapsed time's last digit. Start times are re-stamped on refresh,
