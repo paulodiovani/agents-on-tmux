@@ -31,7 +31,7 @@ pub trait Tmux {
     /// Splits the current window horizontally, creating a side pane of the
     /// given width in columns, and returns its pane id.
     fn split_window(&self, command: &str, width: u16) -> Result<String, TmuxError>;
-    /// Resizes a pane to an absolute width in columns.
+    /// Resizes the given pane to an absolute width in columns.
     fn resize_pane(&self, pane_id: &str, width: u16) -> Result<(), TmuxError>;
 }
 
@@ -277,12 +277,9 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
         Ok(())
     }
 
-    /// Splits the current window horizontally, creating a side pane. The pane
-    /// is told its width via AOT_PANEL_WIDTH so a TUI running in it can
-    /// re-assert the width after tmux rescales the layout.
+    /// Splits the current window horizontally, creating a side pane.
     fn split_window(&self, command: &str, width: u16) -> Result<String, TmuxError> {
         let width = width.to_string();
-        let env = format!("AOT_PANEL_WIDTH={width}");
         self.executor
             .execute(&[
                 "split-window",
@@ -291,8 +288,6 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
                 "-l",
                 &width,
                 "-d",
-                "-e",
-                &env,
                 "-P",
                 "-F",
                 "#{pane_id}",
@@ -303,7 +298,8 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
             .map(|s| s.trim().to_string())
     }
 
-    /// Resizes a pane to an absolute width in columns.
+    /// Resizes the given pane to an absolute width in columns. The target must
+    /// be explicit: without -t tmux resolves the default to the active pane.
     fn resize_pane(&self, pane_id: &str, width: u16) -> Result<(), TmuxError> {
         let width = width.to_string();
         self.executor
@@ -633,8 +629,6 @@ mod tests {
         assert!(split_cmd.contains(&"-l".to_string()));
         assert!(split_cmd.contains(&"35".to_string()));
         assert!(split_cmd.contains(&"-d".to_string()));
-        assert!(split_cmd.contains(&"-e".to_string()));
-        assert!(split_cmd.contains(&"AOT_PANEL_WIDTH=35".to_string()));
         assert!(split_cmd.contains(&"-t".to_string()));
         assert!(split_cmd.contains(&SESSION_NAME.to_string()));
         assert!(split_cmd.contains(&"aot --tui".to_string()));
@@ -653,7 +647,6 @@ mod tests {
             .unwrap();
 
         assert!(split_cmd.contains(&"50".to_string()));
-        assert!(split_cmd.contains(&"AOT_PANEL_WIDTH=50".to_string()));
     }
 
     #[test]
@@ -668,6 +661,8 @@ mod tests {
             .find(|cmd| cmd.first().map(|s| s.as_str()) == Some("resize-pane"))
             .unwrap();
 
+        // Explicit -t: without it tmux resolves the default target to the
+        // active pane, not necessarily the calling one.
         assert!(resize_cmd.contains(&"-t".to_string()));
         assert!(resize_cmd.contains(&"%5".to_string()));
         assert!(resize_cmd.contains(&"-x".to_string()));

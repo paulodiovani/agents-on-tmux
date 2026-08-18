@@ -21,6 +21,10 @@ struct Cli {
     #[arg(long, value_parser = clap::value_parser!(u16).range(1..))]
     tui_width: Option<u16>,
 
+    /// Run as the split side panel (internal: set by the launcher)
+    #[arg(long, hide = true)]
+    split_panel: bool,
+
     /// Enable Nerd Font icons
     #[arg(long, env = "NERD_FONT", value_parser = parse_bool, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
     nerd_font: Option<bool>,
@@ -43,6 +47,9 @@ impl Display for Cli {
         if let Some(no_tui) = self.no_tui {
             write!(f, " --no-tui={}", no_tui)?;
         }
+        if let Some(tui_width) = self.tui_width {
+            write!(f, " --tui-width={}", tui_width)?;
+        }
         if let Some(nerd_font) = self.nerd_font {
             write!(f, " --nerd-font={}", nerd_font)?;
         }
@@ -52,9 +59,6 @@ impl Display for Cli {
         if let Some(debug) = self.debug {
             write!(f, " --debug={}", debug)?;
         }
-        // --tui-width is deliberately not forwarded: the width reaches the
-        // TUI child through split-window's -e (pane processes are spawned by
-        // the tmux server, not by aot).
         Ok(())
     }
 }
@@ -78,6 +82,17 @@ fn parse_bool(value: &str) -> Result<bool, String> {
         "0" | "false" | "no" | "off" => Ok(false),
         _ => Err(format!("expected boolean value, got '{value}'")),
     }
+}
+
+/// Builds the side-panel identity (pane id, width) for the TUI. `Some` only
+/// when launched as the split panel; the pane id comes from TMUX_PANE, which
+/// tmux itself sets in every pane process.
+fn panel_config(split_panel: bool, tui_width: Option<u16>) -> Option<(String, u16)> {
+    if !split_panel {
+        return None;
+    }
+    let pane_id = std::env::var("TMUX_PANE").ok()?;
+    Some((pane_id, tui_width.unwrap_or(DEFAULT_TUI_WIDTH)))
 }
 
 fn main() -> anyhow::Result<()> {
@@ -114,16 +129,18 @@ fn main() -> anyhow::Result<()> {
     if config.tui.unwrap_or(false) {
         backends::logger::info("main: starting tui");
         let terminal = ratatui::init();
+        // Only the split panel enforces its width; a plain `aot --tui` must not.
+        let panel = panel_config(cli.split_panel, config.tui_width);
         let mut app =
-            frontends::tui::app::App::new(Box::new(nested_driver), Box::new(parent_driver))?;
+            frontends::tui::app::App::new(Box::new(nested_driver), Box::new(parent_driver), panel)?;
         app.run(terminal)?;
         ratatui::restore();
     } else {
         let exe = std::env::current_exe()?;
         if !config.no_tui.unwrap_or(false) {
-            let command = format!("{} --tui=true{}", exe.to_string_lossy(), cli);
-            backends::logger::debug(&format!("main: started tui with command {}", command));
-
+            // --split-panel marks the child as the side panel so it enforces
+            // its width; the width itself travels via the forwarded CLI flags.
+            let command = format!("{} --tui=true --split-panel{}", exe.to_string_lossy(), cli);
             let width = config.tui_width.unwrap_or(DEFAULT_TUI_WIDTH);
             parent_driver.split_window(&command, width)?;
         }
@@ -256,11 +273,55 @@ mod tests {
     }
 
     #[test]
-    fn test_tui_width_not_forwarded_to_tui_command() {
-        // The width reaches the TUI child via split-window -e, not CLI args:
-        // pane processes are spawned by the tmux server, not by aot.
+    fn test_tui_width_forwarded_to_tui_command() {
+        // The width must survive the hop to the TUI child process: pane
+        // processes are spawned by the tmux server, not by aot.
         let cli = with_icon_env(None, None, || Cli::parse_from(["aot", "--tui-width", "50"]));
-        assert_eq!(format!("{}", cli), "");
+        assert_eq!(format!("{}", cli), " --tui-width=50");
+    }
+
+    #[test]
+    fn test_split_panel_flag_is_hidden_and_parsed() {
+        let cli = with_icon_env(None, None, || Cli::parse_from(["aot", "--split-panel"]));
+        assert!(cli.split_panel);
+
+        let cli = with_icon_env(None, None, || Cli::parse_from(["aot"]));
+        assert!(!cli.split_panel);
+
+        use clap::CommandFactory;
+        let help = Cli::command().render_long_help().to_string();
+        assert!(!help.contains("split-panel"));
+    }
+
+    #[test]
+    fn test_panel_config_not_split_panel() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        unsafe { std::env::set_var("TMUX_PANE", "%5") };
+        assert_eq!(panel_config(false, Some(50)), None);
+        unsafe { std::env::remove_var("TMUX_PANE") };
+    }
+
+    #[test]
+    fn test_panel_config_split_panel_default_width() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        unsafe { std::env::set_var("TMUX_PANE", "%5") };
+        assert_eq!(panel_config(true, None), Some(("%5".to_string(), 35)));
+        unsafe { std::env::remove_var("TMUX_PANE") };
+    }
+
+    #[test]
+    fn test_panel_config_split_panel_custom_width() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        unsafe { std::env::set_var("TMUX_PANE", "%7") };
+        assert_eq!(panel_config(true, Some(50)), Some(("%7".to_string(), 50)));
+        unsafe { std::env::remove_var("TMUX_PANE") };
+    }
+
+    #[test]
+    fn test_panel_config_split_panel_without_tmux_pane() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        unsafe { std::env::remove_var("TMUX_PANE") };
+        assert_eq!(panel_config(true, None), None);
     }
 
     #[test]

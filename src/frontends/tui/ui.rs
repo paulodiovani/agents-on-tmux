@@ -616,7 +616,7 @@ mod tests {
     fn test_app() -> App {
         let nested_driver = MockTmux::new();
         let parent_driver = MockTmux::new();
-        App::new(Box::new(nested_driver), Box::new(parent_driver)).unwrap()
+        App::new(Box::new(nested_driver), Box::new(parent_driver), None).unwrap()
     }
 
     fn window(name: &str, command: &str, dir: &str, seconds: u64) -> Window {
@@ -651,7 +651,12 @@ mod tests {
 
     fn app_with(windows: Vec<Window>) -> App {
         let driver = MockTmux::with_windows(windows.clone());
-        App::new(Box::new(driver), Box::new(MockTmux::with_windows(windows))).unwrap()
+        App::new(
+            Box::new(driver),
+            Box::new(MockTmux::with_windows(windows)),
+            None,
+        )
+        .unwrap()
     }
 
     /// Column of the elapsed time's last digit. Start times are re-stamped on refresh,

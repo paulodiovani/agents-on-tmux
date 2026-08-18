@@ -32,8 +32,14 @@ pub struct App {
 }
 
 impl App {
-    /// Creates a new App, loading windows from the tmux driver.
-    pub fn new(nested_driver: Box<dyn Tmux>, parent_driver: Box<dyn Tmux>) -> anyhow::Result<Self> {
+    /// Creates a new App, loading windows from the tmux driver. `panel` is
+    /// `Some((pane_id, width))` only when running as the split side panel: the
+    /// width to re-assert on the pane whenever tmux rescales the layout.
+    pub fn new(
+        nested_driver: Box<dyn Tmux>,
+        parent_driver: Box<dyn Tmux>,
+        panel: Option<(String, u16)>,
+    ) -> anyhow::Result<Self> {
         let mut app = Self {
             active_tab: Tab::Windows,
             agents_selected: 0,
@@ -41,7 +47,7 @@ impl App {
             last_focused_id: None,
             list_state: ListState::default(),
             nested_driver,
-            panel: Self::panel_from_env(),
+            panel,
             parent_driver,
             pending_action: None,
             running: true,
@@ -54,15 +60,6 @@ impl App {
             app.active_tab = Tab::Agents;
         }
         Ok(app)
-    }
-
-    /// Reads the side-panel identity (pane id, target width) from the
-    /// environment. AOT_PANEL_WIDTH is injected via split-window -e only into
-    /// the panel pane, so its presence means "this TUI is the side panel".
-    fn panel_from_env() -> Option<(String, u16)> {
-        let width = std::env::var("AOT_PANEL_WIDTH").ok()?.parse().ok()?;
-        let pane_id = std::env::var("TMUX_PANE").ok()?;
-        Some((pane_id, width))
     }
 
     /// Re-asserts the side panel width after tmux rescaled the layout. No-op
@@ -613,7 +610,7 @@ mod tests {
         let driver = MockTmux::new();
         let windows = driver.windows_rc();
         let calls = driver.calls_rc();
-        let app = App::new(Box::new(driver), Box::new(MockTmux::new())).unwrap();
+        let app = App::new(Box::new(driver), Box::new(MockTmux::new()), None).unwrap();
         (app, windows, calls)
     }
 
@@ -630,7 +627,7 @@ mod tests {
         let driver = MockTmux::new();
         driver.windows.borrow_mut()[1].running_command = "bash".to_string();
         driver.windows.borrow_mut()[3].running_command = "zsh".to_string();
-        let app = App::new(Box::new(driver), Box::new(MockTmux::new())).unwrap();
+        let app = App::new(Box::new(driver), Box::new(MockTmux::new()), None).unwrap();
         assert_eq!(app.active_tab(), Tab::Windows);
     }
 
@@ -702,7 +699,7 @@ mod tests {
         let parent_driver = MockTmux::new();
         let nested_calls = nested_driver.calls_rc();
         let parent_calls = parent_driver.calls_rc();
-        let mut app = App::new(Box::new(nested_driver), Box::new(parent_driver)).unwrap();
+        let mut app = App::new(Box::new(nested_driver), Box::new(parent_driver), None).unwrap();
         app.create_window();
         let nested_recorded = nested_calls.borrow();
         assert!(nested_recorded.contains(&"select_window".to_string()));
@@ -970,7 +967,7 @@ mod tests {
         let driver = MockTmux::new();
         driver.windows.borrow_mut()[1].running_command = "bash".to_string();
         driver.windows.borrow_mut()[3].running_command = "zsh".to_string();
-        let mut app = App::new(Box::new(driver), Box::new(MockTmux::new())).unwrap();
+        let mut app = App::new(Box::new(driver), Box::new(MockTmux::new()), None).unwrap();
         assert_eq!(app.active_tab(), Tab::Windows);
         assert!(app.is_tab_empty(Tab::Agents));
         app.switch_tab(Tab::Agents);
@@ -999,7 +996,7 @@ mod tests {
         let driver = MockTmux::new();
         driver.windows.borrow_mut()[1].current_dir = "/home/user/shared".to_string();
         driver.windows.borrow_mut()[2].current_dir = "/home/user/shared".to_string();
-        let mut app = App::new(Box::new(driver), Box::new(MockTmux::new())).unwrap();
+        let mut app = App::new(Box::new(driver), Box::new(MockTmux::new()), None).unwrap();
 
         assert_eq!(app.active_tab(), Tab::Agents);
         assert_eq!(app.current_selected(), 0);
@@ -1014,7 +1011,7 @@ mod tests {
         driver.windows.borrow_mut()[1].current_dir = "/home/user/shared".to_string();
         driver.windows.borrow_mut()[0].current_dir = "/home/user/shared".to_string();
         driver.windows.borrow_mut()[2].current_dir = "/home/user/shared".to_string();
-        let mut app = App::new(Box::new(driver), Box::new(MockTmux::new())).unwrap();
+        let mut app = App::new(Box::new(driver), Box::new(MockTmux::new()), None).unwrap();
 
         assert_eq!(app.active_tab(), Tab::Agents);
         assert_eq!(app.current_selected(), 0);
@@ -1028,7 +1025,7 @@ mod tests {
         let driver = MockTmux::new();
         driver.windows.borrow_mut()[0].current_dir = String::new();
         driver.windows.borrow_mut()[2].current_dir = "/home/user/project3".to_string();
-        let mut app = App::new(Box::new(driver), Box::new(MockTmux::new())).unwrap();
+        let mut app = App::new(Box::new(driver), Box::new(MockTmux::new()), None).unwrap();
 
         assert_eq!(app.active_tab(), Tab::Agents);
         assert_eq!(app.current_selected(), 0);
@@ -1094,56 +1091,16 @@ mod tests {
         assert_eq!(app.list_state().offset(), 0);
     }
 
-    static PANEL_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    #[test]
-    fn test_panel_from_env_set() {
-        let _guard = PANEL_ENV_LOCK.lock().unwrap();
-        unsafe {
-            std::env::set_var("AOT_PANEL_WIDTH", "42");
-            std::env::set_var("TMUX_PANE", "%5");
-        }
-        let panel = App::panel_from_env();
-        unsafe {
-            std::env::remove_var("AOT_PANEL_WIDTH");
-            std::env::remove_var("TMUX_PANE");
-        }
-        assert_eq!(panel, Some(("%5".to_string(), 42)));
-    }
-
-    #[test]
-    fn test_panel_from_env_missing_width_marker() {
-        let _guard = PANEL_ENV_LOCK.lock().unwrap();
-        unsafe {
-            std::env::remove_var("AOT_PANEL_WIDTH");
-            std::env::set_var("TMUX_PANE", "%5");
-        }
-        let panel = App::panel_from_env();
-        unsafe { std::env::remove_var("TMUX_PANE") };
-        assert_eq!(panel, None);
-    }
-
-    #[test]
-    fn test_panel_from_env_unparsable_width() {
-        let _guard = PANEL_ENV_LOCK.lock().unwrap();
-        unsafe {
-            std::env::set_var("AOT_PANEL_WIDTH", "wide");
-            std::env::set_var("TMUX_PANE", "%5");
-        }
-        let panel = App::panel_from_env();
-        unsafe {
-            std::env::remove_var("AOT_PANEL_WIDTH");
-            std::env::remove_var("TMUX_PANE");
-        }
-        assert_eq!(panel, None);
-    }
-
     #[test]
     fn test_enforce_panel_width_resizes_when_width_differs() {
         let parent = MockTmux::new();
         let parent_calls = parent.calls_rc();
-        let mut app = App::new(Box::new(MockTmux::new()), Box::new(parent)).unwrap();
-        app.panel = Some(("%5".to_string(), 35));
+        let app = App::new(
+            Box::new(MockTmux::new()),
+            Box::new(parent),
+            Some(("%5".to_string(), 35)),
+        )
+        .unwrap();
 
         app.enforce_panel_width(50);
 
@@ -1157,8 +1114,12 @@ mod tests {
     fn test_enforce_panel_width_noop_when_width_matches() {
         let parent = MockTmux::new();
         let parent_calls = parent.calls_rc();
-        let mut app = App::new(Box::new(MockTmux::new()), Box::new(parent)).unwrap();
-        app.panel = Some(("%5".to_string(), 35));
+        let app = App::new(
+            Box::new(MockTmux::new()),
+            Box::new(parent),
+            Some(("%5".to_string(), 35)),
+        )
+        .unwrap();
 
         app.enforce_panel_width(35);
 
@@ -1167,14 +1128,9 @@ mod tests {
 
     #[test]
     fn test_enforce_panel_width_noop_outside_panel_mode() {
-        let _guard = PANEL_ENV_LOCK.lock().unwrap();
-        unsafe {
-            std::env::remove_var("AOT_PANEL_WIDTH");
-            std::env::remove_var("TMUX_PANE");
-        }
         let parent = MockTmux::new();
         let parent_calls = parent.calls_rc();
-        let app = App::new(Box::new(MockTmux::new()), Box::new(parent)).unwrap();
+        let app = App::new(Box::new(MockTmux::new()), Box::new(parent), None).unwrap();
         assert_eq!(app.panel, None);
 
         app.enforce_panel_width(50);
