@@ -68,70 +68,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.0] - 2026-07-06
 
 ### Added
-- Basic agent support with detection and management of supported AI coding agents
+- Terminal UI with left pane control panel and right pane for agent/window management
 - Tabbed interface separating Agents and Windows into distinct tabs
-- Double-press confirmation for destructive actions (quit and kill window)
-
-## [0.1.0-beta.1] - 2026-07-06
-
-### Fixed
-- Prevent startup infinite loop by detecting and rejecting nested `aot` runs inside its own dedicated session
-- Switch error handling from `Box<dyn Error>` to `anyhow` for cleaner error propagation
-
-## [0.1.0-alpha.7] - 2026-07-06
-
-### Added
+- Window management: list, select, kill with double-press confirmation
+- Window display with ID, name, running command, start time, and current directory
 - Auto-select new windows when added through the TUI
-- Window/agent counter display
-- Current directory display for each window
 - Scrollable TUI for handling many windows
 - Live sync with external tmux session changes
-
-### Changed
-- Bump crossterm from 0.28.1 to 0.29.0
-
-## [0.1.0-alpha.6] - 2026-07-05
-
-### Fixed
-- Parent session detection now checks `TMUX` environment variable to correctly determine if running inside tmux
-
-## [0.1.0-alpha.5] - 2026-07-05
-
-### Changed
-- Cleaned up `is_running` function and removed unused `send_keys` method
-
-### Added
-- Screenshot to README
-
-## [0.1.0-alpha.4] - 2026-07-05
-
-### Added
-- GitHub Actions workflows for lint and test
-- Dependabot configuration
-- Pull request template
-
-## [0.1.0-alpha.3] - 2026-07-04
-
-### Changed
-- Startup now launches both TUI and tmux session together
-- Uses current app name and path for session management
-
-## [0.1.0-alpha.2] - 2026-07-04
-
-### Added
-- `CommandExecutor` trait for testable tmux command execution
 - Session auto-start/attach on application startup
-- TUI auto-refresh every 5 seconds
-
-### Changed
-- Removed `ctrlc` dependency
-
-## [0.1.0-alpha.1] - 2026-07-04
-
-### Added
-- Terminal UI with ratatui/crossterm
-- Tmux backend with trait-based contract
-- CLI argument parsing with clap (`--tui` flag)
-- Window management: list, select, kill with confirmation
-- Window display with ID, name, running command, and start time
-- Full module documentation
+- CLI argument parsing with `--tui` flag
+- Nested session detection to prevent startup loops
