@@ -3,6 +3,7 @@ use std::path::{Component, Path};
 use unicode_width::UnicodeWidthStr;
 
 const ELLIPSIS: &str = "\u{2026}"; // …
+const MIN_TRUNCATED_WIDTH: usize = 3;
 
 /// Splits a path into joinable parts, the first being `~` under `home` or an empty
 /// string when absolute, so that joining with `/` restores the leading slash.
@@ -74,7 +75,18 @@ fn candidates(path: &Path, home: Option<&Path>) -> Vec<String> {
         shortened.push(abbreviated[leaf].clone());
         shortened.join("/")
     }));
-    candidates.push(abbreviated[leaf].clone());
+    let full_leaf = &parts[parts.len() - 1];
+    candidates.push(full_leaf.clone());
+    let chars: Vec<char> = full_leaf.chars().collect();
+    for suffix_len in (1..chars.len()).rev() {
+        let suffix: String = chars[chars.len() - suffix_len..].iter().collect();
+        let truncated = format!("..{}", suffix);
+        if truncated.width() > MIN_TRUNCATED_WIDTH {
+            candidates.push(truncated);
+        }
+    }
+    let initial_char = initial(full_leaf);
+    candidates.push(initial_char.to_uppercase());
     candidates
 }
 
@@ -170,11 +182,21 @@ mod tests {
     }
 
     #[test]
-    fn test_last_component_is_never_truncated() {
-        assert_eq!(
-            shorten("/home/user/Development/agents-on-tmux", 5),
-            "agents-on-tmux"
-        );
+    fn test_last_component_truncated_from_left_when_too_long() {
+        assert_eq!(shorten("/home/user/Development/agents-on-tmux", 5), "..mux");
+    }
+
+    #[test]
+    fn test_left_truncation_progression() {
+        assert_eq!(shorten("/home/user/foobar", 6), "foobar");
+        assert_eq!(shorten("/home/user/foobar", 5), "..bar");
+        assert_eq!(shorten("/home/user/foobar", 4), "..ar");
+        assert_eq!(shorten("/home/user/foobar", 1), "F");
+    }
+
+    #[test]
+    fn test_abbreviated_leaf_fallback() {
+        assert_eq!(shorten("/home/user/foobar", 2), "F");
     }
 
     #[test]
