@@ -39,6 +39,7 @@ pub enum Action {
     NavigateUp,
     None,
     Quit,
+    RenameWindow,
     SwitchTabLeft,
     SwitchTabRight,
 }
@@ -59,6 +60,7 @@ pub fn key_to_action(key: KeyEvent) -> Action {
         KeyCode::Enter => Action::FocusWindow,
         KeyCode::Char('c') => Action::CreateWindow,
         KeyCode::Char('d') => Action::KillWindow,
+        KeyCode::Char(',') => Action::RenameWindow,
         KeyCode::Left | KeyCode::Char('h') => Action::SwitchTabLeft,
         KeyCode::Right | KeyCode::Char('l') => Action::SwitchTabRight,
         _ => Action::None,
@@ -136,6 +138,14 @@ mod tests {
         assert!(matches!(
             key_to_action(key_event(KeyCode::Char('d'))),
             Action::KillWindow
+        ));
+    }
+
+    #[test]
+    fn test_rename_window() {
+        assert!(matches!(
+            key_to_action(key_event(KeyCode::Char(','))),
+            Action::RenameWindow
         ));
     }
 

@@ -384,6 +384,7 @@ fn footer_entries(app: &App) -> Vec<(String, String, bool)> {
     entries.extend([
         ("⏎".to_string(), "focus".to_string(), true),
         ("c".to_string(), "new".to_string(), true),
+        (",".to_string(), "rename".to_string(), true),
         ("d".to_string(), "kill".to_string(), true),
         ("q".to_string(), "quit".to_string(), true),
     ]);
@@ -574,6 +575,7 @@ mod tests {
             ("n", "next-window"),
             ("p", "previous-window"),
             ("l", "last-window"),
+            (",", "rename-window"),
         ]
         .into_iter()
         .map(|(key, command)| KeyBinding {
@@ -654,6 +656,9 @@ mod tests {
                 }),
                 _ => Err(command_failed("display-message")),
             }
+        }
+        fn command_prompt(&self, _initial: &str, _template: &str) -> Result<(), TmuxError> {
+            Ok(())
         }
     }
 
@@ -796,7 +801,7 @@ mod tests {
     #[test]
     fn test_calculate_footer_height_narrow() {
         let app = test_app();
-        assert_eq!(calculate_footer_height(30, &app, &Theme::default()), 2);
+        assert_eq!(calculate_footer_height(30, &app, &Theme::default()), 3);
     }
 
     /// An app whose pane is unfocused while tmux bindings were resolved.
@@ -828,7 +833,7 @@ mod tests {
     fn test_unfocused_app_tracks_focus_and_hints() {
         let app = unfocused_app();
         assert!(!app.pane_active());
-        assert_eq!(app.tmux_hints().len(), 4);
+        assert_eq!(app.tmux_hints().len(), 5);
     }
 
     #[test]
@@ -848,6 +853,7 @@ mod tests {
         assert!(rendered.contains("C-b C-b n next"));
         assert!(rendered.contains("C-b C-b p prev"));
         assert!(rendered.contains("C-b C-b l last"));
+        assert!(rendered.contains("C-b C-b , rename"));
         assert!(!rendered.contains("quit"));
     }
 
@@ -889,11 +895,11 @@ mod tests {
     fn test_footer_height_covers_tmux_keys() {
         let app = unfocused_app();
         let theme = Theme::default();
-        // 33 usable columns: "c new" + "n next" fit on one line, the other
-        // two wrap.
-        assert_eq!(calculate_footer_height(35, &app, &theme), 2);
+        // 33 usable columns: "c new" + "n next" fit on one line, the rest
+        // wraps over two more.
+        assert_eq!(calculate_footer_height(35, &app, &theme), 3);
         // 18 usable columns: one entry per line.
-        assert_eq!(calculate_footer_height(20, &app, &theme), 4);
+        assert_eq!(calculate_footer_height(20, &app, &theme), 5);
     }
 
     #[test]

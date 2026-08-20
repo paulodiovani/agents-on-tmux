@@ -37,6 +37,9 @@ pub trait Tmux {
     fn list_keys(&self, table: &str) -> Result<Vec<KeyBinding>, TmuxError>;
     /// Returns the value of a single option from the global session options.
     fn show_options(&self, name: &str) -> Result<String, TmuxError>;
+    /// Opens the tmux command prompt on the calling client, pre-filled with
+    /// `initial`, running `template` on accept (`%%` expands to the input).
+    fn command_prompt(&self, initial: &str, template: &str) -> Result<(), TmuxError>;
     /// Evaluates a format string, targeting the given pane when provided.
     fn display_message(&self, pane: Option<&str>, message: &str) -> Result<String, TmuxError>;
 }
@@ -363,6 +366,14 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
             .map(|s| s.trim().to_string())
     }
 
+    /// Opens the tmux command prompt on the calling client, pre-filled with
+    /// `initial`, running `template` on accept (`%%` expands to the input).
+    fn command_prompt(&self, initial: &str, template: &str) -> Result<(), TmuxError> {
+        self.executor
+            .execute(&["command-prompt", "-I", initial, template])
+            .map(|_| ())
+    }
+
     /// Evaluates a format string, targeting the given pane when provided.
     fn display_message(&self, pane: Option<&str>, message: &str) -> Result<String, TmuxError> {
         let output = match pane {
@@ -492,6 +503,7 @@ mod tests {
                 Some(&"send-keys") => Ok(String::new()),
                 Some(&"set-option") => Ok(String::new()),
                 Some(&"resize-pane") => Ok(String::new()),
+                Some(&"command-prompt") => Ok(String::new()),
                 Some(&"split-window") => Ok(self.pane_id.borrow().clone()),
                 Some(&"list-keys") => Ok(concat!(
                     "bind-key -r -T prefix Up select-pane -U\n",
@@ -501,6 +513,7 @@ mod tests {
                     "bind-key    -T prefix n next-window\n",
                     "bind-key    -T prefix p previous-window\n",
                     "bind-key    -T prefix l last-window\n",
+                    "bind-key    -T prefix , rename-window\n",
                 )
                 .to_string()),
                 Some(&"show-options") => {
@@ -869,7 +882,7 @@ mod tests {
         let executor = MockCommandExecutor::with_session();
         let driver = TmuxDriver::with_executor(executor);
         let keys = driver.list_keys("prefix").unwrap();
-        assert_eq!(keys.len(), 6);
+        assert_eq!(keys.len(), 7);
 
         let find = |command: &str| {
             keys.iter()
@@ -880,6 +893,7 @@ mod tests {
         assert_eq!(find("new-window").key, "c");
         assert_eq!(find("next-window").key, "n");
         assert_eq!(find("last-window").key, "l");
+        assert_eq!(find("rename-window").key, ",");
     }
 
     #[test]
@@ -943,6 +957,30 @@ mod tests {
         let driver = TmuxDriver::with_executor(executor);
         let value = driver.show_options("prefix").unwrap();
         assert!(!value.contains('\n'));
+    }
+
+    #[test]
+    fn test_command_prompt_command_args() {
+        let executor = MockCommandExecutor::with_session();
+        let driver = TmuxDriver::with_executor(executor);
+        driver
+            .command_prompt("#W", "rename-window -t \"aot:1\" \"%%\"")
+            .unwrap();
+
+        let commands = driver.executor.commands.borrow();
+        let prompt_cmd = commands
+            .iter()
+            .find(|cmd| cmd.first().map(|s| s.as_str()) == Some("command-prompt"))
+            .unwrap();
+        assert_eq!(
+            prompt_cmd.as_slice(),
+            [
+                "command-prompt".to_string(),
+                "-I".to_string(),
+                "#W".to_string(),
+                "rename-window -t \"aot:1\" \"%%\"".to_string(),
+            ]
+        );
     }
 
     #[test]

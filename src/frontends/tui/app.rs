@@ -16,11 +16,12 @@ use crate::frontends::tui::theme::Theme;
 use crate::frontends::tui::ui;
 
 /// The nested-session commands worth advertising, with their footer labels.
-const HINTED_COMMANDS: [(&str, &str); 4] = [
+const HINTED_COMMANDS: [(&str, &str); 5] = [
     ("new-window", "new"),
     ("next-window", "next"),
     ("previous-window", "prev"),
     ("last-window", "last"),
+    ("rename-window", "rename"),
 ];
 
 /// Whether the server forwards pane focus changes to pane applications.
@@ -279,6 +280,7 @@ impl App {
                     Action::NavigateDown => self.navigate_down(),
                     Action::FocusWindow => self.focus_window(),
                     Action::CreateWindow => self.create_window(),
+                    Action::RenameWindow => self.rename_window(),
                     Action::SwitchTabLeft => self.switch_tab(self.active_tab.left()),
                     Action::SwitchTabRight => self.switch_tab(self.active_tab.right()),
                     _ => {}
@@ -360,6 +362,19 @@ impl App {
             logger::debug(&format!("app: kill window @{}", window.id));
             let _ = self.nested_driver.kill_window(window.id);
             let _ = self.refresh_windows();
+        }
+    }
+
+    /// Renames the selected window: opens the tmux command prompt on the
+    /// client the TUI inherited, pre-filled with the window's current name,
+    /// targeting the window in the nested session. The rename itself arrives
+    /// later through the usual control-mode refresh.
+    pub fn rename_window(&self) {
+        if let Some(window) = self.current_tab_window() {
+            logger::debug(&format!("app: rename window @{}", window.id));
+            let target = format!("{}:{}", self.nested_driver.session_name(), window.id);
+            let template = format!("rename-window -t \"{target}\" \"%%\"");
+            let _ = self.nested_driver.command_prompt(&window.name, &template);
         }
     }
 
@@ -763,6 +778,13 @@ mod tests {
                 _ => Err(command_failed("display-message")),
             }
         }
+
+        fn command_prompt(&self, initial: &str, template: &str) -> Result<(), TmuxError> {
+            self.calls
+                .borrow_mut()
+                .push(format!("command_prompt {initial} {template}"));
+            Ok(())
+        }
     }
 
     fn command_failed(command: &str) -> TmuxError {
@@ -897,6 +919,37 @@ mod tests {
     }
 
     #[test]
+    fn test_rename_window_prompts_for_selected_window() {
+        let nested = MockTmux::new();
+        let calls = nested.calls_rc();
+        let app = App::new(Box::new(nested), Box::new(MockTmux::new()), None, None).unwrap();
+
+        // Agents tab, first selection: agent-2, the claude window (id 2).
+        app.rename_window();
+
+        assert_eq!(
+            calls.borrow().last().unwrap(),
+            "command_prompt agent-2 rename-window -t \"agents-on-tmux:2\" \"%%\""
+        );
+    }
+
+    #[test]
+    fn test_handle_action_triggers_rename() {
+        let nested = MockTmux::new();
+        let calls = nested.calls_rc();
+        let mut app = App::new(Box::new(nested), Box::new(MockTmux::new()), None, None).unwrap();
+
+        app.handle_action(Action::RenameWindow);
+
+        assert!(
+            calls
+                .borrow()
+                .iter()
+                .any(|call| call.starts_with("command_prompt"))
+        );
+    }
+
+    #[test]
     fn test_handle_action_quit() {
         let (mut app, _, _) = test_app();
         app.handle_action(Action::Quit);
@@ -1000,6 +1053,7 @@ mod tests {
             ("n", "next-window"),
             ("p", "previous-window"),
             ("l", "last-window"),
+            (",", "rename-window"),
         ]
         .into_iter()
         .map(|(key, command)| KeyBinding {
@@ -1032,6 +1086,7 @@ mod tests {
                 ("C-b C-b n".to_string(), "next".to_string()),
                 ("C-b C-b p".to_string(), "prev".to_string()),
                 ("C-b C-b l".to_string(), "last".to_string()),
+                ("C-b C-b ,".to_string(), "rename".to_string()),
             ]
         );
     }
@@ -1052,7 +1107,7 @@ mod tests {
                 .collect(),
         );
         let app = hints_app(parent);
-        assert_eq!(app.tmux_hints().len(), 3);
+        assert_eq!(app.tmux_hints().len(), 4);
         assert!(!app.tmux_hints().iter().any(|(_, label)| label == "last"));
     }
 
