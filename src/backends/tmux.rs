@@ -34,16 +34,12 @@ pub trait Tmux {
     /// Resizes the given pane to an absolute width in columns.
     fn resize_pane(&self, pane_id: &str, width: u16) -> Result<(), TmuxError>;
     /// Lists the key bindings of the given key table (e.g. "prefix").
-    #[allow(dead_code)]
     fn list_keys(&self, table: &str) -> Result<Vec<KeyBinding>, TmuxError>;
     /// Returns the configured prefix key (e.g. "C-b").
-    #[allow(dead_code)]
     fn prefix_key(&self) -> Result<String, TmuxError>;
     /// Returns whether the given pane is the active pane of its window.
-    #[allow(dead_code)]
     fn is_pane_active(&self, pane_id: &str) -> Result<bool, TmuxError>;
     /// Returns whether the server-wide focus-events option is enabled.
-    #[allow(dead_code)]
     fn focus_events_enabled(&self) -> Result<bool, TmuxError>;
 }
 
@@ -79,7 +75,6 @@ pub struct Window {
 }
 
 /// A tmux key binding: the bound key and the command it runs.
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub struct KeyBinding {
     pub command: String,
@@ -226,7 +221,6 @@ fn parse_window_line(line: &str) -> Option<Window> {
 
 /// Parses one `list-keys -F '#{key}\t#{command}'` line; single quotes around
 /// the key (used by tmux for keys needing escaping) are stripped.
-#[allow(dead_code)]
 fn parse_key_line(line: &str) -> Option<KeyBinding> {
     let (key, command) = line.split_once('\t')?;
     let key = key.trim_matches('\'').trim();

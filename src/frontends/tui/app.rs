@@ -457,16 +457,12 @@ impl App {
 
     /// Returns whether the TUI pane is focused. Always true when focus
     /// tracking is inactive.
-    // TODO(phase-4): consumed by the footer; drop the allow once wired.
-    #[allow(dead_code)]
     pub fn pane_active(&self) -> bool {
         self.pane_active
     }
 
     /// Returns the tmux key sequences to advertise when the pane is not
     /// focused: (key sequence, label) pairs, e.g. ("C-b C-b c", "new").
-    // TODO(phase-4): consumed by the footer; drop the allow once wired.
-    #[allow(dead_code)]
     pub fn tmux_hints(&self) -> &[(String, String)] {
         &self.tmux_hints
     }
