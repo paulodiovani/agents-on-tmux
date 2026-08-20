@@ -15,6 +15,50 @@ use crate::frontends::tui::event::{Action, PendingAction, Tab, key_to_action};
 use crate::frontends::tui::theme::Theme;
 use crate::frontends::tui::ui;
 
+/// The nested-session commands worth advertising, with their footer labels.
+const HINTED_COMMANDS: [(&str, &str); 4] = [
+    ("new-window", "new"),
+    ("next-window", "next"),
+    ("previous-window", "prev"),
+    ("last-window", "last"),
+];
+
+/// Resolves the key sequences that reach the nested session from the user's
+/// own tmux bindings: parent prefix, send-prefix, then the bound key (e.g.
+/// "C-b C-b c"). Empty when anything cannot be resolved, so the footer falls
+/// back to the TUI's own keybindings.
+fn resolve_tmux_hints(driver: &dyn Tmux) -> Vec<(String, String)> {
+    let (Ok(prefix), Ok(keys)) = (driver.prefix_key(), driver.list_keys("prefix")) else {
+        return Vec::new();
+    };
+    if prefix.is_empty() {
+        return Vec::new();
+    }
+
+    let send_prefix = keys
+        .iter()
+        .find(|b| b.command.split_whitespace().next() == Some("send-prefix"))
+        .map(|b| b.key.clone())
+        .unwrap_or_else(|| prefix.clone());
+
+    let binding_for = |command: &str| {
+        keys.iter()
+            .find(|b| b.command.split_whitespace().next() == Some(command))
+            .map(|b| b.key.clone())
+    };
+
+    HINTED_COMMANDS
+        .iter()
+        .filter_map(|(command, label)| {
+            let key = binding_for(command)?;
+            Some((
+                format!("{prefix} {send_prefix} {key}"),
+                (*label).to_string(),
+            ))
+        })
+        .collect()
+}
+
 /// Main application state for the TUI frontend.
 pub struct App {
     active_tab: Tab,
@@ -29,6 +73,7 @@ pub struct App {
     parent_driver: Box<dyn Tmux>,
     pending_action: Option<PendingAction>,
     running: bool,
+    tmux_hints: Vec<(String, String)>,
     window_starts: HashMap<u32, Instant>,
     windows: Vec<Window>,
     windows_selected: usize,
@@ -55,6 +100,12 @@ impl App {
             (Some(id), true) => parent_driver.is_pane_active(id).unwrap_or(true),
             _ => true,
         };
+        // Bindings are read once: rebinds while aot runs are not picked up.
+        let tmux_hints = if focus_tracking {
+            resolve_tmux_hints(parent_driver.as_ref())
+        } else {
+            Vec::new()
+        };
 
         let mut app = Self {
             active_tab: Tab::Windows,
@@ -69,6 +120,7 @@ impl App {
             parent_driver,
             pending_action: None,
             running: true,
+            tmux_hints,
             window_starts: HashMap::new(),
             windows: Vec::new(),
             windows_selected: 0,
@@ -411,6 +463,14 @@ impl App {
         self.pane_active
     }
 
+    /// Returns the tmux key sequences to advertise when the pane is not
+    /// focused: (key sequence, label) pairs, e.g. ("C-b C-b c", "new").
+    // TODO(phase-4): consumed by the footer; drop the allow once wired.
+    #[allow(dead_code)]
+    pub fn tmux_hints(&self) -> &[(String, String)] {
+        &self.tmux_hints
+    }
+
     /// Returns the selection index within the current tab.
     pub fn current_selected(&self) -> usize {
         match self.active_tab {
@@ -536,8 +596,10 @@ mod tests {
     struct MockTmux {
         calls: Rc<std::cell::RefCell<Vec<String>>>,
         focus_events: bool,
+        keys: Option<Vec<KeyBinding>>,
         next_id: Rc<std::cell::RefCell<u32>>,
         pane_active: bool,
+        prefix: Option<String>,
         windows: Rc<std::cell::RefCell<Vec<Window>>>,
     }
 
@@ -546,8 +608,10 @@ mod tests {
             Self {
                 calls: Rc::new(std::cell::RefCell::new(Vec::new())),
                 focus_events: false,
+                keys: Some(default_key_bindings()),
                 next_id: Rc::new(std::cell::RefCell::new(5)),
                 pane_active: true,
+                prefix: Some("C-b".to_string()),
                 windows: Rc::new(std::cell::RefCell::new(vec![
                     Window {
                         current_dir: "/home/user/project1".to_string(),
@@ -660,11 +724,19 @@ mod tests {
         }
 
         fn list_keys(&self, _table: &str) -> Result<Vec<KeyBinding>, TmuxError> {
-            Ok(Vec::new())
+            self.keys.clone().ok_or(TmuxError::CommandFailed {
+                message: "list-keys failed".to_string(),
+                stderr: String::new(),
+                code: Some(1),
+            })
         }
 
         fn prefix_key(&self) -> Result<String, TmuxError> {
-            Ok("C-b".to_string())
+            self.prefix.clone().ok_or(TmuxError::CommandFailed {
+                message: "show-options failed".to_string(),
+                stderr: String::new(),
+                code: Some(1),
+            })
         }
 
         fn is_pane_active(&self, _pane_id: &str) -> Result<bool, TmuxError> {
@@ -894,6 +966,137 @@ mod tests {
             Some("%7".to_string()),
         )
         .unwrap()
+    }
+
+    fn default_key_bindings() -> Vec<KeyBinding> {
+        [
+            ("C-b", "send-prefix"),
+            ("c", "new-window"),
+            ("n", "next-window"),
+            ("p", "previous-window"),
+            ("l", "last-window"),
+        ]
+        .into_iter()
+        .map(|(key, command)| KeyBinding {
+            key: key.to_string(),
+            command: command.to_string(),
+        })
+        .collect()
+    }
+
+    fn hints_app(parent: MockTmux) -> App {
+        let mut parent = parent;
+        parent.focus_events = true;
+        let driver = MockTmux::new();
+        App::new(
+            Box::new(driver),
+            Box::new(parent),
+            None,
+            Some("%7".to_string()),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn test_tmux_hints_resolved_when_tracking() {
+        let app = hints_app(MockTmux::new());
+        assert_eq!(
+            app.tmux_hints(),
+            [
+                ("C-b C-b c".to_string(), "new".to_string()),
+                ("C-b C-b n".to_string(), "next".to_string()),
+                ("C-b C-b p".to_string(), "prev".to_string()),
+                ("C-b C-b l".to_string(), "last".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_tmux_hints_empty_without_focus_tracking() {
+        let (app, _, _) = test_app();
+        assert!(app.tmux_hints().is_empty());
+    }
+
+    #[test]
+    fn test_tmux_hints_skip_unbound_commands() {
+        let mut parent = MockTmux::new();
+        parent.keys = Some(
+            default_key_bindings()
+                .into_iter()
+                .filter(|b| b.command != "last-window")
+                .collect(),
+        );
+        let app = hints_app(parent);
+        assert_eq!(app.tmux_hints().len(), 3);
+        assert!(!app.tmux_hints().iter().any(|(_, label)| label == "last"));
+    }
+
+    #[test]
+    fn test_tmux_hints_send_prefix_falls_back_to_prefix() {
+        let mut parent = MockTmux::new();
+        parent.prefix = Some("C-a".to_string());
+        parent.keys = Some(
+            default_key_bindings()
+                .into_iter()
+                .filter(|b| b.command != "send-prefix")
+                .collect(),
+        );
+        let app = hints_app(parent);
+        assert_eq!(
+            app.tmux_hints()[0],
+            ("C-a C-a c".to_string(), "new".to_string())
+        );
+    }
+
+    #[test]
+    fn test_tmux_hints_use_bound_send_prefix_key() {
+        let mut parent = MockTmux::new();
+        parent.prefix = Some("C-Space".to_string());
+        let mut keys = default_key_bindings();
+        keys[0].key = "C-b".to_string();
+        parent.keys = Some(keys);
+        let app = hints_app(parent);
+        assert_eq!(
+            app.tmux_hints()[0],
+            ("C-Space C-b c".to_string(), "new".to_string())
+        );
+    }
+
+    #[test]
+    fn test_tmux_hints_match_first_word_of_command() {
+        let mut parent = MockTmux::new();
+        let mut keys = default_key_bindings();
+        keys[1].command = "new-window -c #{pane_current_path}".to_string();
+        parent.keys = Some(keys);
+        let app = hints_app(parent);
+        assert_eq!(
+            app.tmux_hints()[0],
+            ("C-b C-b c".to_string(), "new".to_string())
+        );
+    }
+
+    #[test]
+    fn test_tmux_hints_empty_when_list_keys_fails() {
+        let mut parent = MockTmux::new();
+        parent.keys = None;
+        let app = hints_app(parent);
+        assert!(app.tmux_hints().is_empty());
+    }
+
+    #[test]
+    fn test_tmux_hints_empty_when_prefix_fails() {
+        let mut parent = MockTmux::new();
+        parent.prefix = None;
+        let app = hints_app(parent);
+        assert!(app.tmux_hints().is_empty());
+    }
+
+    #[test]
+    fn test_tmux_hints_empty_when_prefix_blank() {
+        let mut parent = MockTmux::new();
+        parent.prefix = Some(String::new());
+        let app = hints_app(parent);
+        assert!(app.tmux_hints().is_empty());
     }
 
     #[test]
