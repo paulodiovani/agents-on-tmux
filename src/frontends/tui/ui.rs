@@ -629,24 +629,39 @@ mod tests {
             Ok(())
         }
         fn list_keys(&self, _table: &str) -> Result<Vec<KeyBinding>, TmuxError> {
-            self.keys.clone().ok_or(TmuxError::CommandFailed {
-                message: "list-keys failed".to_string(),
-                stderr: String::new(),
-                code: Some(1),
-            })
+            self.keys.clone().ok_or_else(|| command_failed("list-keys"))
         }
-        fn prefix_key(&self) -> Result<String, TmuxError> {
-            self.prefix.clone().ok_or(TmuxError::CommandFailed {
-                message: "show-options failed".to_string(),
-                stderr: String::new(),
-                code: Some(1),
-            })
+        fn show_options(&self, server: bool, name: &str) -> Result<String, TmuxError> {
+            match (server, name) {
+                (false, "prefix") => self
+                    .prefix
+                    .clone()
+                    .ok_or_else(|| command_failed("show-options")),
+                (true, "focus-events") => Ok(if self.focus_events {
+                    "on".to_string()
+                } else {
+                    "off".to_string()
+                }),
+                _ => Err(command_failed("show-options")),
+            }
         }
-        fn is_pane_active(&self, _pane_id: &str) -> Result<bool, TmuxError> {
-            Ok(self.pane_active)
+        fn display_message(&self, pane: Option<&str>, message: &str) -> Result<String, TmuxError> {
+            match (pane, message) {
+                (Some(_), "#{pane_active}") => Ok(if self.pane_active {
+                    "1".to_string()
+                } else {
+                    "0".to_string()
+                }),
+                _ => Err(command_failed("display-message")),
+            }
         }
-        fn focus_events_enabled(&self) -> Result<bool, TmuxError> {
-            Ok(self.focus_events)
+    }
+
+    fn command_failed(command: &str) -> TmuxError {
+        TmuxError::CommandFailed {
+            message: format!("{command} failed"),
+            stderr: String::new(),
+            code: Some(1),
         }
     }
 
