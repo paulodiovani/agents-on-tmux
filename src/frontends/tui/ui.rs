@@ -383,7 +383,7 @@ fn footer_entries(app: &App) -> Vec<(String, String, bool)> {
 
     entries.extend([
         ("⏎".to_string(), "focus".to_string(), true),
-        ("n".to_string(), "new".to_string(), true),
+        ("c".to_string(), "new".to_string(), true),
         ("d".to_string(), "kill".to_string(), true),
         ("q".to_string(), "quit".to_string(), true),
     ]);
