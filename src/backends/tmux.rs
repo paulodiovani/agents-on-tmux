@@ -218,17 +218,31 @@ fn parse_window_line(line: &str) -> Option<Window> {
     })
 }
 
-/// Parses one `list-keys -F '#{key}\t#{command}'` line; single quotes around
-/// the key (used by tmux for keys needing escaping) are stripped.
+/// Parses one `list-keys` output line, shaped `bind-key [-r] -T <table>
+/// <key> <command…>`. list-keys aligns its columns with padding — and pads
+/// the `-r` slot with blanks on non-repeat rows — so fields are split on any
+/// whitespace. The table is skipped: it repeats the -T argument we sent.
+/// Single quotes around keys needing escaping (e.g. '"') are stripped.
 fn parse_key_line(line: &str) -> Option<KeyBinding> {
-    let (key, command) = line.split_once('\t')?;
-    let key = key.trim_matches('\'').trim();
-    let command = command.trim();
+    let mut parts = line.split_whitespace();
+
+    if parts.next()? != "bind-key" {
+        return None;
+    }
+    match parts.next()? {
+        "-T" => {}
+        "-r" if parts.next()? == "-T" => {}
+        _ => return None,
+    }
+    let _table = parts.next()?;
+    let key = parts.next()?.trim_matches('\'');
+    let command = parts.collect::<Vec<_>>().join(" ");
+
     if key.is_empty() || command.is_empty() {
         return None;
     }
     Some(KeyBinding {
-        command: command.to_string(),
+        command,
         key: key.to_string(),
     })
 }
@@ -336,11 +350,10 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
         Ok(())
     }
 
-    /// Lists the key bindings of the given key table (e.g. "prefix").
+    /// Lists the key bindings of the given key table (e.g. "prefix"), as
+    /// `bind-key [-r] -T <table> <key> <command>` lines.
     fn list_keys(&self, table: &str) -> Result<Vec<KeyBinding>, TmuxError> {
-        let output =
-            self.executor
-                .execute(&["list-keys", "-T", table, "-F", "#{key}\t#{command}"])?;
+        let output = self.executor.execute(&["list-keys", "-T", table])?;
         Ok(output.lines().filter_map(parse_key_line).collect())
     }
 
@@ -483,10 +496,16 @@ mod tests {
                 Some(&"set-option") => Ok(String::new()),
                 Some(&"resize-pane") => Ok(String::new()),
                 Some(&"split-window") => Ok(self.pane_id.borrow().clone()),
-                Some(&"list-keys") => Ok(
-                    "C-b\tsend-prefix\nc\tnew-window\nn\tnext-window\np\tprevious-window\nl\tlast-window\n"
-                        .to_string(),
-                ),
+                Some(&"list-keys") => Ok(concat!(
+                    "bind-key -r -T prefix Up select-pane -U\n",
+                    // Non-repeat rows pad the -r slot with blanks.
+                    "bind-key    -T prefix C-b send-prefix\n",
+                    "bind-key    -T prefix c new-window\n",
+                    "bind-key    -T prefix n next-window\n",
+                    "bind-key    -T prefix p previous-window\n",
+                    "bind-key    -T prefix l last-window\n",
+                )
+                .to_string()),
                 Some(&"show-options") => {
                     // Option tables matter: query a server option with -g
                     // (or a session option with -s) and tmux fails.
@@ -500,7 +519,11 @@ mod tests {
                         }
                         Ok(format!(
                             "{}\n",
-                            if *self.focus_events.borrow() { "on" } else { "off" }
+                            if *self.focus_events.borrow() {
+                                "on"
+                            } else {
+                                "off"
+                            }
                         ))
                     } else if args.contains(&"prefix") && args.contains(&"-gv") {
                         Ok("C-b\n".to_string())
@@ -803,30 +826,47 @@ mod tests {
 
     #[test]
     fn test_parse_key_line_valid() {
-        let binding = parse_key_line("c\tnew-window").unwrap();
+        let binding = parse_key_line("bind-key -T prefix c new-window").unwrap();
         assert_eq!(binding.key, "c");
         assert_eq!(binding.command, "new-window");
     }
 
     #[test]
-    fn test_parse_key_line_strips_quotes_around_key() {
-        let binding = parse_key_line("'C-b'\tsend-prefix").unwrap();
+    fn test_parse_key_line_tolerates_column_padding() {
+        // list-keys aligns columns; non-repeat rows pad the -r slot.
+        let binding = parse_key_line("bind-key    -T prefix   C-b send-prefix").unwrap();
         assert_eq!(binding.key, "C-b");
         assert_eq!(binding.command, "send-prefix");
     }
 
     #[test]
+    fn test_parse_key_line_repeat_binding() {
+        let binding = parse_key_line("bind-key -r -T prefix Up select-pane -U").unwrap();
+        assert_eq!(binding.key, "Up");
+        assert_eq!(binding.command, "select-pane -U");
+    }
+
+    #[test]
+    fn test_parse_key_line_strips_quotes_around_key() {
+        let binding = parse_key_line("bind-key -T prefix '\"' split-window").unwrap();
+        assert_eq!(binding.key, "\"");
+        assert_eq!(binding.command, "split-window");
+    }
+
+    #[test]
     fn test_parse_key_line_keeps_command_spaces() {
-        let binding = parse_key_line("c\tnew-window -c /tmp").unwrap();
+        let binding = parse_key_line("bind-key -T prefix c new-window -c /tmp").unwrap();
         assert_eq!(binding.command, "new-window -c /tmp");
     }
 
     #[test]
     fn test_parse_key_line_invalid() {
-        assert!(parse_key_line("no-tab-here").is_none());
-        assert!(parse_key_line("\tnew-window").is_none());
-        assert!(parse_key_line("c\t").is_none());
-        assert!(parse_key_line("\t").is_none());
+        assert!(parse_key_line("no-bind-here").is_none());
+        assert!(parse_key_line("bind-key").is_none());
+        assert!(parse_key_line("bind-key -T").is_none());
+        assert!(parse_key_line("bind-key -T prefix").is_none());
+        assert!(parse_key_line("bind-key -T prefix c").is_none());
+        assert!(parse_key_line("bind-key -X prefix c new-window").is_none());
     }
 
     #[test]
@@ -834,11 +874,17 @@ mod tests {
         let executor = MockCommandExecutor::with_session();
         let driver = TmuxDriver::with_executor(executor);
         let keys = driver.list_keys("prefix").unwrap();
-        assert_eq!(keys.len(), 5);
-        assert_eq!(keys[0].key, "C-b");
-        assert_eq!(keys[0].command, "send-prefix");
-        assert_eq!(keys[1].key, "c");
-        assert_eq!(keys[1].command, "new-window");
+        assert_eq!(keys.len(), 6);
+
+        let find = |command: &str| {
+            keys.iter()
+                .find(|b| b.command == command)
+                .unwrap_or_else(|| panic!("no binding for {command}"))
+        };
+        assert_eq!(find("send-prefix").key, "C-b");
+        assert_eq!(find("new-window").key, "c");
+        assert_eq!(find("next-window").key, "n");
+        assert_eq!(find("last-window").key, "l");
     }
 
     #[test]
@@ -852,10 +898,14 @@ mod tests {
             .iter()
             .find(|cmd| cmd.first().map(|s| s.as_str()) == Some("list-keys"))
             .unwrap();
-        assert!(list_keys_cmd.contains(&"-T".to_string()));
-        assert!(list_keys_cmd.contains(&"prefix".to_string()));
-        assert!(list_keys_cmd.contains(&"-F".to_string()));
-        assert!(list_keys_cmd.contains(&"#{key}\t#{command}".to_string()));
+        assert_eq!(
+            list_keys_cmd.as_slice(),
+            [
+                "list-keys".to_string(),
+                "-T".to_string(),
+                "prefix".to_string()
+            ]
+        );
     }
 
     #[test]
