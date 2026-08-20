@@ -24,10 +24,9 @@ const HINTED_COMMANDS: [(&str, &str); 4] = [
 ];
 
 /// Whether the server forwards pane focus changes to pane applications.
-/// focus-events is a server option, so it lives in the server options table.
 fn focus_events_on(driver: &dyn Tmux) -> bool {
     driver
-        .show_options(true, "focus-events")
+        .show_options("focus-events")
         .is_ok_and(|value| value == "on")
 }
 
@@ -47,7 +46,7 @@ fn resolve_tmux_hints(driver: &dyn Tmux) -> Vec<(String, String)> {
     let Ok(keys) = driver.list_keys("prefix") else {
         return Vec::new();
     };
-    let prefix = driver.show_options(false, "prefix").unwrap_or_default();
+    let prefix = driver.show_options("prefix").unwrap_or_default();
     if prefix.is_empty() {
         return Vec::new();
     }
@@ -739,13 +738,13 @@ mod tests {
             self.keys.clone().ok_or_else(|| command_failed("list-keys"))
         }
 
-        fn show_options(&self, server: bool, name: &str) -> Result<String, TmuxError> {
-            match (server, name) {
-                (false, "prefix") => self
+        fn show_options(&self, name: &str) -> Result<String, TmuxError> {
+            match name {
+                "prefix" => self
                     .prefix
                     .clone()
                     .ok_or_else(|| command_failed("show-options")),
-                (true, "focus-events") => Ok(if self.focus_events {
+                "focus-events" => Ok(if self.focus_events {
                     "on".to_string()
                 } else {
                     "off".to_string()

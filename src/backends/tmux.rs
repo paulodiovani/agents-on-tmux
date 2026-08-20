@@ -35,9 +35,8 @@ pub trait Tmux {
     fn resize_pane(&self, pane_id: &str, width: u16) -> Result<(), TmuxError>;
     /// Lists the key bindings of the given key table (e.g. "prefix").
     fn list_keys(&self, table: &str) -> Result<Vec<KeyBinding>, TmuxError>;
-    /// Returns the value of a single option. `server` selects the server
-    /// options table instead of the global session options.
-    fn show_options(&self, server: bool, name: &str) -> Result<String, TmuxError>;
+    /// Returns the value of a single option from the global session options.
+    fn show_options(&self, name: &str) -> Result<String, TmuxError>;
     /// Evaluates a format string, targeting the given pane when provided.
     fn display_message(&self, pane: Option<&str>, message: &str) -> Result<String, TmuxError>;
 }
@@ -357,12 +356,10 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
         Ok(output.lines().filter_map(parse_key_line).collect())
     }
 
-    /// Returns the value of a single option. `server` selects the server
-    /// options table instead of the global session options.
-    fn show_options(&self, server: bool, name: &str) -> Result<String, TmuxError> {
-        let table = if server { "-sv" } else { "-gv" };
+    /// Returns the value of a single option from the global session options.
+    fn show_options(&self, name: &str) -> Result<String, TmuxError> {
         self.executor
-            .execute(&["show-options", table, name])
+            .execute(&["show-options", "-gv", name])
             .map(|s| s.trim().to_string())
     }
 
@@ -507,16 +504,14 @@ mod tests {
                 )
                 .to_string()),
                 Some(&"show-options") => {
-                    // Option tables matter: query a server option with -g
-                    // (or a session option with -s) and tmux fails.
+                    if !args.contains(&"-gv") {
+                        return Err(TmuxError::CommandFailed {
+                            message: format!("unknown option: {:?}", args),
+                            stderr: String::new(),
+                            code: Some(1),
+                        });
+                    }
                     if args.contains(&"focus-events") {
-                        if !args.contains(&"-sv") {
-                            return Err(TmuxError::CommandFailed {
-                                message: "unknown option: focus-events".to_string(),
-                                stderr: String::new(),
-                                code: Some(1),
-                            });
-                        }
                         Ok(format!(
                             "{}\n",
                             if *self.focus_events.borrow() {
@@ -525,7 +520,7 @@ mod tests {
                                 "off"
                             }
                         ))
-                    } else if args.contains(&"prefix") && args.contains(&"-gv") {
+                    } else if args.contains(&"prefix") {
                         Ok("C-b\n".to_string())
                     } else {
                         Err(TmuxError::CommandFailed {
@@ -909,17 +904,17 @@ mod tests {
     }
 
     #[test]
-    fn test_show_options_global_prefix() {
+    fn test_show_options_prefix() {
         let executor = MockCommandExecutor::with_session();
         let driver = TmuxDriver::with_executor(executor);
-        assert_eq!(driver.show_options(false, "prefix").unwrap(), "C-b");
+        assert_eq!(driver.show_options("prefix").unwrap(), "C-b");
     }
 
     #[test]
-    fn test_show_options_global_command_args() {
+    fn test_show_options_command_args() {
         let executor = MockCommandExecutor::with_session();
         let driver = TmuxDriver::with_executor(executor);
-        let _ = driver.show_options(false, "prefix");
+        let _ = driver.show_options("prefix");
 
         let commands = driver.executor.commands.borrow();
         let show_options_cmd = commands
@@ -932,39 +927,21 @@ mod tests {
     }
 
     #[test]
-    fn test_show_options_server_focus_events() {
+    fn test_show_options_focus_events() {
         let executor = MockCommandExecutor::with_focus_events();
         let driver = TmuxDriver::with_executor(executor);
-        assert_eq!(driver.show_options(true, "focus-events").unwrap(), "on");
+        assert_eq!(driver.show_options("focus-events").unwrap(), "on");
 
         let executor = MockCommandExecutor::with_session();
         let driver = TmuxDriver::with_executor(executor);
-        assert_eq!(driver.show_options(true, "focus-events").unwrap(), "off");
-    }
-
-    #[test]
-    fn test_show_options_server_command_args() {
-        // focus-events is a server option: reading it from the session
-        // options table fails, so the server table must be selected.
-        let executor = MockCommandExecutor::with_focus_events();
-        let driver = TmuxDriver::with_executor(executor);
-        assert!(driver.show_options(true, "focus-events").is_ok());
-
-        let commands = driver.executor.commands.borrow();
-        let show_cmd = commands
-            .iter()
-            .find(|cmd| cmd.first().map(|s| s.as_str()) == Some("show-options"))
-            .unwrap();
-        assert!(show_cmd.contains(&"-sv".to_string()));
-        assert!(!show_cmd.contains(&"-gv".to_string()));
-        assert!(show_cmd.contains(&"focus-events".to_string()));
+        assert_eq!(driver.show_options("focus-events").unwrap(), "off");
     }
 
     #[test]
     fn test_show_options_trims_output() {
         let executor = MockCommandExecutor::with_session();
         let driver = TmuxDriver::with_executor(executor);
-        let value = driver.show_options(false, "prefix").unwrap();
+        let value = driver.show_options("prefix").unwrap();
         assert!(!value.contains('\n'));
     }
 

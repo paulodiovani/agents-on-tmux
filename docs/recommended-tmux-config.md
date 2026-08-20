@@ -16,10 +16,8 @@ Update to your prefix, or preferred key.
 ### Focus events
 
 ```tmux
-set-option -s focus-events on
+set-option -g focus-events on
 ```
-
-`focus-events` is a tmux **server** option, hence `-s` (`set -s` also works); `set -g` does not work for it.
 
 Required for the TUI footer to switch keybinding hints by focus: while the
 TUI pane is focused it shows the TUI's own keys (`n new`, `q quit`, ...);

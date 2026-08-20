@@ -17,9 +17,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - The side panel now retains its width when the terminal or window is resized (only when started in normal mode, with both the TUI pane and the nested session)
 
-### Fixed
-- `focus-events` is a tmux server option: it is now queried from the server options table (`show-options -s`) and documented as `set -s focus-events on`. Querying the session options table always failed, which silently disabled the focus-aware footer
-
 ## [0.3.0] - 2026-08-09
 
 ### Added
