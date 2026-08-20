@@ -522,7 +522,7 @@ fn count_windows_for_tab(app: &App, tab: Tab) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backends::tmux::{Tmux, TmuxError};
+    use crate::backends::tmux::{KeyBinding, Tmux, TmuxError};
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::buffer::Buffer;
@@ -610,6 +610,18 @@ mod tests {
         }
         fn resize_pane(&self, _pane_id: &str, _width: u16) -> Result<(), TmuxError> {
             Ok(())
+        }
+        fn list_keys(&self, _table: &str) -> Result<Vec<KeyBinding>, TmuxError> {
+            Ok(Vec::new())
+        }
+        fn prefix_key(&self) -> Result<String, TmuxError> {
+            Ok("C-b".to_string())
+        }
+        fn is_pane_active(&self, _pane_id: &str) -> Result<bool, TmuxError> {
+            Ok(true)
+        }
+        fn focus_events_enabled(&self) -> Result<bool, TmuxError> {
+            Ok(false)
         }
     }
 

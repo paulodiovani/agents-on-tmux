@@ -33,6 +33,18 @@ pub trait Tmux {
     fn split_window(&self, command: &str, width: u16) -> Result<String, TmuxError>;
     /// Resizes the given pane to an absolute width in columns.
     fn resize_pane(&self, pane_id: &str, width: u16) -> Result<(), TmuxError>;
+    /// Lists the key bindings of the given key table (e.g. "prefix").
+    #[allow(dead_code)]
+    fn list_keys(&self, table: &str) -> Result<Vec<KeyBinding>, TmuxError>;
+    /// Returns the configured prefix key (e.g. "C-b").
+    #[allow(dead_code)]
+    fn prefix_key(&self) -> Result<String, TmuxError>;
+    /// Returns whether the given pane is the active pane of its window.
+    #[allow(dead_code)]
+    fn is_pane_active(&self, pane_id: &str) -> Result<bool, TmuxError>;
+    /// Returns whether the server-wide focus-events option is enabled.
+    #[allow(dead_code)]
+    fn focus_events_enabled(&self) -> Result<bool, TmuxError>;
 }
 
 pub const SESSION_NAME: &str = "agents-on-tmux";
@@ -64,6 +76,14 @@ pub struct Window {
     pub notification_pending: bool,
     pub running_command: String,
     pub started_at: Option<Instant>,
+}
+
+/// A tmux key binding: the bound key and the command it runs.
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq)]
+pub struct KeyBinding {
+    pub command: String,
+    pub key: String,
 }
 
 pub fn check_inside_tmux() -> Result<(), TmuxError> {
@@ -204,6 +224,22 @@ fn parse_window_line(line: &str) -> Option<Window> {
     })
 }
 
+/// Parses one `list-keys -F '#{key}\t#{command}'` line; single quotes around
+/// the key (used by tmux for keys needing escaping) are stripped.
+#[allow(dead_code)]
+fn parse_key_line(line: &str) -> Option<KeyBinding> {
+    let (key, command) = line.split_once('\t')?;
+    let key = key.trim_matches('\'').trim();
+    let command = command.trim();
+    if key.is_empty() || command.is_empty() {
+        return None;
+    }
+    Some(KeyBinding {
+        command: command.to_string(),
+        key: key.to_string(),
+    })
+}
+
 impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
     /// Returns the session name this driver targets.
     fn session_name(&self) -> &str {
@@ -306,6 +342,35 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
             .execute(&["resize-pane", "-t", pane_id, "-x", &width])?;
         Ok(())
     }
+
+    /// Lists the key bindings of the given key table (e.g. "prefix").
+    fn list_keys(&self, table: &str) -> Result<Vec<KeyBinding>, TmuxError> {
+        let output =
+            self.executor
+                .execute(&["list-keys", "-T", table, "-F", "#{key}\t#{command}"])?;
+        Ok(output.lines().filter_map(parse_key_line).collect())
+    }
+
+    /// Returns the configured prefix key (e.g. "C-b").
+    fn prefix_key(&self) -> Result<String, TmuxError> {
+        self.executor
+            .execute(&["show-options", "-gv", "prefix"])
+            .map(|s| s.trim().to_string())
+    }
+
+    /// Returns whether the given pane is the active pane of its window.
+    fn is_pane_active(&self, pane_id: &str) -> Result<bool, TmuxError> {
+        self.executor
+            .execute(&["display-message", "-p", "-t", pane_id, "#{pane_active}"])
+            .map(|s| s.trim() == "1")
+    }
+
+    /// Returns whether the server-wide focus-events option is enabled.
+    fn focus_events_enabled(&self) -> Result<bool, TmuxError> {
+        self.executor
+            .execute(&["show-options", "-gv", "focus-events"])
+            .map(|s| s.trim() == "on")
+    }
 }
 
 #[cfg(test)]
@@ -317,6 +382,8 @@ mod tests {
     /// Mock command executor for testing.
     struct MockCommandExecutor {
         commands: RefCell<Vec<Vec<String>>>,
+        focus_events: RefCell<bool>,
+        pane_active: RefCell<bool>,
         pane_id: RefCell<String>,
         session_exists: RefCell<bool>,
         windows: RefCell<Vec<Window>>,
@@ -326,6 +393,8 @@ mod tests {
         fn new() -> Self {
             Self {
                 commands: RefCell::new(Vec::new()),
+                focus_events: RefCell::new(false),
+                pane_active: RefCell::new(true),
                 pane_id: RefCell::new("%99".to_string()),
                 session_exists: RefCell::new(false),
                 windows: RefCell::new(Vec::new()),
@@ -335,6 +404,12 @@ mod tests {
         fn with_session() -> Self {
             let mock = Self::new();
             *mock.session_exists.borrow_mut() = true;
+            mock
+        }
+
+        fn with_focus_events() -> Self {
+            let mock = Self::new();
+            *mock.focus_events.borrow_mut() = true;
             mock
         }
     }
@@ -415,6 +490,30 @@ mod tests {
                 Some(&"set-option") => Ok(String::new()),
                 Some(&"resize-pane") => Ok(String::new()),
                 Some(&"split-window") => Ok(self.pane_id.borrow().clone()),
+                Some(&"list-keys") => Ok(
+                    "C-b\tsend-prefix\nc\tnew-window\nn\tnext-window\np\tprevious-window\nl\tlast-window\n"
+                        .to_string(),
+                ),
+                Some(&"show-options") => {
+                    if args.contains(&"focus-events") {
+                        Ok(format!(
+                            "{}\n",
+                            if *self.focus_events.borrow() { "on" } else { "off" }
+                        ))
+                    } else if args.contains(&"prefix") {
+                        Ok("C-b\n".to_string())
+                    } else {
+                        Err(TmuxError::CommandFailed {
+                            message: format!("unknown option: {:?}", args),
+                            stderr: String::new(),
+                            code: Some(1),
+                        })
+                    }
+                }
+                Some(&"display-message") => Ok(format!(
+                    "{}\n",
+                    if *self.pane_active.borrow() { "1" } else { "0" }
+                )),
                 _ => Err(TmuxError::CommandFailed {
                     message: format!("unknown command: {:?}", args),
                     stderr: String::new(),
@@ -692,5 +791,140 @@ mod tests {
             message,
             "Cannot run aot inside its own dedicated session 'agents-on-tmux'."
         );
+    }
+
+    #[test]
+    fn test_parse_key_line_valid() {
+        let binding = parse_key_line("c\tnew-window").unwrap();
+        assert_eq!(binding.key, "c");
+        assert_eq!(binding.command, "new-window");
+    }
+
+    #[test]
+    fn test_parse_key_line_strips_quotes_around_key() {
+        let binding = parse_key_line("'C-b'\tsend-prefix").unwrap();
+        assert_eq!(binding.key, "C-b");
+        assert_eq!(binding.command, "send-prefix");
+    }
+
+    #[test]
+    fn test_parse_key_line_keeps_command_spaces() {
+        let binding = parse_key_line("c\tnew-window -c /tmp").unwrap();
+        assert_eq!(binding.command, "new-window -c /tmp");
+    }
+
+    #[test]
+    fn test_parse_key_line_invalid() {
+        assert!(parse_key_line("no-tab-here").is_none());
+        assert!(parse_key_line("\tnew-window").is_none());
+        assert!(parse_key_line("c\t").is_none());
+        assert!(parse_key_line("\t").is_none());
+    }
+
+    #[test]
+    fn test_list_keys_parses_bindings() {
+        let executor = MockCommandExecutor::with_session();
+        let driver = TmuxDriver::with_executor(executor);
+        let keys = driver.list_keys("prefix").unwrap();
+        assert_eq!(keys.len(), 5);
+        assert_eq!(keys[0].key, "C-b");
+        assert_eq!(keys[0].command, "send-prefix");
+        assert_eq!(keys[1].key, "c");
+        assert_eq!(keys[1].command, "new-window");
+    }
+
+    #[test]
+    fn test_list_keys_command_args() {
+        let executor = MockCommandExecutor::with_session();
+        let driver = TmuxDriver::with_executor(executor);
+        let _ = driver.list_keys("prefix");
+
+        let commands = driver.executor.commands.borrow();
+        let list_keys_cmd = commands
+            .iter()
+            .find(|cmd| cmd.first().map(|s| s.as_str()) == Some("list-keys"))
+            .unwrap();
+        assert!(list_keys_cmd.contains(&"-T".to_string()));
+        assert!(list_keys_cmd.contains(&"prefix".to_string()));
+        assert!(list_keys_cmd.contains(&"-F".to_string()));
+        assert!(list_keys_cmd.contains(&"#{key}\t#{command}".to_string()));
+    }
+
+    #[test]
+    fn test_prefix_key() {
+        let executor = MockCommandExecutor::with_session();
+        let driver = TmuxDriver::with_executor(executor);
+        assert_eq!(driver.prefix_key().unwrap(), "C-b");
+    }
+
+    #[test]
+    fn test_prefix_key_command_args() {
+        let executor = MockCommandExecutor::with_session();
+        let driver = TmuxDriver::with_executor(executor);
+        let _ = driver.prefix_key();
+
+        let commands = driver.executor.commands.borrow();
+        let show_options_cmd = commands
+            .iter()
+            .find(|cmd| cmd.first().map(|s| s.as_str()) == Some("show-options"))
+            .unwrap();
+        assert!(show_options_cmd.contains(&"-gv".to_string()));
+        assert!(show_options_cmd.contains(&"prefix".to_string()));
+    }
+
+    #[test]
+    fn test_is_pane_active_true() {
+        let executor = MockCommandExecutor::with_session();
+        let driver = TmuxDriver::with_executor(executor);
+        assert!(driver.is_pane_active("%5").unwrap());
+    }
+
+    #[test]
+    fn test_is_pane_active_false() {
+        let executor = MockCommandExecutor::with_session();
+        *executor.pane_active.borrow_mut() = false;
+        let driver = TmuxDriver::with_executor(executor);
+        assert!(!driver.is_pane_active("%5").unwrap());
+    }
+
+    #[test]
+    fn test_is_pane_active_command_args() {
+        let executor = MockCommandExecutor::with_session();
+        let driver = TmuxDriver::with_executor(executor);
+        let _ = driver.is_pane_active("%5");
+
+        let commands = driver.executor.commands.borrow();
+        let display_cmd = commands
+            .iter()
+            .find(|cmd| cmd.first().map(|s| s.as_str()) == Some("display-message"))
+            .unwrap();
+        assert!(display_cmd.contains(&"-p".to_string()));
+        assert!(display_cmd.contains(&"-t".to_string()));
+        assert!(display_cmd.contains(&"%5".to_string()));
+        assert!(display_cmd.contains(&"#{pane_active}".to_string()));
+    }
+
+    #[test]
+    fn test_focus_events_enabled_default_off() {
+        let executor = MockCommandExecutor::with_session();
+        let driver = TmuxDriver::with_executor(executor);
+        assert!(!driver.focus_events_enabled().unwrap());
+    }
+
+    #[test]
+    fn test_focus_events_enabled_on() {
+        let executor = MockCommandExecutor::with_focus_events();
+        let driver = TmuxDriver::with_executor(executor);
+        assert!(driver.focus_events_enabled().unwrap());
+    }
+
+    #[test]
+    fn test_key_binding_struct_fields() {
+        let binding = KeyBinding {
+            command: "next-window".to_string(),
+            key: "n".to_string(),
+        };
+        assert_eq!(binding.key, "n");
+        assert_eq!(binding.command, "next-window");
     }
 }
