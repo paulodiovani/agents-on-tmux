@@ -628,7 +628,7 @@ mod tests {
     fn test_app() -> App {
         let nested_driver = MockTmux::new();
         let parent_driver = MockTmux::new();
-        App::new(Box::new(nested_driver), Box::new(parent_driver), None).unwrap()
+        App::new(Box::new(nested_driver), Box::new(parent_driver), None, None).unwrap()
     }
 
     fn window(name: &str, command: &str, dir: &str, seconds: u64) -> Window {
@@ -666,6 +666,7 @@ mod tests {
         App::new(
             Box::new(driver),
             Box::new(MockTmux::with_windows(windows)),
+            None,
             None,
         )
         .unwrap()

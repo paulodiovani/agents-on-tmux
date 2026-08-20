@@ -3,6 +3,7 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use crossterm::event;
+use crossterm::execute;
 use ratatui::DefaultTerminal;
 use ratatui::widgets::ListState;
 
@@ -19,9 +20,11 @@ pub struct App {
     active_tab: Tab,
     agents_selected: usize,
     event_rx: Option<mpsc::Receiver<TmuxEvent>>,
+    focus_tracking: bool,
     last_focused_id: Option<u32>,
     list_state: ListState,
     nested_driver: Box<dyn Tmux>,
+    pane_active: bool,
     panel: Option<(String, u16)>,
     parent_driver: Box<dyn Tmux>,
     pending_action: Option<PendingAction>,
@@ -35,18 +38,33 @@ impl App {
     /// Creates a new App, loading windows from the tmux driver. `panel` is
     /// `Some((pane_id, width))` only when running as the split side panel: the
     /// width to re-assert on the pane whenever tmux rescales the layout.
+    /// `pane_id` is the pane the TUI runs in, when known; it enables focus
+    /// tracking when the server also has focus-events on.
     pub fn new(
         nested_driver: Box<dyn Tmux>,
         parent_driver: Box<dyn Tmux>,
         panel: Option<(String, u16)>,
+        pane_id: Option<String>,
     ) -> anyhow::Result<Self> {
+        // Focus tracking needs tmux to forward pane focus events (focus-events
+        // on) and to know our own pane. Without either, the TUI assumes it is
+        // focused and keeps showing its own keybindings.
+        let focus_tracking =
+            pane_id.is_some() && parent_driver.focus_events_enabled().unwrap_or(false);
+        let pane_active = match (&pane_id, focus_tracking) {
+            (Some(id), true) => parent_driver.is_pane_active(id).unwrap_or(true),
+            _ => true,
+        };
+
         let mut app = Self {
             active_tab: Tab::Windows,
             agents_selected: 0,
             event_rx: None,
+            focus_tracking,
             last_focused_id: None,
             list_state: ListState::default(),
             nested_driver,
+            pane_active,
             panel,
             parent_driver,
             pending_action: None,
@@ -97,6 +115,12 @@ impl App {
         let initial_width = terminal.size()?.width;
         self.enforce_panel_width(initial_width);
 
+        // Ask the terminal/tmux to report pane focus changes. Only meaningful
+        // with focus-events on; without it no events ever arrive.
+        if self.focus_tracking {
+            let _ = execute!(std::io::stdout(), event::EnableFocusChange);
+        }
+
         let redraw_tick = Duration::from_secs(1);
         let mut last_draw = Instant::now() - redraw_tick;
         while self.running {
@@ -105,8 +129,8 @@ impl App {
                 last_draw = Instant::now();
             }
 
-            // Poll terminal events (100ms). A keypress or a resize forces an
-            // immediate redraw next iteration.
+            // Poll terminal events (100ms). A keypress, resize, or focus
+            // change forces an immediate redraw next iteration.
             if event::poll(Duration::from_millis(100))? {
                 match event::read()? {
                     event::Event::Key(key) if key.kind == event::KeyEventKind::Press => {
@@ -117,6 +141,14 @@ impl App {
                         self.enforce_panel_width(width);
                         last_draw = Instant::now() - redraw_tick;
                     }
+                    event::Event::FocusGained => {
+                        self.set_pane_active(true);
+                        last_draw = Instant::now() - redraw_tick;
+                    }
+                    event::Event::FocusLost => {
+                        self.set_pane_active(false);
+                        last_draw = Instant::now() - redraw_tick;
+                    }
                     _ => {}
                 }
             }
@@ -125,6 +157,10 @@ impl App {
             if self.process_tmux_events() {
                 last_draw = Instant::now() - redraw_tick;
             }
+        }
+
+        if self.focus_tracking {
+            let _ = execute!(std::io::stdout(), event::DisableFocusChange);
         }
         Ok(())
     }
@@ -188,6 +224,16 @@ impl App {
     pub fn quit(&mut self) {
         logger::info("app: quit");
         self.running = false;
+    }
+
+    /// Updates the pane focus state from a terminal focus event. Ignored
+    /// unless focus tracking is active, so terminals that report their own
+    /// window focus cannot desync the state.
+    pub fn set_pane_active(&mut self, active: bool) {
+        if self.focus_tracking && self.pane_active != active {
+            logger::debug(&format!("app: pane {active}"));
+            self.pane_active = active;
+        }
     }
 
     /// Moves the selection up by one window within the current tab.
@@ -357,6 +403,14 @@ impl App {
         self.active_tab
     }
 
+    /// Returns whether the TUI pane is focused. Always true when focus
+    /// tracking is inactive.
+    // TODO(phase-4): consumed by the footer; drop the allow once wired.
+    #[allow(dead_code)]
+    pub fn pane_active(&self) -> bool {
+        self.pane_active
+    }
+
     /// Returns the selection index within the current tab.
     pub fn current_selected(&self) -> usize {
         match self.active_tab {
@@ -481,7 +535,9 @@ mod tests {
 
     struct MockTmux {
         calls: Rc<std::cell::RefCell<Vec<String>>>,
+        focus_events: bool,
         next_id: Rc<std::cell::RefCell<u32>>,
+        pane_active: bool,
         windows: Rc<std::cell::RefCell<Vec<Window>>>,
     }
 
@@ -489,7 +545,9 @@ mod tests {
         fn new() -> Self {
             Self {
                 calls: Rc::new(std::cell::RefCell::new(Vec::new())),
+                focus_events: false,
                 next_id: Rc::new(std::cell::RefCell::new(5)),
+                pane_active: true,
                 windows: Rc::new(std::cell::RefCell::new(vec![
                     Window {
                         current_dir: "/home/user/project1".to_string(),
@@ -610,11 +668,11 @@ mod tests {
         }
 
         fn is_pane_active(&self, _pane_id: &str) -> Result<bool, TmuxError> {
-            Ok(true)
+            Ok(self.pane_active)
         }
 
         fn focus_events_enabled(&self) -> Result<bool, TmuxError> {
-            Ok(false)
+            Ok(self.focus_events)
         }
     }
 
@@ -626,7 +684,7 @@ mod tests {
         let driver = MockTmux::new();
         let windows = driver.windows_rc();
         let calls = driver.calls_rc();
-        let app = App::new(Box::new(driver), Box::new(MockTmux::new()), None).unwrap();
+        let app = App::new(Box::new(driver), Box::new(MockTmux::new()), None, None).unwrap();
         (app, windows, calls)
     }
 
@@ -643,7 +701,7 @@ mod tests {
         let driver = MockTmux::new();
         driver.windows.borrow_mut()[1].running_command = "bash".to_string();
         driver.windows.borrow_mut()[3].running_command = "zsh".to_string();
-        let app = App::new(Box::new(driver), Box::new(MockTmux::new()), None).unwrap();
+        let app = App::new(Box::new(driver), Box::new(MockTmux::new()), None, None).unwrap();
         assert_eq!(app.active_tab(), Tab::Windows);
     }
 
@@ -715,7 +773,8 @@ mod tests {
         let parent_driver = MockTmux::new();
         let nested_calls = nested_driver.calls_rc();
         let parent_calls = parent_driver.calls_rc();
-        let mut app = App::new(Box::new(nested_driver), Box::new(parent_driver), None).unwrap();
+        let mut app =
+            App::new(Box::new(nested_driver), Box::new(parent_driver), None, None).unwrap();
         app.create_window();
         let nested_recorded = nested_calls.borrow();
         assert!(nested_recorded.contains(&"select_window".to_string()));
@@ -821,6 +880,58 @@ mod tests {
     fn test_app_new_has_no_event_receiver() {
         let (app, _, _) = test_app();
         assert!(app.event_rx.is_none());
+    }
+
+    fn focus_app(focus_events: bool, pane_active: bool) -> App {
+        let driver = MockTmux::new();
+        let mut parent = MockTmux::new();
+        parent.focus_events = focus_events;
+        parent.pane_active = pane_active;
+        App::new(
+            Box::new(driver),
+            Box::new(parent),
+            None,
+            Some("%7".to_string()),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn test_new_without_pane_id_assumes_focused() {
+        let mut parent = MockTmux::new();
+        parent.focus_events = true;
+        parent.pane_active = false;
+        let driver = MockTmux::new();
+        let app = App::new(Box::new(driver), Box::new(parent), None, None).unwrap();
+        assert!(app.pane_active());
+    }
+
+    #[test]
+    fn test_new_with_focus_events_off_assumes_focused() {
+        let app = focus_app(false, false);
+        assert!(app.pane_active());
+    }
+
+    #[test]
+    fn test_new_with_focus_events_on_reads_pane_state() {
+        assert!(focus_app(true, true).pane_active());
+        assert!(!focus_app(true, false).pane_active());
+    }
+
+    #[test]
+    fn test_set_pane_active_updates_when_tracking() {
+        let mut app = focus_app(true, true);
+        app.set_pane_active(false);
+        assert!(!app.pane_active());
+        app.set_pane_active(true);
+        assert!(app.pane_active());
+    }
+
+    #[test]
+    fn test_set_pane_active_ignored_without_tracking() {
+        let mut app = focus_app(false, false);
+        app.set_pane_active(false);
+        assert!(app.pane_active());
     }
 
     #[test]
@@ -983,7 +1094,7 @@ mod tests {
         let driver = MockTmux::new();
         driver.windows.borrow_mut()[1].running_command = "bash".to_string();
         driver.windows.borrow_mut()[3].running_command = "zsh".to_string();
-        let mut app = App::new(Box::new(driver), Box::new(MockTmux::new()), None).unwrap();
+        let mut app = App::new(Box::new(driver), Box::new(MockTmux::new()), None, None).unwrap();
         assert_eq!(app.active_tab(), Tab::Windows);
         assert!(app.is_tab_empty(Tab::Agents));
         app.switch_tab(Tab::Agents);
@@ -1012,7 +1123,7 @@ mod tests {
         let driver = MockTmux::new();
         driver.windows.borrow_mut()[1].current_dir = "/home/user/shared".to_string();
         driver.windows.borrow_mut()[2].current_dir = "/home/user/shared".to_string();
-        let mut app = App::new(Box::new(driver), Box::new(MockTmux::new()), None).unwrap();
+        let mut app = App::new(Box::new(driver), Box::new(MockTmux::new()), None, None).unwrap();
 
         assert_eq!(app.active_tab(), Tab::Agents);
         assert_eq!(app.current_selected(), 0);
@@ -1027,7 +1138,7 @@ mod tests {
         driver.windows.borrow_mut()[1].current_dir = "/home/user/shared".to_string();
         driver.windows.borrow_mut()[0].current_dir = "/home/user/shared".to_string();
         driver.windows.borrow_mut()[2].current_dir = "/home/user/shared".to_string();
-        let mut app = App::new(Box::new(driver), Box::new(MockTmux::new()), None).unwrap();
+        let mut app = App::new(Box::new(driver), Box::new(MockTmux::new()), None, None).unwrap();
 
         assert_eq!(app.active_tab(), Tab::Agents);
         assert_eq!(app.current_selected(), 0);
@@ -1041,7 +1152,7 @@ mod tests {
         let driver = MockTmux::new();
         driver.windows.borrow_mut()[0].current_dir = String::new();
         driver.windows.borrow_mut()[2].current_dir = "/home/user/project3".to_string();
-        let mut app = App::new(Box::new(driver), Box::new(MockTmux::new()), None).unwrap();
+        let mut app = App::new(Box::new(driver), Box::new(MockTmux::new()), None, None).unwrap();
 
         assert_eq!(app.active_tab(), Tab::Agents);
         assert_eq!(app.current_selected(), 0);
@@ -1115,6 +1226,7 @@ mod tests {
             Box::new(MockTmux::new()),
             Box::new(parent),
             Some(("%5".to_string(), 35)),
+            None,
         )
         .unwrap();
 
@@ -1134,6 +1246,7 @@ mod tests {
             Box::new(MockTmux::new()),
             Box::new(parent),
             Some(("%5".to_string(), 35)),
+            None,
         )
         .unwrap();
 
@@ -1146,7 +1259,7 @@ mod tests {
     fn test_enforce_panel_width_noop_outside_panel_mode() {
         let parent = MockTmux::new();
         let parent_calls = parent.calls_rc();
-        let app = App::new(Box::new(MockTmux::new()), Box::new(parent), None).unwrap();
+        let app = App::new(Box::new(MockTmux::new()), Box::new(parent), None, None).unwrap();
         assert_eq!(app.panel, None);
 
         app.enforce_panel_width(50);
