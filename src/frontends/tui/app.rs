@@ -299,7 +299,7 @@ impl App {
     /// window focus cannot desync the state.
     pub fn set_pane_active(&mut self, active: bool) {
         if self.focus_tracking && self.pane_active != active {
-            logger::debug(&format!("app: pane {active}"));
+            logger::debug(&format!("app: pane active {active}"));
             self.pane_active = active;
         }
     }
