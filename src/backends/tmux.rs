@@ -360,9 +360,11 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
     }
 
     /// Returns whether the server-wide focus-events option is enabled.
+    /// focus-events is a server option, so it must be read from the server
+    /// options table (`-s`), not the session options.
     fn focus_events_enabled(&self) -> Result<bool, TmuxError> {
         self.executor
-            .execute(&["show-options", "-gv", "focus-events"])
+            .execute(&["show-options", "-sv", "focus-events"])
             .map(|s| s.trim() == "on")
     }
 }
@@ -489,12 +491,21 @@ mod tests {
                         .to_string(),
                 ),
                 Some(&"show-options") => {
+                    // Option tables matter: query a server option with -g
+                    // (or a session option with -s) and tmux fails.
                     if args.contains(&"focus-events") {
+                        if !args.contains(&"-sv") {
+                            return Err(TmuxError::CommandFailed {
+                                message: "unknown option: focus-events".to_string(),
+                                stderr: String::new(),
+                                code: Some(1),
+                            });
+                        }
                         Ok(format!(
                             "{}\n",
                             if *self.focus_events.borrow() { "on" } else { "off" }
                         ))
-                    } else if args.contains(&"prefix") {
+                    } else if args.contains(&"prefix") && args.contains(&"-gv") {
                         Ok("C-b\n".to_string())
                     } else {
                         Err(TmuxError::CommandFailed {
@@ -910,6 +921,23 @@ mod tests {
         let executor = MockCommandExecutor::with_focus_events();
         let driver = TmuxDriver::with_executor(executor);
         assert!(driver.focus_events_enabled().unwrap());
+    }
+
+    #[test]
+    fn test_focus_events_enabled_uses_server_options_table() {
+        // focus-events is a server option: reading it from the session
+        // options table fails, so the driver must query with -s.
+        let executor = MockCommandExecutor::with_focus_events();
+        let driver = TmuxDriver::with_executor(executor);
+        assert!(driver.focus_events_enabled().is_ok());
+
+        let commands = driver.executor.commands.borrow();
+        let show_cmd = commands
+            .iter()
+            .find(|cmd| cmd.first().map(|s| s.as_str()) == Some("show-options"))
+            .unwrap();
+        assert!(show_cmd.contains(&"-sv".to_string()));
+        assert!(!show_cmd.contains(&"-gv".to_string()));
     }
 
     #[test]
