@@ -17,11 +17,11 @@ use crate::frontends::tui::ui;
 
 /// The nested-session commands worth advertising, with their footer labels.
 const HINTED_COMMANDS: [(&str, &str); 5] = [
-    ("new-window", "new"),
+    ("new-window -c \"#{pane_current_path}\"", "new"),
     ("next-window", "next"),
     ("previous-window", "prev"),
     ("last-window", "last"),
-    ("rename-window", "rename"),
+    ("command-prompt -I \"#W\" { rename-window \"%%\" }", "rename"),
 ];
 
 /// Resolves the key sequences that reach the nested session from the user's
@@ -40,7 +40,7 @@ fn resolve_tmux_hints(driver: &dyn Tmux) -> Vec<(String, String)> {
 
     let send_prefix = keys
         .iter()
-        .find(|b| b.command.split_whitespace().next() == Some("send-prefix"))
+        .find(|b| b.command == "send-prefix")
         .map(|b| b.key.clone())
         .unwrap_or_else(|| prefix.clone());
 
@@ -48,19 +48,7 @@ fn resolve_tmux_hints(driver: &dyn Tmux) -> Vec<(String, String)> {
 
     let binding_for = |command: &str| {
         keys.iter()
-            .find(|b| {
-                let first_word = b.command.split_whitespace().next();
-                if first_word == Some(command) {
-                    return true;
-                }
-                if command == "rename-window"
-                    && first_word == Some("command-prompt")
-                    && b.command.contains("rename-window")
-                {
-                    return true;
-                }
-                false
-            })
+            .find(|b| b.command == command)
             .map(|b| b.key.clone())
     };
 
@@ -69,6 +57,7 @@ fn resolve_tmux_hints(driver: &dyn Tmux) -> Vec<(String, String)> {
         let key = binding_for(command)?;
         Some((key, (*label).to_string()))
     }));
+
     hints
 }
 
@@ -996,7 +985,7 @@ mod tests {
     fn default_key_bindings() -> Vec<KeyBinding> {
         [
             ("C-b", "send-prefix"),
-            ("c", "new-window"),
+            ("c", "new-window -c \"#{pane_current_path}\""),
             ("n", "next-window"),
             ("p", "previous-window"),
             ("l", "last-window"),
@@ -1092,16 +1081,6 @@ mod tests {
             app.tmux_hints()[0],
             ("C-Space C-b".to_string(), "prefix".to_string())
         );
-    }
-
-    #[test]
-    fn test_tmux_hints_match_first_word_of_command() {
-        let mut parent = MockTmux::new();
-        let mut keys = default_key_bindings();
-        keys[1].command = "new-window -c #{pane_current_path}".to_string();
-        parent.keys = Some(keys);
-        let app = hints_app(parent);
-        assert_eq!(app.tmux_hints()[1], ("c".to_string(), "new".to_string()));
     }
 
     #[test]

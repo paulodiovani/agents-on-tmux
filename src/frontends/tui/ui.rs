@@ -567,7 +567,7 @@ mod tests {
     fn default_key_bindings() -> Vec<KeyBinding> {
         [
             ("C-b", "send-prefix"),
-            ("c", "new-window"),
+            ("c", "new-window -c \"#{pane_current_path}\""),
             ("n", "next-window"),
             ("p", "previous-window"),
             ("l", "last-window"),

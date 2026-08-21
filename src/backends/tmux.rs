@@ -485,7 +485,7 @@ mod tests {
                     "bind-key -r -T prefix Up select-pane -U\n",
                     // Non-repeat rows pad the -r slot with blanks.
                     "bind-key    -T prefix C-b send-prefix\n",
-                    "bind-key    -T prefix c new-window\n",
+                    "bind-key    -T prefix c new-window -c \"#{pane_current_path}\"\n",
                     "bind-key    -T prefix n next-window\n",
                     "bind-key    -T prefix p previous-window\n",
                     "bind-key    -T prefix l last-window\n",
@@ -847,14 +847,16 @@ mod tests {
                 .unwrap_or_else(|| panic!("no binding for {command}"))
         };
         assert_eq!(find("send-prefix").key, "C-b");
-        assert_eq!(find("new-window").key, "c");
+        assert_eq!(
+            find("new-window -c \"#{pane_current_path}\"").key,
+            "c"
+        );
         assert_eq!(find("next-window").key, "n");
         assert_eq!(find("last-window").key, "l");
-        let rename_binding = keys
-            .iter()
-            .find(|b| b.key == "," && b.command.contains("rename-window"))
-            .expect("no rename-window binding");
-        assert!(rename_binding.command.starts_with("command-prompt"));
+        assert_eq!(
+            find("command-prompt -I \"#W\" { rename-window \"%%\" }").key,
+            ","
+        );
     }
 
     #[test]
