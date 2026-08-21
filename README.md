@@ -14,7 +14,7 @@ A TMUX-based AI Agents orchestrator.
 
 `agents-on-tmux`, or just `aot`, works as a thin wrapper over tmux and a TUI control panel. Its features are divided into three primary modules:
 
-- `tui` The terminal interface provides a control panel for running agents, including actions to focus, stop, or start a new agent.
+- `tui` The terminal interface provides a control panel for running agents, including actions to focus, rename, stop, or start a new agent.
   The TUI run on its own TMUX pane, window, or popup, it does not highjack or wrap your terminal to run agents inside its interface.
   - Windows are organized into two tabs: **Agents** (running AI coding agents) and **Windows** (regular tmux windows).
 - `tmux` The TMUX communication interface, allowing to start and control a dedicated TMUX session.

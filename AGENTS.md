@@ -31,10 +31,11 @@ Binary crate (`aot`, package name `agents-on-tmux`).
 Two top-level modules under `src/`:
 
 - `backends/` — tmux communication interface
-  - `Tmux` trait defines the contract (session management, window CRUD, split_window, resize_pane)
+  - `Tmux` trait defines the contract (session management, window CRUD, split_window, resize_pane, list_keys, show_options, command_prompt)
   - `TmuxDriver<E: CommandExecutor>` implements `Tmux` with dependency injection
   - `CommandExecutor` trait abstracts tmux command execution (real `ShellCommandExecutor` + mock for tests)
   - `Window` struct represents tmux window state (id, name, running_command, started_at, notification_pending, is_active, current_dir)
+  - `KeyBinding` struct represents a tmux key binding (key, command)
   - `TmuxError` enum for error handling
   - `agents.rs` identifies agents by name and command
   - `logger.rs` is a std-only global file logger (`init`/`debug`/`error`), it never writes to stdout/stderr

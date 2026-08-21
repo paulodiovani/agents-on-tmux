@@ -219,24 +219,17 @@ fn parse_window_line(line: &str) -> Option<Window> {
 }
 
 /// Parses one `list-keys` output line, shaped `bind-key [-r] -T <table>
-/// <key> <command…>`. list-keys aligns its columns with padding — and pads
-/// the `-r` slot with blanks on non-repeat rows — so fields are split on any
-/// whitespace. The table is skipped: it repeats the -T argument we sent.
-/// Single quotes around keys needing escaping (e.g. '"') are stripped.
+/// <key> <command…>`. Fields split on any whitespace because list-keys pads
+/// its columns; single quotes around escaped keys (e.g. '"') are stripped.
 fn parse_key_line(line: &str) -> Option<KeyBinding> {
-    let mut parts = line.split_whitespace();
-
-    if parts.next()? != "bind-key" {
-        return None;
-    }
-    match parts.next()? {
-        "-T" => {}
-        "-r" if parts.next()? == "-T" => {}
+    let fields: Vec<&str> = line.split_whitespace().collect();
+    let (key, command) = match fields.as_slice() {
+        ["bind-key", "-T", _, key, cmd @ ..] | ["bind-key", "-r", "-T", _, key, cmd @ ..] => {
+            (*key, cmd.join(" "))
+        }
         _ => return None,
-    }
-    let _table = parts.next()?;
-    let key = parts.next()?.trim_matches('\'');
-    let command = parts.collect::<Vec<_>>().join(" ");
+    };
+    let key = key.trim_matches('\'');
 
     if key.is_empty() || command.is_empty() {
         return None;

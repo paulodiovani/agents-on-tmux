@@ -354,47 +354,41 @@ fn draw_footer(frame: &mut Frame, app: &mut App, area: Rect, theme: &Theme) {
     frame.render_widget(footer, padded(area));
 }
 
-/// The (key, description, enabled) entries shown in the footer. TUI keys
-/// while the pane is focused; the user's tmux bindings as nested-session
-/// sequences when it is not, falling back to TUI keys when unresolved.
-fn footer_entries(app: &App) -> Vec<(String, String, bool)> {
-    if !app.pane_active() && !app.tmux_hints().is_empty() {
-        return app
-            .tmux_hints()
+/// Builds the styled footer keybinding entries: the user's tmux bindings as
+/// nested-session sequences while the pane is unfocused, the TUI keys
+/// otherwise (also the fallback when tmux hints are unavailable).
+fn build_footer_entries(app: &App, theme: &Theme) -> Vec<(Vec<Span<'static>>, usize)> {
+    let entries: Vec<(String, String, bool)> = if !app.pane_active() && !app.tmux_hints().is_empty()
+    {
+        app.tmux_hints()
             .iter()
             .map(|(key, label)| (key.clone(), label.clone(), true))
-            .collect();
-    }
-
-    let mut entries = vec![("↑↓".to_string(), "navigate".to_string(), true)];
-
-    match app.active_tab() {
-        Tab::Agents => entries.push((
-            "→".to_string(),
-            "windows".to_string(),
-            !app.is_tab_empty(Tab::Windows),
-        )),
-        Tab::Windows => entries.push((
-            "←".to_string(),
-            "agents".to_string(),
-            !app.is_tab_empty(Tab::Agents),
-        )),
-    }
-
-    entries.extend([
-        ("⏎".to_string(), "focus".to_string(), true),
-        ("c".to_string(), "new".to_string(), true),
-        (",".to_string(), "rename".to_string(), true),
-        ("d".to_string(), "kill".to_string(), true),
-        ("q".to_string(), "quit".to_string(), true),
-    ]);
+            .collect()
+    } else {
+        let mut entries = vec![("↑↓".to_string(), "navigate".to_string(), true)];
+        match app.active_tab() {
+            Tab::Agents => entries.push((
+                "→".to_string(),
+                "windows".to_string(),
+                !app.is_tab_empty(Tab::Windows),
+            )),
+            Tab::Windows => entries.push((
+                "←".to_string(),
+                "agents".to_string(),
+                !app.is_tab_empty(Tab::Agents),
+            )),
+        }
+        entries.extend([
+            ("⏎".to_string(), "focus".to_string(), true),
+            ("c".to_string(), "new".to_string(), true),
+            (",".to_string(), "rename".to_string(), true),
+            ("d".to_string(), "kill".to_string(), true),
+            ("q".to_string(), "quit".to_string(), true),
+        ]);
+        entries
+    };
 
     entries
-}
-
-/// Builds styled footer keybinding entries based on the active tab.
-fn build_footer_entries(app: &App, theme: &Theme) -> Vec<(Vec<Span<'static>>, usize)> {
-    footer_entries(app)
         .iter()
         .map(|(key, desc, enabled)| {
             let key_style = if *enabled {

@@ -27,11 +27,10 @@ const HINTED_COMMANDS: [(&str, &str); 5] = [
     ),
 ];
 
-/// Resolves the key sequences that reach the nested session from the user's
-/// own tmux bindings: one entry for the prefix sequence (e.g. "C-b C-b",
-/// label "prefix"), then the bare keys for the hinted commands (e.g. "c",
-/// "new"). Empty when anything cannot be resolved, so the footer falls back
-/// to the TUI's own keybindings.
+/// Resolves the nested-session key sequences to advertise from the user's
+/// own tmux bindings: the prefix sequence (e.g. "C-b C-b"), then one entry
+/// per hinted command. Empty when anything cannot be resolved, so the footer
+/// falls back to the TUI's own keybindings.
 fn resolve_tmux_hints(driver: &dyn Tmux) -> Vec<(String, String)> {
     let Ok(keys) = driver.list_keys("prefix") else {
         return Vec::new();
@@ -41,24 +40,12 @@ fn resolve_tmux_hints(driver: &dyn Tmux) -> Vec<(String, String)> {
         return Vec::new();
     }
 
-    let send_prefix = keys
-        .iter()
-        .find(|b| b.command == "send-prefix")
-        .map(|b| b.key.clone())
-        .unwrap_or_else(|| prefix.clone());
+    let binding_for = |command| keys.iter().find(|b| b.command == command).map(|b| &b.key);
+    let send_prefix = binding_for("send-prefix").unwrap_or(&prefix);
 
-    let prefix_seq = format!("{prefix} {send_prefix}");
-
-    let binding_for = |command: &str| {
-        keys.iter()
-            .find(|b| b.command == command)
-            .map(|b| b.key.clone())
-    };
-
-    let mut hints = vec![(prefix_seq, "prefix".to_string())];
+    let mut hints = vec![(format!("{prefix} {send_prefix}"), "prefix".to_string())];
     hints.extend(HINTED_COMMANDS.iter().filter_map(|(command, label)| {
-        let key = binding_for(command)?;
-        Some((key, (*label).to_string()))
+        Some((binding_for(command)?.clone(), (*label).to_string()))
     }));
 
     hints
@@ -185,12 +172,8 @@ impl App {
                         self.enforce_panel_width(width);
                         last_draw = Instant::now() - redraw_tick;
                     }
-                    event::Event::FocusGained => {
-                        self.set_pane_active(true);
-                        last_draw = Instant::now() - redraw_tick;
-                    }
-                    event::Event::FocusLost => {
-                        self.set_pane_active(false);
+                    ev @ (event::Event::FocusGained | event::Event::FocusLost) => {
+                        self.set_pane_active(matches!(ev, event::Event::FocusGained));
                         last_draw = Instant::now() - redraw_tick;
                     }
                     _ => {}
