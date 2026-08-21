@@ -33,6 +33,14 @@ pub trait Tmux {
     fn split_window(&self, command: &str, width: u16) -> Result<String, TmuxError>;
     /// Resizes the given pane to an absolute width in columns.
     fn resize_pane(&self, pane_id: &str, width: u16) -> Result<(), TmuxError>;
+    /// Lists the key bindings of the given key table (e.g. "prefix").
+    fn list_keys(&self, table: &str) -> Result<Vec<KeyBinding>, TmuxError>;
+    /// Returns the value of a single option: this driver's session by
+    /// default, or the global scope when `global` is set.
+    fn show_options(&self, name: &str, global: bool) -> Result<String, TmuxError>;
+    /// Opens the tmux command prompt on the calling client, pre-filled with
+    /// `initial`, running `template` on accept (`%%` expands to the input).
+    fn command_prompt(&self, initial: &str, template: &str) -> Result<(), TmuxError>;
 }
 
 pub const SESSION_NAME: &str = "agents-on-tmux";
@@ -64,6 +72,13 @@ pub struct Window {
     pub notification_pending: bool,
     pub running_command: String,
     pub started_at: Option<Instant>,
+}
+
+/// A tmux key binding: the bound key and the command it runs.
+#[derive(Debug, Clone, PartialEq)]
+pub struct KeyBinding {
+    pub command: String,
+    pub key: String,
 }
 
 pub fn check_inside_tmux() -> Result<(), TmuxError> {
@@ -204,6 +219,28 @@ fn parse_window_line(line: &str) -> Option<Window> {
     })
 }
 
+/// Parses one `list-keys` output line, shaped `bind-key [-r] -T <table>
+/// <key> <command…>`. Fields split on any whitespace because list-keys pads
+/// its columns; single quotes around escaped keys (e.g. '"') are stripped.
+fn parse_key_line(line: &str) -> Option<KeyBinding> {
+    let fields: Vec<&str> = line.split_whitespace().collect();
+    let (key, command) = match fields.as_slice() {
+        ["bind-key", "-T", _, key, cmd @ ..] | ["bind-key", "-r", "-T", _, key, cmd @ ..] => {
+            (*key, cmd.join(" "))
+        }
+        _ => return None,
+    };
+    let key = key.trim_matches('\'');
+
+    if key.is_empty() || command.is_empty() {
+        return None;
+    }
+    Some(KeyBinding {
+        command,
+        key: key.to_string(),
+    })
+}
+
 impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
     /// Returns the session name this driver targets.
     fn session_name(&self) -> &str {
@@ -306,6 +343,32 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
             .execute(&["resize-pane", "-t", pane_id, "-x", &width])?;
         Ok(())
     }
+
+    /// Lists the key bindings of the given key table (e.g. "prefix"), as
+    /// `bind-key [-r] -T <table> <key> <command>` lines.
+    fn list_keys(&self, table: &str) -> Result<Vec<KeyBinding>, TmuxError> {
+        let output = self.executor.execute(&["list-keys", "-T", table])?;
+        Ok(output.lines().filter_map(parse_key_line).collect())
+    }
+
+    /// Returns the value of a single option: this driver's session by
+    /// default, or the global scope when `global` is set.
+    fn show_options(&self, name: &str, global: bool) -> Result<String, TmuxError> {
+        let args = if global {
+            vec!["show-options", "-gv", name]
+        } else {
+            vec!["show-options", "-v", "-t", self.session.as_str(), name]
+        };
+        self.executor.execute(&args).map(|s| s.trim().to_string())
+    }
+
+    /// Opens the tmux command prompt on the calling client, pre-filled with
+    /// `initial`, running `template` on accept (`%%` expands to the input).
+    fn command_prompt(&self, initial: &str, template: &str) -> Result<(), TmuxError> {
+        self.executor
+            .execute(&["command-prompt", "-I", initial, template])
+            .map(|_| ())
+    }
 }
 
 #[cfg(test)]
@@ -319,6 +382,7 @@ mod tests {
         commands: RefCell<Vec<Vec<String>>>,
         pane_id: RefCell<String>,
         session_exists: RefCell<bool>,
+        session_prefix: RefCell<Option<String>>,
         windows: RefCell<Vec<Window>>,
     }
 
@@ -328,6 +392,7 @@ mod tests {
                 commands: RefCell::new(Vec::new()),
                 pane_id: RefCell::new("%99".to_string()),
                 session_exists: RefCell::new(false),
+                session_prefix: RefCell::new(None),
                 windows: RefCell::new(Vec::new()),
             }
         }
@@ -414,7 +479,39 @@ mod tests {
                 Some(&"send-keys") => Ok(String::new()),
                 Some(&"set-option") => Ok(String::new()),
                 Some(&"resize-pane") => Ok(String::new()),
+                Some(&"command-prompt") => Ok(String::new()),
                 Some(&"split-window") => Ok(self.pane_id.borrow().clone()),
+                Some(&"list-keys") => Ok(concat!(
+                    "bind-key -r -T prefix Up select-pane -U\n",
+                    // Non-repeat rows pad the -r slot with blanks.
+                    "bind-key    -T prefix C-b send-prefix\n",
+                    "bind-key    -T prefix c new-window -c \"#{pane_current_path}\"\n",
+                    "bind-key    -T prefix n next-window\n",
+                    "bind-key    -T prefix p previous-window\n",
+                    "bind-key    -T prefix l last-window\n",
+                    "bind-key    -T prefix , command-prompt -I \"#W\" { rename-window \"%%\" }\n",
+                )
+                .to_string()),
+                Some(&"show-options") => {
+                    if !args.contains(&"prefix") {
+                        return Err(TmuxError::CommandFailed {
+                            message: format!("unknown option: {:?}", args),
+                            stderr: String::new(),
+                            code: Some(1),
+                        });
+                    }
+                    if args.contains(&"-gv") {
+                        Ok("C-b\n".to_string())
+                    } else if let Some(prefix) = self.session_prefix.borrow().as_ref() {
+                        Ok(format!("{prefix}\n"))
+                    } else {
+                        Err(TmuxError::CommandFailed {
+                            message: format!("option not set: {:?}", args),
+                            stderr: String::new(),
+                            code: Some(1),
+                        })
+                    }
+                }
                 _ => Err(TmuxError::CommandFailed {
                     message: format!("unknown command: {:?}", args),
                     stderr: String::new(),
@@ -692,5 +789,188 @@ mod tests {
             message,
             "Cannot run aot inside its own dedicated session 'agents-on-tmux'."
         );
+    }
+
+    #[test]
+    fn test_parse_key_line_valid() {
+        let binding = parse_key_line("bind-key -T prefix c new-window").unwrap();
+        assert_eq!(binding.key, "c");
+        assert_eq!(binding.command, "new-window");
+    }
+
+    #[test]
+    fn test_parse_key_line_tolerates_column_padding() {
+        // list-keys aligns columns; non-repeat rows pad the -r slot.
+        let binding = parse_key_line("bind-key    -T prefix   C-b send-prefix").unwrap();
+        assert_eq!(binding.key, "C-b");
+        assert_eq!(binding.command, "send-prefix");
+    }
+
+    #[test]
+    fn test_parse_key_line_repeat_binding() {
+        let binding = parse_key_line("bind-key -r -T prefix Up select-pane -U").unwrap();
+        assert_eq!(binding.key, "Up");
+        assert_eq!(binding.command, "select-pane -U");
+    }
+
+    #[test]
+    fn test_parse_key_line_strips_quotes_around_key() {
+        let binding = parse_key_line("bind-key -T prefix '\"' split-window").unwrap();
+        assert_eq!(binding.key, "\"");
+        assert_eq!(binding.command, "split-window");
+    }
+
+    #[test]
+    fn test_parse_key_line_keeps_command_spaces() {
+        let binding = parse_key_line("bind-key -T prefix c new-window -c /tmp").unwrap();
+        assert_eq!(binding.command, "new-window -c /tmp");
+    }
+
+    #[test]
+    fn test_parse_key_line_invalid() {
+        assert!(parse_key_line("no-bind-here").is_none());
+        assert!(parse_key_line("bind-key").is_none());
+        assert!(parse_key_line("bind-key -T").is_none());
+        assert!(parse_key_line("bind-key -T prefix").is_none());
+        assert!(parse_key_line("bind-key -T prefix c").is_none());
+        assert!(parse_key_line("bind-key -X prefix c new-window").is_none());
+    }
+
+    #[test]
+    fn test_list_keys_parses_bindings() {
+        let executor = MockCommandExecutor::with_session();
+        let driver = TmuxDriver::with_executor(executor);
+        let keys = driver.list_keys("prefix").unwrap();
+        assert_eq!(keys.len(), 7);
+
+        let find = |command: &str| {
+            keys.iter()
+                .find(|b| b.command == command)
+                .unwrap_or_else(|| panic!("no binding for {command}"))
+        };
+        assert_eq!(find("send-prefix").key, "C-b");
+        assert_eq!(find("new-window -c \"#{pane_current_path}\"").key, "c");
+        assert_eq!(find("next-window").key, "n");
+        assert_eq!(find("last-window").key, "l");
+        assert_eq!(
+            find("command-prompt -I \"#W\" { rename-window \"%%\" }").key,
+            ","
+        );
+    }
+
+    #[test]
+    fn test_list_keys_command_args() {
+        let executor = MockCommandExecutor::with_session();
+        let driver = TmuxDriver::with_executor(executor);
+        let _ = driver.list_keys("prefix");
+
+        let commands = driver.executor.commands.borrow();
+        let list_keys_cmd = commands
+            .iter()
+            .find(|cmd| cmd.first().map(|s| s.as_str()) == Some("list-keys"))
+            .unwrap();
+        assert_eq!(
+            list_keys_cmd.as_slice(),
+            [
+                "list-keys".to_string(),
+                "-T".to_string(),
+                "prefix".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn test_show_options_global_prefix() {
+        let executor = MockCommandExecutor::with_session();
+        let driver = TmuxDriver::with_executor(executor);
+        assert_eq!(driver.show_options("prefix", true).unwrap(), "C-b");
+    }
+
+    #[test]
+    fn test_show_options_session_prefix_override() {
+        let executor = MockCommandExecutor::with_session();
+        *executor.session_prefix.borrow_mut() = Some("C-a".to_string());
+        let driver = TmuxDriver::with_executor(executor);
+        assert_eq!(driver.show_options("prefix", false).unwrap(), "C-a");
+    }
+
+    #[test]
+    fn test_show_options_session_prefix_unset_fails() {
+        let executor = MockCommandExecutor::with_session();
+        let driver = TmuxDriver::with_executor(executor);
+        assert!(driver.show_options("prefix", false).is_err());
+    }
+
+    #[test]
+    fn test_show_options_command_args() {
+        let executor = MockCommandExecutor::with_session();
+        let driver = TmuxDriver::with_executor(executor);
+        let _ = driver.show_options("prefix", false);
+        let _ = driver.show_options("prefix", true);
+
+        let commands = driver.executor.commands.borrow();
+        let mut show_options_cmds = commands
+            .iter()
+            .filter(|cmd| cmd.first().map(|s| s.as_str()) == Some("show-options"));
+        assert_eq!(
+            show_options_cmds.next().unwrap().as_slice(),
+            [
+                "show-options".to_string(),
+                "-v".to_string(),
+                "-t".to_string(),
+                SESSION_NAME.to_string(),
+                "prefix".to_string(),
+            ]
+        );
+        assert_eq!(
+            show_options_cmds.next().unwrap().as_slice(),
+            [
+                "show-options".to_string(),
+                "-gv".to_string(),
+                "prefix".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_show_options_trims_output() {
+        let executor = MockCommandExecutor::with_session();
+        let driver = TmuxDriver::with_executor(executor);
+        let value = driver.show_options("prefix", true).unwrap();
+        assert!(!value.contains('\n'));
+    }
+
+    #[test]
+    fn test_command_prompt_command_args() {
+        let executor = MockCommandExecutor::with_session();
+        let driver = TmuxDriver::with_executor(executor);
+        driver
+            .command_prompt("#W", "rename-window -t \"aot:1\" \"%%\"")
+            .unwrap();
+
+        let commands = driver.executor.commands.borrow();
+        let prompt_cmd = commands
+            .iter()
+            .find(|cmd| cmd.first().map(|s| s.as_str()) == Some("command-prompt"))
+            .unwrap();
+        assert_eq!(
+            prompt_cmd.as_slice(),
+            [
+                "command-prompt".to_string(),
+                "-I".to_string(),
+                "#W".to_string(),
+                "rename-window -t \"aot:1\" \"%%\"".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_key_binding_struct_fields() {
+        let binding = KeyBinding {
+            command: "next-window".to_string(),
+            key: "n".to_string(),
+        };
+        assert_eq!(binding.key, "n");
+        assert_eq!(binding.command, "next-window");
     }
 }

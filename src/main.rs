@@ -95,6 +95,14 @@ fn panel_config(split_panel: bool, tui_width: Option<u16>) -> Option<(String, u1
     Some((pane_id, tui_width.unwrap_or(DEFAULT_TUI_WIDTH)))
 }
 
+/// Resolves the pane the TUI runs in: the split panel's own pane when
+/// present, otherwise the pane of this process (plain `aot --tui`).
+fn tui_pane_id(panel_pane: Option<&str>) -> Option<String> {
+    panel_pane
+        .map(str::to_string)
+        .or_else(|| std::env::var("TMUX_PANE").ok())
+}
+
 fn main() -> anyhow::Result<()> {
     use backends::tmux::{SESSION_NAME, Tmux, TmuxDriver, TmuxError, detect_parent_session};
     let config = Config::parse()?;
@@ -131,8 +139,13 @@ fn main() -> anyhow::Result<()> {
         let terminal = ratatui::init();
         // Only the split panel enforces its width; a plain `aot --tui` must not.
         let panel = panel_config(cli.split_panel, config.tui_width);
-        let mut app =
-            frontends::tui::app::App::new(Box::new(nested_driver), Box::new(parent_driver), panel)?;
+        let pane_id = tui_pane_id(panel.as_ref().map(|(pane_id, _)| pane_id.as_str()));
+        let mut app = frontends::tui::app::App::new(
+            Box::new(nested_driver),
+            Box::new(parent_driver),
+            panel,
+            pane_id,
+        )?;
         app.run(terminal)?;
         ratatui::restore();
     } else {
@@ -143,6 +156,7 @@ fn main() -> anyhow::Result<()> {
             let command = format!("{} --tui=true --split-panel{}", exe.to_string_lossy(), cli);
             let width = config.tui_width.unwrap_or(DEFAULT_TUI_WIDTH);
             parent_driver.split_window(&command, width)?;
+            parent_driver.last_pane()?;
         }
         nested_driver.attach_session()?;
     }
@@ -322,6 +336,29 @@ mod tests {
         let _guard = ENV_LOCK.lock().unwrap();
         unsafe { std::env::remove_var("TMUX_PANE") };
         assert_eq!(panel_config(true, None), None);
+    }
+
+    #[test]
+    fn test_tui_pane_id_prefers_panel_pane() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        unsafe { std::env::set_var("TMUX_PANE", "%9") };
+        assert_eq!(tui_pane_id(Some("%5")), Some("%5".to_string()));
+        unsafe { std::env::remove_var("TMUX_PANE") };
+    }
+
+    #[test]
+    fn test_tui_pane_id_falls_back_to_env() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        unsafe { std::env::set_var("TMUX_PANE", "%9") };
+        assert_eq!(tui_pane_id(None), Some("%9".to_string()));
+        unsafe { std::env::remove_var("TMUX_PANE") };
+    }
+
+    #[test]
+    fn test_tui_pane_id_none_without_env() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        unsafe { std::env::remove_var("TMUX_PANE") };
+        assert_eq!(tui_pane_id(None), None);
     }
 
     #[test]

@@ -19,6 +19,11 @@
   implementation — it would interact with existing tmux sessions. Only run tests with
   mocked tmux. The user will do the final (manual) testing.
 
+## Git operations
+
+- Don't make write git operations (commit, push, rebase, etc.) unless explicitly asked by the user.
+- Commit messages should be a single line; use bullets for additional changes only when needed.
+
 ## Architecture
 
 Binary crate (`aot`, package name `agents-on-tmux`).
@@ -26,13 +31,14 @@ Binary crate (`aot`, package name `agents-on-tmux`).
 Two top-level modules under `src/`:
 
 - `backends/` — tmux communication interface
-  - `Tmux` trait defines the contract (session management, window CRUD, split_window, resize_pane)
+  - `Tmux` trait defines the contract (session management, window CRUD, split_window, resize_pane, list_keys, show_options, command_prompt)
   - `TmuxDriver<E: CommandExecutor>` implements `Tmux` with dependency injection
   - `CommandExecutor` trait abstracts tmux command execution (real `ShellCommandExecutor` + mock for tests)
   - `Window` struct represents tmux window state (id, name, running_command, started_at, notification_pending, is_active, current_dir)
+  - `KeyBinding` struct represents a tmux key binding (key, command)
   - `TmuxError` enum for error handling
   - `agents.rs` identifies agents by name and command
-  - Backend is fully wired and tested
+  - `logger.rs` is a std-only global file logger (`init`/`debug`/`error`), it never writes to stdout/stderr
 
 - `frontends/` — terminal UI (`tui/` with app, event, icons, path, theme, ui)
   - `App` manages TUI state and user actions
@@ -40,9 +46,8 @@ Two top-level modules under `src/`:
   - `Theme` defines visual styles
   - `ui::draw` renders the interface
 
-`backends/logger.rs` is a std-only global file logger (`init`/`debug`/`error`) — no logging
-crates; it never writes to stdout/stderr, which would corrupt the ratatui alternate screen.
-Prefer std over new crates in general: every added crate grows the binary.
+Presentation belongs to the frontend: backends never carry icons, colors, or any other display data
+Colors are named ANSI slots (0-15) or `Color::Reset` only — never `Color::Rgb` or `Color::Indexed`, so the UI follows the user's terminal theme
 
 Entry point: `main.rs` parses CLI args with clap, detects the parent tmux session, creates a nested `TmuxDriver` for the `agents-on-tmux` session, ensures it exists. Without `--tui`, it splits a pane in the parent session to launch the TUI and attaches to the nested session. With `--tui`, it runs the TUI directly.
 
@@ -53,7 +58,4 @@ Entry point: `main.rs` parses CLI args with clap, detects the parent tmux sessio
 - All public structs must implement a trait; inter-module communication follows trait contracts
 - Private by default; only expose what external modules actually use
 - Module item order (top to bottom): traits → constants → enums → structs. Within each category: private before public
-- Presentation belongs to the frontend: backends never carry icons, colors, or any
-  other display data
-- Colors are named ANSI slots (0-15) or `Color::Reset` only — never `Color::Rgb` or
-  `Color::Indexed`, so the UI follows the user's terminal theme
+- Prefer std over new crates in general: every added crate grows the binary.
