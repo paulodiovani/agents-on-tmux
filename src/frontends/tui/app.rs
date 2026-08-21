@@ -48,7 +48,19 @@ fn resolve_tmux_hints(driver: &dyn Tmux) -> Vec<(String, String)> {
 
     let binding_for = |command: &str| {
         keys.iter()
-            .find(|b| b.command.split_whitespace().any(|word| word == command))
+            .find(|b| {
+                let first_word = b.command.split_whitespace().next();
+                if first_word == Some(command) {
+                    return true;
+                }
+                if command == "rename-window"
+                    && first_word == Some("command-prompt")
+                    && b.command.contains("rename-window")
+                {
+                    return true;
+                }
+                false
+            })
             .map(|b| b.key.clone())
     };
 
@@ -1083,17 +1095,13 @@ mod tests {
     }
 
     #[test]
-    fn test_tmux_hints_match_command_anywhere_in_binding() {
+    fn test_tmux_hints_match_first_word_of_command() {
         let mut parent = MockTmux::new();
         let mut keys = default_key_bindings();
         keys[1].command = "new-window -c #{pane_current_path}".to_string();
         parent.keys = Some(keys);
         let app = hints_app(parent);
-        assert!(
-            app.tmux_hints()
-                .iter()
-                .any(|(key, label)| key == "c" && label == "new")
-        );
+        assert_eq!(app.tmux_hints()[1], ("c".to_string(), "new".to_string()));
     }
 
     #[test]
@@ -1105,6 +1113,21 @@ mod tests {
                 .iter()
                 .any(|(key, label)| key == "," && label == "rename")
         );
+    }
+
+    #[test]
+    fn test_tmux_hints_do_not_match_menu_commands() {
+        let mut parent = MockTmux::new();
+        let mut keys = default_key_bindings();
+        keys.push(KeyBinding {
+            key: "<".to_string(),
+            command: "display-menu -T \"Window menu\" #{window_index} rename-window".to_string(),
+        });
+        parent.keys = Some(keys);
+        let app = hints_app(parent);
+        let rename_hint = app.tmux_hints().iter().find(|(_, label)| label == "rename");
+        assert!(rename_hint.is_some());
+        assert_ne!(rename_hint.unwrap().0, "<");
     }
 
     #[test]
