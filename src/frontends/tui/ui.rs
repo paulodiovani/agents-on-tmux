@@ -814,7 +814,7 @@ mod tests {
     fn test_unfocused_app_tracks_focus_and_hints() {
         let app = unfocused_app();
         assert!(!app.pane_active());
-        assert_eq!(app.tmux_hints().len(), 5);
+        assert_eq!(app.tmux_hints().len(), 6);
     }
 
     #[test]
@@ -830,11 +830,12 @@ mod tests {
         let mut app = unfocused_app();
         let buffer = render(&mut app, 35, 12);
         let rendered = all_text(&buffer);
-        assert!(rendered.contains("C-b C-b c new"));
-        assert!(rendered.contains("C-b C-b n next"));
-        assert!(rendered.contains("C-b C-b p prev"));
-        assert!(rendered.contains("C-b C-b l last"));
-        assert!(rendered.contains("C-b C-b , rename"));
+        assert!(rendered.contains("C-b C-b prefix"));
+        assert!(rendered.contains("c new"));
+        assert!(rendered.contains("n next"));
+        assert!(rendered.contains("p prev"));
+        assert!(rendered.contains("l last"));
+        assert!(rendered.contains(", rename"));
         assert!(!rendered.contains("quit"));
     }
 
@@ -873,11 +874,11 @@ mod tests {
     fn test_footer_height_covers_tmux_keys() {
         let app = unfocused_app();
         let theme = Theme::default();
-        // 33 usable columns: "c new" + "n next" fit on one line, the rest
-        // wraps over two more.
-        assert_eq!(calculate_footer_height(35, &app, &theme), 3);
-        // 18 usable columns: one entry per line.
-        assert_eq!(calculate_footer_height(20, &app, &theme), 5);
+        // 31 usable columns: "C-b C-b prefix" + "c new" + "n next" fit on one
+        // line, the rest wraps to a second.
+        assert_eq!(calculate_footer_height(35, &app, &theme), 2);
+        // 16 usable columns: one or two entries per line.
+        assert_eq!(calculate_footer_height(20, &app, &theme), 4);
     }
 
     #[test]

@@ -25,9 +25,10 @@ const HINTED_COMMANDS: [(&str, &str); 5] = [
 ];
 
 /// Resolves the key sequences that reach the nested session from the user's
-/// own tmux bindings: parent prefix, send-prefix, then the bound key (e.g.
-/// "C-b C-b c"). Empty when anything cannot be resolved, so the footer falls
-/// back to the TUI's own keybindings.
+/// own tmux bindings: one entry for the prefix sequence (e.g. "C-b C-b",
+/// label "prefix"), then the bare keys for the hinted commands (e.g. "c",
+/// "new"). Empty when anything cannot be resolved, so the footer falls back
+/// to the TUI's own keybindings.
 fn resolve_tmux_hints(driver: &dyn Tmux) -> Vec<(String, String)> {
     let Ok(keys) = driver.list_keys("prefix") else {
         return Vec::new();
@@ -43,22 +44,20 @@ fn resolve_tmux_hints(driver: &dyn Tmux) -> Vec<(String, String)> {
         .map(|b| b.key.clone())
         .unwrap_or_else(|| prefix.clone());
 
+    let prefix_seq = format!("{prefix} {send_prefix}");
+
     let binding_for = |command: &str| {
         keys.iter()
             .find(|b| b.command.split_whitespace().next() == Some(command))
             .map(|b| b.key.clone())
     };
 
-    HINTED_COMMANDS
-        .iter()
-        .filter_map(|(command, label)| {
-            let key = binding_for(command)?;
-            Some((
-                format!("{prefix} {send_prefix} {key}"),
-                (*label).to_string(),
-            ))
-        })
-        .collect()
+    let mut hints = vec![(prefix_seq, "prefix".to_string())];
+    hints.extend(HINTED_COMMANDS.iter().filter_map(|(command, label)| {
+        let key = binding_for(command)?;
+        Some((key, (*label).to_string()))
+    }));
+    hints
 }
 
 /// Main application state for the TUI frontend.
@@ -461,7 +460,8 @@ impl App {
     }
 
     /// Returns the tmux key sequences to advertise when the pane is not
-    /// focused: (key sequence, label) pairs, e.g. ("C-b C-b c", "new").
+    /// focused: (key sequence, label) pairs, e.g. ("C-b C-b", "prefix"),
+    /// ("c", "new").
     pub fn tmux_hints(&self) -> &[(String, String)] {
         &self.tmux_hints
     }
@@ -1016,11 +1016,12 @@ mod tests {
         assert_eq!(
             app.tmux_hints(),
             [
-                ("C-b C-b c".to_string(), "new".to_string()),
-                ("C-b C-b n".to_string(), "next".to_string()),
-                ("C-b C-b p".to_string(), "prev".to_string()),
-                ("C-b C-b l".to_string(), "last".to_string()),
-                ("C-b C-b ,".to_string(), "rename".to_string()),
+                ("C-b C-b".to_string(), "prefix".to_string()),
+                ("c".to_string(), "new".to_string()),
+                ("n".to_string(), "next".to_string()),
+                ("p".to_string(), "prev".to_string()),
+                ("l".to_string(), "last".to_string()),
+                (",".to_string(), "rename".to_string()),
             ]
         );
     }
@@ -1041,7 +1042,7 @@ mod tests {
                 .collect(),
         );
         let app = hints_app(parent);
-        assert_eq!(app.tmux_hints().len(), 4);
+        assert_eq!(app.tmux_hints().len(), 5);
         assert!(!app.tmux_hints().iter().any(|(_, label)| label == "last"));
     }
 
@@ -1058,7 +1059,12 @@ mod tests {
         let app = hints_app(parent);
         assert_eq!(
             app.tmux_hints()[0],
-            ("C-a C-a c".to_string(), "new".to_string())
+            ("C-a C-a".to_string(), "prefix".to_string())
+        );
+        assert!(
+            app.tmux_hints()
+                .iter()
+                .any(|(key, label)| key == "c" && label == "new")
         );
     }
 
@@ -1072,7 +1078,7 @@ mod tests {
         let app = hints_app(parent);
         assert_eq!(
             app.tmux_hints()[0],
-            ("C-Space C-b c".to_string(), "new".to_string())
+            ("C-Space C-b".to_string(), "prefix".to_string())
         );
     }
 
@@ -1083,9 +1089,10 @@ mod tests {
         keys[1].command = "new-window -c #{pane_current_path}".to_string();
         parent.keys = Some(keys);
         let app = hints_app(parent);
-        assert_eq!(
-            app.tmux_hints()[0],
-            ("C-b C-b c".to_string(), "new".to_string())
+        assert!(
+            app.tmux_hints()
+                .iter()
+                .any(|(key, label)| key == "c" && label == "new")
         );
     }
 
