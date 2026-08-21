@@ -21,7 +21,10 @@ const HINTED_COMMANDS: [(&str, &str); 5] = [
     ("next-window", "next"),
     ("previous-window", "prev"),
     ("last-window", "last"),
-    ("command-prompt -I \"#W\" { rename-window \"%%\" }", "rename"),
+    (
+        "command-prompt -I \"#W\" { rename-window \"%%\" }",
+        "rename",
+    ),
 ];
 
 /// Resolves the key sequences that reach the nested session from the user's

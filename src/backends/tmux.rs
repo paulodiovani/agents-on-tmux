@@ -847,10 +847,7 @@ mod tests {
                 .unwrap_or_else(|| panic!("no binding for {command}"))
         };
         assert_eq!(find("send-prefix").key, "C-b");
-        assert_eq!(
-            find("new-window -c \"#{pane_current_path}\"").key,
-            "c"
-        );
+        assert_eq!(find("new-window -c \"#{pane_current_path}\"").key, "c");
         assert_eq!(find("next-window").key, "n");
         assert_eq!(find("last-window").key, "l");
         assert_eq!(
