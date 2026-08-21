@@ -24,21 +24,6 @@ const HINTED_COMMANDS: [(&str, &str); 5] = [
     ("rename-window", "rename"),
 ];
 
-/// Whether the server forwards pane focus changes to pane applications.
-fn focus_events_on(driver: &dyn Tmux) -> bool {
-    driver
-        .show_options("focus-events")
-        .is_ok_and(|value| value == "on")
-}
-
-/// Whether the given pane is the active pane of its window. Assumes focused
-/// when the query fails, so a hiccup keeps the TUI's own keybindings.
-fn pane_is_active(driver: &dyn Tmux, pane_id: &str) -> bool {
-    driver
-        .display_message(Some(pane_id), "#{pane_active}")
-        .is_ok_and(|value| value == "1")
-}
-
 /// Resolves the key sequences that reach the nested session from the user's
 /// own tmux bindings: parent prefix, send-prefix, then the bound key (e.g.
 /// "C-b C-b c"). Empty when anything cannot be resolved, so the footer falls
@@ -81,7 +66,6 @@ pub struct App {
     active_tab: Tab,
     agents_selected: usize,
     event_rx: Option<mpsc::Receiver<TmuxEvent>>,
-    focus_tracking: bool,
     last_focused_id: Option<u32>,
     list_state: ListState,
     nested_driver: Box<dyn Tmux>,
@@ -101,23 +85,15 @@ impl App {
     /// `Some((pane_id, width))` only when running as the split side panel: the
     /// width to re-assert on the pane whenever tmux rescales the layout.
     /// `pane_id` is the pane the TUI runs in, when known; it enables focus
-    /// tracking when the server also has focus-events on.
+    /// tracking.
     pub fn new(
         nested_driver: Box<dyn Tmux>,
         parent_driver: Box<dyn Tmux>,
         panel: Option<(String, u16)>,
         pane_id: Option<String>,
     ) -> anyhow::Result<Self> {
-        // Focus tracking needs tmux to forward pane focus events (focus-events
-        // on) and to know our own pane. Without either, the TUI assumes it is
-        // focused and keeps showing its own keybindings.
-        let focus_tracking = pane_id.is_some() && focus_events_on(parent_driver.as_ref());
-        let pane_active = match (&pane_id, focus_tracking) {
-            (Some(id), true) => pane_is_active(parent_driver.as_ref(), id),
-            _ => true,
-        };
         // Bindings are read once: rebinds while aot runs are not picked up.
-        let tmux_hints = if focus_tracking {
+        let tmux_hints = if pane_id.is_some() {
             resolve_tmux_hints(parent_driver.as_ref())
         } else {
             Vec::new()
@@ -127,11 +103,10 @@ impl App {
             active_tab: Tab::Windows,
             agents_selected: 0,
             event_rx: None,
-            focus_tracking,
             last_focused_id: None,
             list_state: ListState::default(),
             nested_driver,
-            pane_active,
+            pane_active: true,
             panel,
             parent_driver,
             pending_action: None,
@@ -183,11 +158,9 @@ impl App {
         let initial_width = terminal.size()?.width;
         self.enforce_panel_width(initial_width);
 
-        // Ask the terminal/tmux to report pane focus changes. Only meaningful
-        // with focus-events on; without it no events ever arrive.
-        if self.focus_tracking {
-            let _ = execute!(std::io::stdout(), event::EnableFocusChange);
-        }
+        // Ask the terminal/tmux to report pane focus changes. Without
+        // focus-events on no events ever arrive, so pane_active stays true.
+        let _ = execute!(std::io::stdout(), event::EnableFocusChange);
 
         let redraw_tick = Duration::from_secs(1);
         let mut last_draw = Instant::now() - redraw_tick;
@@ -227,9 +200,7 @@ impl App {
             }
         }
 
-        if self.focus_tracking {
-            let _ = execute!(std::io::stdout(), event::DisableFocusChange);
-        }
+        let _ = execute!(std::io::stdout(), event::DisableFocusChange);
         Ok(())
     }
 
@@ -295,11 +266,9 @@ impl App {
         self.running = false;
     }
 
-    /// Updates the pane focus state from a terminal focus event. Ignored
-    /// unless focus tracking is active, so terminals that report their own
-    /// window focus cannot desync the state.
+    /// Updates the pane focus state from a terminal focus event.
     pub fn set_pane_active(&mut self, active: bool) {
-        if self.focus_tracking && self.pane_active != active {
+        if self.pane_active != active {
             logger::debug(&format!("app: pane active {active}"));
             self.pane_active = active;
         }
@@ -621,10 +590,8 @@ mod tests {
 
     struct MockTmux {
         calls: Rc<std::cell::RefCell<Vec<String>>>,
-        focus_events: bool,
         keys: Option<Vec<KeyBinding>>,
         next_id: Rc<std::cell::RefCell<u32>>,
-        pane_active: bool,
         prefix: Option<String>,
         windows: Rc<std::cell::RefCell<Vec<Window>>>,
     }
@@ -633,10 +600,8 @@ mod tests {
         fn new() -> Self {
             Self {
                 calls: Rc::new(std::cell::RefCell::new(Vec::new())),
-                focus_events: false,
                 keys: Some(default_key_bindings()),
                 next_id: Rc::new(std::cell::RefCell::new(5)),
-                pane_active: true,
                 prefix: Some("C-b".to_string()),
                 windows: Rc::new(std::cell::RefCell::new(vec![
                     Window {
@@ -759,23 +724,7 @@ mod tests {
                     .prefix
                     .clone()
                     .ok_or_else(|| command_failed("show-options")),
-                "focus-events" => Ok(if self.focus_events {
-                    "on".to_string()
-                } else {
-                    "off".to_string()
-                }),
                 _ => Err(command_failed("show-options")),
-            }
-        }
-
-        fn display_message(&self, pane: Option<&str>, message: &str) -> Result<String, TmuxError> {
-            match (pane, message) {
-                (Some(_), "#{pane_active}") => Ok(if self.pane_active {
-                    "1".to_string()
-                } else {
-                    "0".to_string()
-                }),
-                _ => Err(command_failed("display-message")),
             }
         }
 
@@ -1032,20 +981,6 @@ mod tests {
         assert!(app.event_rx.is_none());
     }
 
-    fn focus_app(focus_events: bool, pane_active: bool) -> App {
-        let driver = MockTmux::new();
-        let mut parent = MockTmux::new();
-        parent.focus_events = focus_events;
-        parent.pane_active = pane_active;
-        App::new(
-            Box::new(driver),
-            Box::new(parent),
-            None,
-            Some("%7".to_string()),
-        )
-        .unwrap()
-    }
-
     fn default_key_bindings() -> Vec<KeyBinding> {
         [
             ("C-b", "send-prefix"),
@@ -1064,8 +999,7 @@ mod tests {
     }
 
     fn hints_app(parent: MockTmux) -> App {
-        let mut parent = parent;
-        parent.focus_events = true;
+        let parent = parent;
         let driver = MockTmux::new();
         App::new(
             Box::new(driver),
@@ -1092,7 +1026,7 @@ mod tests {
     }
 
     #[test]
-    fn test_tmux_hints_empty_without_focus_tracking() {
+    fn test_tmux_hints_empty_without_pane_id() {
         let (app, _, _) = test_app();
         assert!(app.tmux_hints().is_empty());
     }
@@ -1181,39 +1115,24 @@ mod tests {
 
     #[test]
     fn test_new_without_pane_id_assumes_focused() {
-        let mut parent = MockTmux::new();
-        parent.focus_events = true;
-        parent.pane_active = false;
         let driver = MockTmux::new();
-        let app = App::new(Box::new(driver), Box::new(parent), None, None).unwrap();
+        let app = App::new(Box::new(driver), Box::new(MockTmux::new()), None, None).unwrap();
         assert!(app.pane_active());
     }
 
     #[test]
-    fn test_new_with_focus_events_off_assumes_focused() {
-        let app = focus_app(false, false);
+    fn test_set_pane_active_toggles() {
+        let mut app = App::new(
+            Box::new(MockTmux::new()),
+            Box::new(MockTmux::new()),
+            None,
+            Some("%7".to_string()),
+        )
+        .unwrap();
         assert!(app.pane_active());
-    }
-
-    #[test]
-    fn test_new_with_focus_events_on_reads_pane_state() {
-        assert!(focus_app(true, true).pane_active());
-        assert!(!focus_app(true, false).pane_active());
-    }
-
-    #[test]
-    fn test_set_pane_active_updates_when_tracking() {
-        let mut app = focus_app(true, true);
         app.set_pane_active(false);
         assert!(!app.pane_active());
         app.set_pane_active(true);
-        assert!(app.pane_active());
-    }
-
-    #[test]
-    fn test_set_pane_active_ignored_without_tracking() {
-        let mut app = focus_app(false, false);
-        app.set_pane_active(false);
         assert!(app.pane_active());
     }
 

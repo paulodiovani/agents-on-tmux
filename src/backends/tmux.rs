@@ -40,8 +40,6 @@ pub trait Tmux {
     /// Opens the tmux command prompt on the calling client, pre-filled with
     /// `initial`, running `template` on accept (`%%` expands to the input).
     fn command_prompt(&self, initial: &str, template: &str) -> Result<(), TmuxError>;
-    /// Evaluates a format string, targeting the given pane when provided.
-    fn display_message(&self, pane: Option<&str>, message: &str) -> Result<String, TmuxError>;
 }
 
 pub const SESSION_NAME: &str = "agents-on-tmux";
@@ -373,18 +371,6 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
             .execute(&["command-prompt", "-I", initial, template])
             .map(|_| ())
     }
-
-    /// Evaluates a format string, targeting the given pane when provided.
-    fn display_message(&self, pane: Option<&str>, message: &str) -> Result<String, TmuxError> {
-        let output = match pane {
-            Some(pane_id) => {
-                self.executor
-                    .execute(&["display-message", "-p", "-t", pane_id, message])?
-            }
-            None => self.executor.execute(&["display-message", "-p", message])?,
-        };
-        Ok(output.trim().to_string())
-    }
 }
 
 #[cfg(test)]
@@ -396,8 +382,6 @@ mod tests {
     /// Mock command executor for testing.
     struct MockCommandExecutor {
         commands: RefCell<Vec<Vec<String>>>,
-        focus_events: RefCell<bool>,
-        pane_active: RefCell<bool>,
         pane_id: RefCell<String>,
         session_exists: RefCell<bool>,
         windows: RefCell<Vec<Window>>,
@@ -407,8 +391,6 @@ mod tests {
         fn new() -> Self {
             Self {
                 commands: RefCell::new(Vec::new()),
-                focus_events: RefCell::new(false),
-                pane_active: RefCell::new(true),
                 pane_id: RefCell::new("%99".to_string()),
                 session_exists: RefCell::new(false),
                 windows: RefCell::new(Vec::new()),
@@ -418,12 +400,6 @@ mod tests {
         fn with_session() -> Self {
             let mock = Self::new();
             *mock.session_exists.borrow_mut() = true;
-            mock
-        }
-
-        fn with_focus_events() -> Self {
-            let mock = Self::new();
-            *mock.focus_events.borrow_mut() = true;
             mock
         }
     }
@@ -524,16 +500,7 @@ mod tests {
                             code: Some(1),
                         });
                     }
-                    if args.contains(&"focus-events") {
-                        Ok(format!(
-                            "{}\n",
-                            if *self.focus_events.borrow() {
-                                "on"
-                            } else {
-                                "off"
-                            }
-                        ))
-                    } else if args.contains(&"prefix") {
+                    if args.contains(&"prefix") {
                         Ok("C-b\n".to_string())
                     } else {
                         Err(TmuxError::CommandFailed {
@@ -541,16 +508,6 @@ mod tests {
                             stderr: String::new(),
                             code: Some(1),
                         })
-                    }
-                }
-                Some(&"display-message") => {
-                    if args.contains(&"#{pane_active}") {
-                        Ok(format!(
-                            "{}\n",
-                            if *self.pane_active.borrow() { "1" } else { "0" }
-                        ))
-                    } else {
-                        Ok(String::new())
                     }
                 }
                 _ => Err(TmuxError::CommandFailed {
@@ -941,17 +898,6 @@ mod tests {
     }
 
     #[test]
-    fn test_show_options_focus_events() {
-        let executor = MockCommandExecutor::with_focus_events();
-        let driver = TmuxDriver::with_executor(executor);
-        assert_eq!(driver.show_options("focus-events").unwrap(), "on");
-
-        let executor = MockCommandExecutor::with_session();
-        let driver = TmuxDriver::with_executor(executor);
-        assert_eq!(driver.show_options("focus-events").unwrap(), "off");
-    }
-
-    #[test]
     fn test_show_options_trims_output() {
         let executor = MockCommandExecutor::with_session();
         let driver = TmuxDriver::with_executor(executor);
@@ -981,57 +927,6 @@ mod tests {
                 "rename-window -t \"aot:1\" \"%%\"".to_string(),
             ]
         );
-    }
-
-    #[test]
-    fn test_display_message_pane_active() {
-        let executor = MockCommandExecutor::with_session();
-        let driver = TmuxDriver::with_executor(executor);
-        assert_eq!(
-            driver
-                .display_message(Some("%5"), "#{pane_active}")
-                .unwrap(),
-            "1"
-        );
-
-        *driver.executor.pane_active.borrow_mut() = false;
-        assert_eq!(
-            driver
-                .display_message(Some("%5"), "#{pane_active}")
-                .unwrap(),
-            "0"
-        );
-    }
-
-    #[test]
-    fn test_display_message_command_args() {
-        let executor = MockCommandExecutor::with_session();
-        let driver = TmuxDriver::with_executor(executor);
-        let _ = driver.display_message(Some("%5"), "#{pane_active}");
-
-        let commands = driver.executor.commands.borrow();
-        let display_cmd = commands
-            .iter()
-            .find(|cmd| cmd.first().map(|s| s.as_str()) == Some("display-message"))
-            .unwrap();
-        assert!(display_cmd.contains(&"-p".to_string()));
-        assert!(display_cmd.contains(&"-t".to_string()));
-        assert!(display_cmd.contains(&"%5".to_string()));
-        assert!(display_cmd.contains(&"#{pane_active}".to_string()));
-    }
-
-    #[test]
-    fn test_display_message_without_target() {
-        let executor = MockCommandExecutor::with_session();
-        let driver = TmuxDriver::with_executor(executor);
-        let _ = driver.display_message(None, "#{pane_active}");
-
-        let commands = driver.executor.commands.borrow();
-        let display_cmd = commands
-            .iter()
-            .find(|cmd| cmd.first().map(|s| s.as_str()) == Some("display-message"))
-            .unwrap();
-        assert!(!display_cmd.contains(&"-t".to_string()));
     }
 
     #[test]

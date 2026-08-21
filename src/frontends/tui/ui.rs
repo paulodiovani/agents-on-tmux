@@ -524,10 +524,8 @@ mod tests {
     use std::time::Duration;
 
     struct MockTmux {
-        focus_events: bool,
         keys: Option<Vec<KeyBinding>>,
         next_id: std::cell::RefCell<u32>,
-        pane_active: bool,
         prefix: Option<String>,
         windows: std::cell::RefCell<Vec<Window>>,
     }
@@ -558,10 +556,8 @@ mod tests {
 
         fn with_windows(windows: Vec<Window>) -> Self {
             Self {
-                focus_events: false,
                 keys: Some(default_key_bindings()),
                 next_id: std::cell::RefCell::new(90),
-                pane_active: true,
                 prefix: Some("C-b".to_string()),
                 windows: std::cell::RefCell::new(windows),
             }
@@ -639,22 +635,7 @@ mod tests {
                     .prefix
                     .clone()
                     .ok_or_else(|| command_failed("show-options")),
-                "focus-events" => Ok(if self.focus_events {
-                    "on".to_string()
-                } else {
-                    "off".to_string()
-                }),
                 _ => Err(command_failed("show-options")),
-            }
-        }
-        fn display_message(&self, pane: Option<&str>, message: &str) -> Result<String, TmuxError> {
-            match (pane, message) {
-                (Some(_), "#{pane_active}") => Ok(if self.pane_active {
-                    "1".to_string()
-                } else {
-                    "0".to_string()
-                }),
-                _ => Err(command_failed("display-message")),
             }
         }
         fn command_prompt(&self, _initial: &str, _template: &str) -> Result<(), TmuxError> {
@@ -807,16 +788,16 @@ mod tests {
     /// An app whose pane is unfocused while tmux bindings were resolved.
     fn unfocused_app() -> App {
         let driver = MockTmux::new();
-        let mut parent = MockTmux::new();
-        parent.focus_events = true;
-        parent.pane_active = false;
-        App::new(
+        let parent = MockTmux::new();
+        let mut app = App::new(
             Box::new(driver),
             Box::new(parent),
             None,
             Some("%7".to_string()),
         )
-        .unwrap()
+        .unwrap();
+        app.set_pane_active(false);
+        app
     }
 
     /// Every rendered row joined by newlines, trailing blanks trimmed.
@@ -861,8 +842,6 @@ mod tests {
     fn test_footer_falls_back_to_tui_keys_without_hints() {
         let driver = MockTmux::new();
         let mut parent = MockTmux::new();
-        parent.focus_events = true;
-        parent.pane_active = false;
         parent.keys = None;
         let mut app = App::new(
             Box::new(driver),
@@ -871,7 +850,6 @@ mod tests {
             Some("%7".to_string()),
         )
         .unwrap();
-        assert!(!app.pane_active());
 
         let buffer = render(&mut app, 35, 12);
         let rendered = all_text(&buffer);
