@@ -489,7 +489,7 @@ mod tests {
                     "bind-key    -T prefix n next-window\n",
                     "bind-key    -T prefix p previous-window\n",
                     "bind-key    -T prefix l last-window\n",
-                    "bind-key    -T prefix , rename-window\n",
+                    "bind-key    -T prefix , command-prompt -I \"#W\" { rename-window \"%%\" }\n",
                 )
                 .to_string()),
                 Some(&"show-options") => {
@@ -850,7 +850,11 @@ mod tests {
         assert_eq!(find("new-window").key, "c");
         assert_eq!(find("next-window").key, "n");
         assert_eq!(find("last-window").key, "l");
-        assert_eq!(find("rename-window").key, ",");
+        let rename_binding = keys
+            .iter()
+            .find(|b| b.key == "," && b.command.contains("rename-window"))
+            .expect("no rename-window binding");
+        assert!(rename_binding.command.starts_with("command-prompt"));
     }
 
     #[test]

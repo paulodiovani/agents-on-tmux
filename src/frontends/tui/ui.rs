@@ -571,7 +571,7 @@ mod tests {
             ("n", "next-window"),
             ("p", "previous-window"),
             ("l", "last-window"),
-            (",", "rename-window"),
+            (",", "command-prompt -I \"#W\" { rename-window \"%%\" }"),
         ]
         .into_iter()
         .map(|(key, command)| KeyBinding {

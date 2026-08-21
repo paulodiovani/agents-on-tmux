@@ -48,7 +48,7 @@ fn resolve_tmux_hints(driver: &dyn Tmux) -> Vec<(String, String)> {
 
     let binding_for = |command: &str| {
         keys.iter()
-            .find(|b| b.command.split_whitespace().next() == Some(command))
+            .find(|b| b.command.split_whitespace().any(|word| word == command))
             .map(|b| b.key.clone())
     };
 
@@ -988,7 +988,7 @@ mod tests {
             ("n", "next-window"),
             ("p", "previous-window"),
             ("l", "last-window"),
-            (",", "rename-window"),
+            (",", "command-prompt -I \"#W\" { rename-window \"%%\" }"),
         ]
         .into_iter()
         .map(|(key, command)| KeyBinding {
@@ -1083,7 +1083,7 @@ mod tests {
     }
 
     #[test]
-    fn test_tmux_hints_match_first_word_of_command() {
+    fn test_tmux_hints_match_command_anywhere_in_binding() {
         let mut parent = MockTmux::new();
         let mut keys = default_key_bindings();
         keys[1].command = "new-window -c #{pane_current_path}".to_string();
@@ -1093,6 +1093,17 @@ mod tests {
             app.tmux_hints()
                 .iter()
                 .any(|(key, label)| key == "c" && label == "new")
+        );
+    }
+
+    #[test]
+    fn test_tmux_hints_match_command_prompt_with_rename() {
+        let parent = MockTmux::new();
+        let app = hints_app(parent);
+        assert!(
+            app.tmux_hints()
+                .iter()
+                .any(|(key, label)| key == "," && label == "rename")
         );
     }
 
