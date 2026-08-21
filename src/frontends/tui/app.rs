@@ -27,27 +27,53 @@ const HINTED_COMMANDS: [(&str, &str); 5] = [
     ),
 ];
 
-/// Resolves the nested-session key sequences to advertise from the user's
-/// own tmux bindings: the prefix sequence (e.g. "C-b C-b"), then one entry
-/// per hinted command. Empty when anything cannot be resolved, so the footer
-/// falls back to the TUI's own keybindings.
-fn resolve_tmux_hints(driver: &dyn Tmux) -> Vec<(String, String)> {
-    let Ok(keys) = driver.list_keys("prefix") else {
+/// Effective prefix of a driver's session: its own override, else the
+/// server-wide default.
+fn effective_prefix(driver: &dyn Tmux) -> Option<String> {
+    match driver.show_options("prefix", false) {
+        Ok(value) if !value.is_empty() => Some(value),
+        _ => {
+            let value = driver.show_options("prefix", true).ok()?;
+            (!value.is_empty()).then_some(value)
+        }
+    }
+}
+
+/// Resolves the nested-session key sequences to advertise, from the nested
+/// bindings and both sessions' prefixes: `<prefix> <parent send-prefix>`
+/// when the prefixes collide (the parent eats the first press), otherwise
+/// just the nested prefix. Empty when anything cannot be resolved, so the
+/// footer falls back to the TUI's own keybindings.
+fn resolve_tmux_hints(nested: &dyn Tmux, parent: &dyn Tmux) -> Vec<(String, String)> {
+    let Some(nested_prefix) = effective_prefix(nested) else {
         return Vec::new();
     };
-    let prefix = driver.show_options("prefix").unwrap_or_default();
-    if prefix.is_empty() {
+    let Some(parent_prefix) = effective_prefix(parent) else {
         return Vec::new();
-    }
+    };
+    let Ok(keys) = nested.list_keys("prefix") else {
+        return Vec::new();
+    };
 
-    let binding_for = |command| keys.iter().find(|b| b.command == command).map(|b| &b.key);
-    let send_prefix = binding_for("send-prefix").unwrap_or(&prefix);
+    let prefix_entry = if nested_prefix == parent_prefix {
+        let Ok(parent_keys) = parent.list_keys("prefix") else {
+            return Vec::new();
+        };
+        let send_prefix = parent_keys
+            .iter()
+            .find(|b| b.command == "send-prefix")
+            .map(|b| b.key.clone())
+            .unwrap_or_else(|| parent_prefix.clone());
+        format!("{nested_prefix} {send_prefix}")
+    } else {
+        nested_prefix.clone()
+    };
 
-    let mut hints = vec![(format!("{prefix} {send_prefix}"), "prefix".to_string())];
+    let binding_for = |command: &str| keys.iter().find(|b| b.command == command).map(|b| &b.key);
+    let mut hints = vec![(prefix_entry, "prefix".to_string())];
     hints.extend(HINTED_COMMANDS.iter().filter_map(|(command, label)| {
         Some((binding_for(command)?.clone(), (*label).to_string()))
     }));
-
     hints
 }
 
@@ -84,7 +110,7 @@ impl App {
     ) -> anyhow::Result<Self> {
         // Bindings are read once: rebinds while aot runs are not picked up.
         let tmux_hints = if pane_id.is_some() {
-            resolve_tmux_hints(parent_driver.as_ref())
+            resolve_tmux_hints(nested_driver.as_ref(), parent_driver.as_ref())
         } else {
             Vec::new()
         };
@@ -705,7 +731,7 @@ mod tests {
             self.keys.clone().ok_or_else(|| command_failed("list-keys"))
         }
 
-        fn show_options(&self, name: &str) -> Result<String, TmuxError> {
+        fn show_options(&self, name: &str, _global: bool) -> Result<String, TmuxError> {
             match name {
                 "prefix" => self
                     .prefix
@@ -985,11 +1011,9 @@ mod tests {
         .collect()
     }
 
-    fn hints_app(parent: MockTmux) -> App {
-        let parent = parent;
-        let driver = MockTmux::new();
+    fn hints_app(nested: MockTmux, parent: MockTmux) -> App {
         App::new(
-            Box::new(driver),
+            Box::new(nested),
             Box::new(parent),
             None,
             Some("%7".to_string()),
@@ -999,7 +1023,7 @@ mod tests {
 
     #[test]
     fn test_tmux_hints_resolved_when_tracking() {
-        let app = hints_app(MockTmux::new());
+        let app = hints_app(MockTmux::new(), MockTmux::new());
         assert_eq!(
             app.tmux_hints(),
             [
@@ -1021,20 +1045,22 @@ mod tests {
 
     #[test]
     fn test_tmux_hints_skip_unbound_commands() {
-        let mut parent = MockTmux::new();
-        parent.keys = Some(
+        let mut nested = MockTmux::new();
+        nested.keys = Some(
             default_key_bindings()
                 .into_iter()
                 .filter(|b| b.command != "last-window")
                 .collect(),
         );
-        let app = hints_app(parent);
+        let app = hints_app(nested, MockTmux::new());
         assert_eq!(app.tmux_hints().len(), 5);
         assert!(!app.tmux_hints().iter().any(|(_, label)| label == "last"));
     }
 
     #[test]
     fn test_tmux_hints_send_prefix_falls_back_to_prefix() {
+        let mut nested = MockTmux::new();
+        nested.prefix = Some("C-a".to_string());
         let mut parent = MockTmux::new();
         parent.prefix = Some("C-a".to_string());
         parent.keys = Some(
@@ -1043,7 +1069,7 @@ mod tests {
                 .filter(|b| b.command != "send-prefix")
                 .collect(),
         );
-        let app = hints_app(parent);
+        let app = hints_app(nested, parent);
         assert_eq!(
             app.tmux_hints()[0],
             ("C-a C-a".to_string(), "prefix".to_string())
@@ -1058,21 +1084,31 @@ mod tests {
     #[test]
     fn test_tmux_hints_use_bound_send_prefix_key() {
         let mut parent = MockTmux::new();
-        parent.prefix = Some("C-Space".to_string());
         let mut keys = default_key_bindings();
-        keys[0].key = "C-b".to_string();
+        keys[0].key = "C-Space".to_string();
         parent.keys = Some(keys);
-        let app = hints_app(parent);
+        let app = hints_app(MockTmux::new(), parent);
         assert_eq!(
             app.tmux_hints()[0],
-            ("C-Space C-b".to_string(), "prefix".to_string())
+            ("C-b C-Space".to_string(), "prefix".to_string())
         );
     }
 
     #[test]
+    fn test_tmux_hints_bare_nested_prefix_when_prefixes_differ() {
+        let mut parent = MockTmux::new();
+        parent.prefix = Some("C-a".to_string());
+        let app = hints_app(MockTmux::new(), parent);
+        assert_eq!(
+            app.tmux_hints()[0],
+            ("C-b".to_string(), "prefix".to_string())
+        );
+        assert_eq!(app.tmux_hints().len(), 6);
+    }
+
+    #[test]
     fn test_tmux_hints_match_command_prompt_with_rename() {
-        let parent = MockTmux::new();
-        let app = hints_app(parent);
+        let app = hints_app(MockTmux::new(), MockTmux::new());
         assert!(
             app.tmux_hints()
                 .iter()
@@ -1082,40 +1118,56 @@ mod tests {
 
     #[test]
     fn test_tmux_hints_do_not_match_menu_commands() {
-        let mut parent = MockTmux::new();
+        let mut nested = MockTmux::new();
         let mut keys = default_key_bindings();
         keys.push(KeyBinding {
             key: "<".to_string(),
             command: "display-menu -T \"Window menu\" #{window_index} rename-window".to_string(),
         });
-        parent.keys = Some(keys);
-        let app = hints_app(parent);
+        nested.keys = Some(keys);
+        let app = hints_app(nested, MockTmux::new());
         let rename_hint = app.tmux_hints().iter().find(|(_, label)| label == "rename");
         assert!(rename_hint.is_some());
         assert_ne!(rename_hint.unwrap().0, "<");
     }
 
     #[test]
-    fn test_tmux_hints_empty_when_list_keys_fails() {
+    fn test_tmux_hints_empty_when_nested_list_keys_fails() {
+        let mut nested = MockTmux::new();
+        nested.keys = None;
+        let app = hints_app(nested, MockTmux::new());
+        assert!(app.tmux_hints().is_empty());
+    }
+
+    #[test]
+    fn test_tmux_hints_empty_when_parent_list_keys_fails() {
         let mut parent = MockTmux::new();
         parent.keys = None;
-        let app = hints_app(parent);
+        let app = hints_app(MockTmux::new(), parent);
         assert!(app.tmux_hints().is_empty());
     }
 
     #[test]
-    fn test_tmux_hints_empty_when_prefix_fails() {
+    fn test_tmux_hints_empty_when_nested_prefix_fails() {
+        let mut nested = MockTmux::new();
+        nested.prefix = None;
+        let app = hints_app(nested, MockTmux::new());
+        assert!(app.tmux_hints().is_empty());
+    }
+
+    #[test]
+    fn test_tmux_hints_empty_when_parent_prefix_fails() {
         let mut parent = MockTmux::new();
         parent.prefix = None;
-        let app = hints_app(parent);
+        let app = hints_app(MockTmux::new(), parent);
         assert!(app.tmux_hints().is_empty());
     }
 
     #[test]
-    fn test_tmux_hints_empty_when_prefix_blank() {
+    fn test_tmux_hints_empty_when_parent_prefix_blank() {
         let mut parent = MockTmux::new();
         parent.prefix = Some(String::new());
-        let app = hints_app(parent);
+        let app = hints_app(MockTmux::new(), parent);
         assert!(app.tmux_hints().is_empty());
     }
 

@@ -35,8 +35,9 @@ pub trait Tmux {
     fn resize_pane(&self, pane_id: &str, width: u16) -> Result<(), TmuxError>;
     /// Lists the key bindings of the given key table (e.g. "prefix").
     fn list_keys(&self, table: &str) -> Result<Vec<KeyBinding>, TmuxError>;
-    /// Returns the value of a single option from the global session options.
-    fn show_options(&self, name: &str) -> Result<String, TmuxError>;
+    /// Returns the value of a single option: this driver's session by
+    /// default, or the global scope when `global` is set.
+    fn show_options(&self, name: &str, global: bool) -> Result<String, TmuxError>;
     /// Opens the tmux command prompt on the calling client, pre-filled with
     /// `initial`, running `template` on accept (`%%` expands to the input).
     fn command_prompt(&self, initial: &str, template: &str) -> Result<(), TmuxError>;
@@ -350,11 +351,15 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
         Ok(output.lines().filter_map(parse_key_line).collect())
     }
 
-    /// Returns the value of a single option from the global session options.
-    fn show_options(&self, name: &str) -> Result<String, TmuxError> {
-        self.executor
-            .execute(&["show-options", "-gv", name])
-            .map(|s| s.trim().to_string())
+    /// Returns the value of a single option: this driver's session by
+    /// default, or the global scope when `global` is set.
+    fn show_options(&self, name: &str, global: bool) -> Result<String, TmuxError> {
+        let args = if global {
+            vec!["show-options", "-gv", name]
+        } else {
+            vec!["show-options", "-v", "-t", self.session.as_str(), name]
+        };
+        self.executor.execute(&args).map(|s| s.trim().to_string())
     }
 
     /// Opens the tmux command prompt on the calling client, pre-filled with
@@ -377,6 +382,7 @@ mod tests {
         commands: RefCell<Vec<Vec<String>>>,
         pane_id: RefCell<String>,
         session_exists: RefCell<bool>,
+        session_prefix: RefCell<Option<String>>,
         windows: RefCell<Vec<Window>>,
     }
 
@@ -386,6 +392,7 @@ mod tests {
                 commands: RefCell::new(Vec::new()),
                 pane_id: RefCell::new("%99".to_string()),
                 session_exists: RefCell::new(false),
+                session_prefix: RefCell::new(None),
                 windows: RefCell::new(Vec::new()),
             }
         }
@@ -486,18 +493,20 @@ mod tests {
                 )
                 .to_string()),
                 Some(&"show-options") => {
-                    if !args.contains(&"-gv") {
+                    if !args.contains(&"prefix") {
                         return Err(TmuxError::CommandFailed {
                             message: format!("unknown option: {:?}", args),
                             stderr: String::new(),
                             code: Some(1),
                         });
                     }
-                    if args.contains(&"prefix") {
+                    if args.contains(&"-gv") {
                         Ok("C-b\n".to_string())
+                    } else if let Some(prefix) = self.session_prefix.borrow().as_ref() {
+                        Ok(format!("{prefix}\n"))
                     } else {
                         Err(TmuxError::CommandFailed {
-                            message: format!("unknown option: {:?}", args),
+                            message: format!("option not set: {:?}", args),
                             stderr: String::new(),
                             code: Some(1),
                         })
@@ -871,33 +880,63 @@ mod tests {
     }
 
     #[test]
-    fn test_show_options_prefix() {
+    fn test_show_options_global_prefix() {
         let executor = MockCommandExecutor::with_session();
         let driver = TmuxDriver::with_executor(executor);
-        assert_eq!(driver.show_options("prefix").unwrap(), "C-b");
+        assert_eq!(driver.show_options("prefix", true).unwrap(), "C-b");
+    }
+
+    #[test]
+    fn test_show_options_session_prefix_override() {
+        let executor = MockCommandExecutor::with_session();
+        *executor.session_prefix.borrow_mut() = Some("C-a".to_string());
+        let driver = TmuxDriver::with_executor(executor);
+        assert_eq!(driver.show_options("prefix", false).unwrap(), "C-a");
+    }
+
+    #[test]
+    fn test_show_options_session_prefix_unset_fails() {
+        let executor = MockCommandExecutor::with_session();
+        let driver = TmuxDriver::with_executor(executor);
+        assert!(driver.show_options("prefix", false).is_err());
     }
 
     #[test]
     fn test_show_options_command_args() {
         let executor = MockCommandExecutor::with_session();
         let driver = TmuxDriver::with_executor(executor);
-        let _ = driver.show_options("prefix");
+        let _ = driver.show_options("prefix", false);
+        let _ = driver.show_options("prefix", true);
 
         let commands = driver.executor.commands.borrow();
-        let show_options_cmd = commands
+        let mut show_options_cmds = commands
             .iter()
-            .find(|cmd| cmd.first().map(|s| s.as_str()) == Some("show-options"))
-            .unwrap();
-        assert!(show_options_cmd.contains(&"-gv".to_string()));
-        assert!(!show_options_cmd.contains(&"-sv".to_string()));
-        assert!(show_options_cmd.contains(&"prefix".to_string()));
+            .filter(|cmd| cmd.first().map(|s| s.as_str()) == Some("show-options"));
+        assert_eq!(
+            show_options_cmds.next().unwrap().as_slice(),
+            [
+                "show-options".to_string(),
+                "-v".to_string(),
+                "-t".to_string(),
+                SESSION_NAME.to_string(),
+                "prefix".to_string(),
+            ]
+        );
+        assert_eq!(
+            show_options_cmds.next().unwrap().as_slice(),
+            [
+                "show-options".to_string(),
+                "-gv".to_string(),
+                "prefix".to_string(),
+            ]
+        );
     }
 
     #[test]
     fn test_show_options_trims_output() {
         let executor = MockCommandExecutor::with_session();
         let driver = TmuxDriver::with_executor(executor);
-        let value = driver.show_options("prefix").unwrap();
+        let value = driver.show_options("prefix", true).unwrap();
         assert!(!value.contains('\n'));
     }
 

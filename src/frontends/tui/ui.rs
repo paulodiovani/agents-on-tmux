@@ -623,7 +623,7 @@ mod tests {
         fn list_keys(&self, _table: &str) -> Result<Vec<KeyBinding>, TmuxError> {
             self.keys.clone().ok_or_else(|| command_failed("list-keys"))
         }
-        fn show_options(&self, name: &str) -> Result<String, TmuxError> {
+        fn show_options(&self, name: &str, _global: bool) -> Result<String, TmuxError> {
             match name {
                 "prefix" => self
                     .prefix
