@@ -32,10 +32,10 @@ const HINTED_COMMANDS: [(&str, &str); 5] = [
 fn effective_prefix(driver: &dyn Tmux) -> Option<String> {
     match driver.show_options("prefix", false) {
         Ok(value) if !value.is_empty() => Some(value),
-        _ => {
-            let value = driver.show_options("prefix", true).ok()?;
-            (!value.is_empty()).then_some(value)
-        }
+        _ => match driver.show_options("prefix", true) {
+            Ok(value) if !value.is_empty() => Some(value),
+            _ => None,
+        },
     }
 }
 
@@ -198,8 +198,12 @@ impl App {
                         self.enforce_panel_width(width);
                         last_draw = Instant::now() - redraw_tick;
                     }
-                    ev @ (event::Event::FocusGained | event::Event::FocusLost) => {
-                        self.set_pane_active(matches!(ev, event::Event::FocusGained));
+                    event::Event::FocusGained => {
+                        self.set_pane_active(true);
+                        last_draw = Instant::now() - redraw_tick;
+                    }
+                    event::Event::FocusLost => {
+                        self.set_pane_active(false);
                         last_draw = Instant::now() - redraw_tick;
                     }
                     _ => {}

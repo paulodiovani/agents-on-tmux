@@ -324,7 +324,6 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
                 "-b",
                 "-l",
                 &width,
-                "-d",
                 "-P",
                 "-F",
                 "#{pane_id}",
@@ -725,7 +724,6 @@ mod tests {
         assert!(split_cmd.contains(&"-b".to_string()));
         assert!(split_cmd.contains(&"-l".to_string()));
         assert!(split_cmd.contains(&"35".to_string()));
-        assert!(split_cmd.contains(&"-d".to_string()));
         assert!(split_cmd.contains(&"-t".to_string()));
         assert!(split_cmd.contains(&SESSION_NAME.to_string()));
         assert!(split_cmd.contains(&"aot --tui".to_string()));

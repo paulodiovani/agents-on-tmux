@@ -156,7 +156,7 @@ fn main() -> anyhow::Result<()> {
             let command = format!("{} --tui=true --split-panel{}", exe.to_string_lossy(), cli);
             let width = config.tui_width.unwrap_or(DEFAULT_TUI_WIDTH);
             parent_driver.split_window(&command, width)?;
-            parent_driver.last_pane()?;
+            // parent_driver.last_pane()?;
         }
         nested_driver.attach_session()?;
     }
