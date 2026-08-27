@@ -3,7 +3,6 @@ use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use crossterm::event;
-use crossterm::execute;
 use ratatui::DefaultTerminal;
 use ratatui::widgets::ListState;
 
@@ -86,6 +85,7 @@ pub struct App {
     list_state: ListState,
     nested_driver: Box<dyn Tmux>,
     pane_active: bool,
+    pane_id: Option<String>,
     panel: Option<(String, u16)>,
     parent_driver: Box<dyn Tmux>,
     pending_action: Option<PendingAction>,
@@ -122,7 +122,8 @@ impl App {
             last_focused_id: None,
             list_state: ListState::default(),
             nested_driver,
-            pane_active: true,
+            pane_active: panel.is_none(),
+            pane_id,
             panel,
             parent_driver,
             pending_action: None,
@@ -174,20 +175,16 @@ impl App {
         let initial_width = terminal.size()?.width;
         self.enforce_panel_width(initial_width);
 
-        // Ask the terminal/tmux to report pane focus changes. Without
-        // focus-events on no events ever arrive, so pane_active stays true.
-        let _ = execute!(std::io::stdout(), event::EnableFocusChange);
-
         let redraw_tick = Duration::from_secs(1);
         let mut last_draw = Instant::now() - redraw_tick;
         while self.running {
             if last_draw.elapsed() >= redraw_tick {
                 terminal.draw(|frame| ui::draw(frame, self, &theme))?;
-                last_draw = Instant::now();
+                last_draw = Instant::now() - redraw_tick;
             }
 
-            // Poll terminal events (100ms). A keypress, resize, or focus
-            // change forces an immediate redraw next iteration.
+            // Poll terminal events (100ms). A keypress or resize forces
+            // an immediate redraw next iteration.
             if event::poll(Duration::from_millis(100))? {
                 match event::read()? {
                     event::Event::Key(key) if key.kind == event::KeyEventKind::Press => {
@@ -196,14 +193,6 @@ impl App {
                     }
                     event::Event::Resize(width, _) => {
                         self.enforce_panel_width(width);
-                        last_draw = Instant::now() - redraw_tick;
-                    }
-                    event::Event::FocusGained => {
-                        self.set_pane_active(true);
-                        last_draw = Instant::now() - redraw_tick;
-                    }
-                    event::Event::FocusLost => {
-                        self.set_pane_active(false);
                         last_draw = Instant::now() - redraw_tick;
                     }
                     _ => {}
@@ -216,7 +205,6 @@ impl App {
             }
         }
 
-        let _ = execute!(std::io::stdout(), event::DisableFocusChange);
         Ok(())
     }
 
@@ -226,15 +214,24 @@ impl App {
     fn process_tmux_events(&mut self) -> bool {
         let mut needs_refresh = false;
         let mut should_exit = false;
+        let mut new_pane_id = None;
 
         // Drain the channel; the borrow of event_rx ends before we touch &mut self.
         if let Some(rx) = &self.event_rx {
             while let Ok(event) = rx.try_recv() {
                 match event {
-                    TmuxEvent::Refresh => needs_refresh = true,
                     TmuxEvent::Exit => should_exit = true,
+                    TmuxEvent::PaneChanged(id) => new_pane_id = Some(id),
+                    TmuxEvent::Refresh => needs_refresh = true,
                 }
             }
+        }
+
+        if let Some(id) = new_pane_id {
+            if let Some(own_id) = &self.pane_id {
+                self.set_pane_active(*own_id == id);
+            }
+            needs_refresh = true;
         }
 
         if needs_refresh {
@@ -282,7 +279,7 @@ impl App {
         self.running = false;
     }
 
-    /// Updates the pane focus state from a terminal focus event.
+    /// Updates the pane focus state.
     pub fn set_pane_active(&mut self, active: bool) {
         if self.pane_active != active {
             logger::debug(&format!("app: pane active {active}"));
@@ -1260,6 +1257,43 @@ mod tests {
         assert!(!app.process_tmux_events());
 
         assert!(!app.running);
+    }
+
+    #[test]
+    fn test_pane_changed_matching_own_pane_sets_active() {
+        let (mut app, _, _) = test_app();
+        app.pane_id = Some("%5".to_string());
+        app.set_pane_active(false);
+        let (tx, rx) = mpsc::channel();
+        app.event_rx = Some(rx);
+
+        let _ = tx.send(TmuxEvent::PaneChanged("%5".to_string()));
+        assert!(app.process_tmux_events());
+        assert!(app.pane_active());
+    }
+
+    #[test]
+    fn test_pane_changed_not_matching_own_pane_sets_inactive() {
+        let (mut app, _, _) = test_app();
+        app.pane_id = Some("%5".to_string());
+        let (tx, rx) = mpsc::channel();
+        app.event_rx = Some(rx);
+
+        let _ = tx.send(TmuxEvent::PaneChanged("%6".to_string()));
+        assert!(app.process_tmux_events());
+        assert!(!app.pane_active());
+    }
+
+    #[test]
+    fn test_pane_changed_without_own_pane_id_keeps_active() {
+        let (mut app, _, _) = test_app();
+        app.pane_id = None;
+        let (tx, rx) = mpsc::channel();
+        app.event_rx = Some(rx);
+
+        let _ = tx.send(TmuxEvent::PaneChanged("%6".to_string()));
+        assert!(app.process_tmux_events());
+        assert!(app.pane_active());
     }
 
     #[test]

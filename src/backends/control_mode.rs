@@ -8,10 +8,12 @@ const MAX_RETRIES: usize = 5;
 /// Events emitted by the tmux control-mode client.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TmuxEvent {
-    /// Some observable state changed — re-run list_windows.
-    Refresh,
     /// The control-mode connection ended or the server exited.
     Exit,
+    /// The active pane changed to the given pane-id.
+    PaneChanged(String),
+    /// Some observable state changed — re-run list_windows.
+    Refresh,
 }
 
 /// Owns the control-mode child process. Reading delegates to the child's stdout;
@@ -49,25 +51,26 @@ impl Drop for ControlModeReader {
 /// Parses a single control-mode notification line into an event, if relevant.
 pub fn parse_event(line: &str) -> Option<TmuxEvent> {
     let mut parts = line.split(' ');
-    match parts.next()? {
-        command @ "%exit" => {
-            super::logger::debug(&format!("control_mode: {command}"));
-            Some(TmuxEvent::Exit)
-        }
+    let command = parts.next()?;
+
+    super::logger::debug(&format!("control_mode: {command}"));
+
+    match command {
+        "%exit" => Some(TmuxEvent::Exit),
+        // Activity changes: keep the active window live.
+        "%session-changed" | "%session-window-changed" => Some(TmuxEvent::Refresh),
         // Structural changes: validate the id so malformed lines are ignored.
-        command @ "%window-add" | command @ "%window-close" | command @ "%window-renamed" => {
-            super::logger::debug(&format!("control_mode: {command}"));
+        "%window-add" | "%window-close" | "%window-renamed" => {
             let id = parts.next()?.strip_prefix('@')?;
             id.parse::<u32>().ok().map(|_| TmuxEvent::Refresh)
         }
-        // Activity / focus changes: keep the active window live.
-        "%session-changed" | "%session-window-changed" | "%window-pane-changed" => {
-            Some(TmuxEvent::Refresh)
+        // Pane focus changes: extract the pane-id so the TUI can compare it.
+        "%window-pane-changed" => {
+            let id = parts.nth(1); // skip window id and pick pane id
+            let id = id.filter(|id| id.starts_with("%"));
+            id.map(|id| TmuxEvent::PaneChanged(id.to_string()))
         }
-        command => {
-            super::logger::debug(&format!("control_mode: {command}"));
-            None
-        }
+        _ => None,
     }
 }
 
@@ -207,11 +210,17 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_window_pane_changed_triggers_refresh() {
+    fn test_parse_window_pane_changed() {
         assert_eq!(
             parse_event("%window-pane-changed @3 %6"),
-            Some(TmuxEvent::Refresh)
+            Some(TmuxEvent::PaneChanged("%6".to_string()))
         );
+    }
+
+    #[test]
+    fn test_parse_window_pane_changed_malformed_is_none() {
+        assert_eq!(parse_event("%window-pane-changed @3"), None);
+        assert_eq!(parse_event("%window-pane-changed @3 6"), None);
     }
 
     #[test]

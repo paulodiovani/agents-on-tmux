@@ -324,6 +324,7 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
                 "-b",
                 "-l",
                 &width,
+                "-d",
                 "-P",
                 "-F",
                 "#{pane_id}",

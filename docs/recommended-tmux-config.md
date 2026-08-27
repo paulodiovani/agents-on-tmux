@@ -13,19 +13,6 @@ bind-key C-b send-prefix
 Then type `Ctrl + b` twice to run bindings in the nested session.
 Update to your prefix, or preferred key.
 
-### Focus events
-
-```tmux
-set-option -g focus-events on
-```
-
-Required for the TUI footer to switch keybinding hints by focus: while the
-TUI pane is focused it shows the TUI's own keys (`c new`, `q quit`, ...);
-when another pane is focused it shows your own tmux bindings to control the
-nested session (e.g. `C-b C-b c new`, resolved from `list-keys`). Without
-this option tmux does not report pane focus changes, and the footer always
-shows the TUI keys.
-
 ### Detect Shift+Enter
 
 ```tmux
