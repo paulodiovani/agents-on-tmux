@@ -786,8 +786,8 @@ mod tests {
         let mut app = App::new(
             Box::new(driver),
             Box::new(parent),
-            None,
             Some("%7".to_string()),
+            None,
         )
         .unwrap();
         app.set_pane_active(false);
@@ -841,8 +841,8 @@ mod tests {
         let mut app = App::new(
             Box::new(driver),
             Box::new(parent),
-            None,
             Some("%7".to_string()),
+            None,
         )
         .unwrap();
 

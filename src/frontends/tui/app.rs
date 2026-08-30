@@ -86,7 +86,7 @@ pub struct App {
     nested_driver: Box<dyn Tmux>,
     pane_active: bool,
     pane_id: Option<String>,
-    panel: Option<(String, u16)>,
+    panel_width: Option<u16>,
     parent_driver: Box<dyn Tmux>,
     pending_action: Option<PendingAction>,
     running: bool,
@@ -97,16 +97,15 @@ pub struct App {
 }
 
 impl App {
-    /// Creates a new App, loading windows from the tmux driver. `panel` is
-    /// `Some((pane_id, width))` only when running as the split side panel: the
-    /// width to re-assert on the pane whenever tmux rescales the layout.
-    /// `pane_id` is the pane the TUI runs in, when known; it enables focus
-    /// tracking.
+    /// Creates a new App, loading windows from the tmux driver. `pane_id` is
+    /// the pane the TUI runs in, when known; it enables focus tracking.
+    /// `panel_width` is the width to re-assert on the pane whenever tmux
+    /// rescales the layout; `None` disables enforcement.
     pub fn new(
         nested_driver: Box<dyn Tmux>,
         parent_driver: Box<dyn Tmux>,
-        panel: Option<(String, u16)>,
         pane_id: Option<String>,
+        panel_width: Option<u16>,
     ) -> anyhow::Result<Self> {
         // Bindings are read once: rebinds while aot runs are not picked up.
         let tmux_hints = if pane_id.is_some() {
@@ -122,9 +121,9 @@ impl App {
             last_focused_id: None,
             list_state: ListState::default(),
             nested_driver,
-            pane_active: panel.is_none(),
+            pane_active: panel_width.is_none(),
             pane_id,
-            panel,
+            panel_width,
             parent_driver,
             pending_action: None,
             running: true,
@@ -141,17 +140,18 @@ impl App {
     }
 
     /// Re-asserts the side panel width after tmux rescaled the layout. No-op
-    /// outside panel mode or when the width already matches, which makes the
-    /// enforcement converge without loops or redundant tmux calls. Failures
-    /// (e.g. terminal narrower than the panel) are logged and ignored.
+    /// when enforcement is disabled or when the width already matches, which
+    /// makes the enforcement converge without loops or redundant tmux calls.
+    /// Failures (e.g. terminal narrower than the panel) are logged and ignored.
     fn enforce_panel_width(&self, current_width: u16) {
-        if let Some((pane_id, target)) = &self.panel
-            && current_width != *target
+        if let Some(target) = self.panel_width
+            && let Some(pane_id) = &self.pane_id
+            && current_width != target
         {
             logger::debug(&format!(
                 "app: enforce panel width {target} (was {current_width})"
             ));
-            let _ = self.parent_driver.resize_pane(pane_id, *target);
+            let _ = self.parent_driver.resize_pane(pane_id, target);
         }
     }
 
@@ -1016,8 +1016,8 @@ mod tests {
         App::new(
             Box::new(nested),
             Box::new(parent),
-            None,
             Some("%7".to_string()),
+            None,
         )
         .unwrap()
     }
@@ -1173,7 +1173,7 @@ mod tests {
     }
 
     #[test]
-    fn test_new_without_pane_id_assumes_focused() {
+    fn test_new_without_panel_width_assumes_focused() {
         let driver = MockTmux::new();
         let app = App::new(Box::new(driver), Box::new(MockTmux::new()), None, None).unwrap();
         assert!(app.pane_active());
@@ -1184,8 +1184,8 @@ mod tests {
         let mut app = App::new(
             Box::new(MockTmux::new()),
             Box::new(MockTmux::new()),
-            None,
             Some("%7".to_string()),
+            None,
         )
         .unwrap();
         assert!(app.pane_active());
@@ -1523,8 +1523,8 @@ mod tests {
         let app = App::new(
             Box::new(MockTmux::new()),
             Box::new(parent),
-            Some(("%5".to_string(), 35)),
-            None,
+            Some("%5".to_string()),
+            Some(35),
         )
         .unwrap();
 
@@ -1543,8 +1543,8 @@ mod tests {
         let app = App::new(
             Box::new(MockTmux::new()),
             Box::new(parent),
-            Some(("%5".to_string(), 35)),
-            None,
+            Some("%5".to_string()),
+            Some(35),
         )
         .unwrap();
 
@@ -1554,11 +1554,11 @@ mod tests {
     }
 
     #[test]
-    fn test_enforce_panel_width_noop_outside_panel_mode() {
+    fn test_enforce_panel_width_noop_without_panel_width() {
         let parent = MockTmux::new();
         let parent_calls = parent.calls_rc();
         let app = App::new(Box::new(MockTmux::new()), Box::new(parent), None, None).unwrap();
-        assert_eq!(app.panel, None);
+        assert_eq!(app.panel_width, None);
 
         app.enforce_panel_width(50);
 
