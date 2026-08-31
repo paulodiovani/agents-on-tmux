@@ -1,6 +1,13 @@
 /// Default width in columns of the TUI side panel.
 pub const DEFAULT_TUI_WIDTH: u16 = 35;
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum LaunchMode {
+    TuiOnly { width: Option<u16> },
+    Split { width: u16 },
+    NoTui,
+}
+
 /// Application configuration options
 #[derive(serde::Deserialize, Clone, Copy, Default)]
 pub struct Config {
@@ -55,6 +62,22 @@ impl Config {
             nerd_font: other.nerd_font.or(self.nerd_font),
             font_awesome: other.font_awesome.or(self.font_awesome),
             debug: other.debug.or(self.debug),
+        }
+    }
+
+    pub fn launch_mode(&self) -> LaunchMode {
+        if self.tui.unwrap_or(false) {
+            if let Some(width) = self.tui_width {
+                LaunchMode::TuiOnly { width: Some(width) }
+            } else {
+                LaunchMode::TuiOnly { width: None }
+            }
+        } else if self.no_tui.unwrap_or(false) {
+            LaunchMode::NoTui
+        } else {
+            LaunchMode::Split {
+                width: self.tui_width.unwrap_or(DEFAULT_TUI_WIDTH),
+            }
         }
     }
 }
@@ -168,5 +191,66 @@ mod tests {
     fn test_parse_malformed_toml_returns_error() {
         let result: Result<Config, _> = toml::from_str("not valid {{{ toml");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_launch_mode_default_is_split() {
+        let config = Config::default();
+        assert_eq!(
+            config.launch_mode(),
+            LaunchMode::Split {
+                width: DEFAULT_TUI_WIDTH
+            }
+        );
+    }
+
+    #[test]
+    fn test_launch_mode_split_with_custom_width() {
+        let config = Config {
+            tui_width: Some(50),
+            ..Default::default()
+        };
+        assert_eq!(config.launch_mode(), LaunchMode::Split { width: 50 });
+    }
+
+    #[test]
+    fn test_launch_mode_tui_only_without_width() {
+        let config = Config {
+            tui: Some(true),
+            ..Default::default()
+        };
+        assert_eq!(config.launch_mode(), LaunchMode::TuiOnly { width: None });
+    }
+
+    #[test]
+    fn test_launch_mode_tui_only_with_width() {
+        let config = Config {
+            tui: Some(true),
+            tui_width: Some(42),
+            ..Default::default()
+        };
+        assert_eq!(
+            config.launch_mode(),
+            LaunchMode::TuiOnly { width: Some(42) }
+        );
+    }
+
+    #[test]
+    fn test_launch_mode_no_tui() {
+        let config = Config {
+            no_tui: Some(true),
+            ..Default::default()
+        };
+        assert_eq!(config.launch_mode(), LaunchMode::NoTui);
+    }
+
+    #[test]
+    fn test_launch_mode_tui_takes_precedence_over_no_tui() {
+        let config = Config {
+            tui: Some(true),
+            no_tui: Some(true),
+            ..Default::default()
+        };
+        assert_eq!(config.launch_mode(), LaunchMode::TuiOnly { width: None });
     }
 }

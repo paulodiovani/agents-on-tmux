@@ -42,7 +42,7 @@ fn padded(area: Rect) -> Rect {
 
 /// Renders the complete TUI layout: header, tab bar, window rows, and footer.
 pub fn draw(frame: &mut Frame, app: &mut App, theme: &Theme) {
-    let footer_height = calculate_footer_height(padded(frame.area()).width, app);
+    let footer_height = calculate_footer_height(padded(frame.area()).width, app, theme);
     let chunks = Layout::vertical([
         Constraint::Length(1),
         Constraint::Length(2),
@@ -354,23 +354,42 @@ fn draw_footer(frame: &mut Frame, app: &mut App, area: Rect, theme: &Theme) {
     frame.render_widget(footer, padded(area));
 }
 
-/// Builds styled footer keybinding entries based on the active tab.
+/// Builds the styled footer keybinding entries: the user's tmux bindings as
+/// nested-session sequences while the pane is unfocused, the TUI keys
+/// otherwise (also the fallback when tmux hints are unavailable).
 fn build_footer_entries(app: &App, theme: &Theme) -> Vec<(Vec<Span<'static>>, usize)> {
-    let mut keys: Vec<(&str, &str, bool)> = vec![("↑↓", "navigate", true)];
+    let entries: Vec<(String, String, bool)> = if !app.pane_active() && !app.tmux_hints().is_empty()
+    {
+        app.tmux_hints()
+            .iter()
+            .map(|(key, label)| (key.clone(), label.clone(), true))
+            .collect()
+    } else {
+        let mut entries = vec![("↑↓".to_string(), "navigate".to_string(), true)];
+        match app.active_tab() {
+            Tab::Agents => entries.push((
+                "→".to_string(),
+                "windows".to_string(),
+                !app.is_tab_empty(Tab::Windows),
+            )),
+            Tab::Windows => entries.push((
+                "←".to_string(),
+                "agents".to_string(),
+                !app.is_tab_empty(Tab::Agents),
+            )),
+        }
+        entries.extend([
+            ("⏎".to_string(), "focus".to_string(), true),
+            ("c".to_string(), "new".to_string(), true),
+            (",".to_string(), "rename".to_string(), true),
+            ("d".to_string(), "kill".to_string(), true),
+            ("q".to_string(), "quit".to_string(), true),
+        ]);
+        entries
+    };
 
-    match app.active_tab() {
-        Tab::Agents => keys.push(("→", "windows", !app.is_tab_empty(Tab::Windows))),
-        Tab::Windows => keys.push(("←", "agents", !app.is_tab_empty(Tab::Agents))),
-    }
-
-    keys.extend([
-        ("⏎", "focus", true),
-        ("n", "new", true),
-        ("d", "kill", true),
-        ("q", "quit", true),
-    ]);
-
-    keys.iter()
+    entries
+        .iter()
         .map(|(key, desc, enabled)| {
             let key_style = if *enabled {
                 theme.footer_key
@@ -379,7 +398,7 @@ fn build_footer_entries(app: &App, theme: &Theme) -> Vec<(Vec<Span<'static>>, us
             };
             let spans = vec![
                 Span::styled(key.to_string(), key_style),
-                Span::styled(format!(" {}", desc), theme.dim),
+                Span::styled(format!(" {desc}"), theme.dim),
             ];
             let width = key.chars().count() + 1 + desc.chars().count();
             (spans, width)
@@ -473,40 +492,9 @@ fn truncate_end(text: &str, max_cols: usize) -> String {
 }
 
 /// Calculates how many lines the footer needs for the given width.
-fn calculate_footer_height(width: u16, app: &App) -> u16 {
-    let mut keys: Vec<(&str, &str)> = vec![("↑↓", "navigate")];
-
-    match app.active_tab() {
-        Tab::Agents => keys.push(("→", "windows")),
-        Tab::Windows => keys.push(("←", "agents")),
-    }
-
-    keys.extend([("⏎", "focus"), ("n", "new"), ("d", "kill"), ("q", "quit")]);
-
-    let widths: Vec<usize> = keys
-        .iter()
-        .map(|(key, desc)| key.chars().count() + 1 + desc.chars().count())
-        .collect();
-
-    let mut lines = 1;
-    let mut current_width = 0;
-
-    for &entry_width in widths.iter() {
-        let separator_width = if current_width > 0 { 2 } else { 0 };
-        let needed = current_width + separator_width + entry_width;
-
-        if needed > width as usize && current_width > 0 {
-            lines += 1;
-            current_width = 0;
-        }
-
-        if current_width > 0 {
-            current_width += 2;
-        }
-        current_width += entry_width;
-    }
-
-    lines
+fn calculate_footer_height(width: u16, app: &App, theme: &Theme) -> u16 {
+    let entries = build_footer_entries(app, theme);
+    wrap_entries(&entries, width as usize).len() as u16
 }
 
 fn count_windows_for_tab(app: &App, tab: Tab) -> usize {
@@ -522,7 +510,7 @@ fn count_windows_for_tab(app: &App, tab: Tab) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backends::tmux::{Tmux, TmuxError};
+    use crate::backends::tmux::{KeyBinding, Tmux, TmuxError};
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::buffer::Buffer;
@@ -530,7 +518,9 @@ mod tests {
     use std::time::Duration;
 
     struct MockTmux {
+        keys: Option<Vec<KeyBinding>>,
         next_id: std::cell::RefCell<u32>,
+        prefix: Option<String>,
         windows: std::cell::RefCell<Vec<Window>>,
     }
 
@@ -560,10 +550,29 @@ mod tests {
 
         fn with_windows(windows: Vec<Window>) -> Self {
             Self {
+                keys: Some(default_key_bindings()),
                 next_id: std::cell::RefCell::new(90),
+                prefix: Some("C-b".to_string()),
                 windows: std::cell::RefCell::new(windows),
             }
         }
+    }
+
+    fn default_key_bindings() -> Vec<KeyBinding> {
+        [
+            ("C-b", "send-prefix"),
+            ("c", "new-window -c \"#{pane_current_path}\""),
+            ("n", "next-window"),
+            ("p", "previous-window"),
+            ("l", "last-window"),
+            (",", "command-prompt -I \"#W\" { rename-window \"%%\" }"),
+        ]
+        .into_iter()
+        .map(|(key, command)| KeyBinding {
+            key: key.to_string(),
+            command: command.to_string(),
+        })
+        .collect()
     }
 
     impl Tmux for MockTmux {
@@ -611,12 +620,35 @@ mod tests {
         fn resize_pane(&self, _pane_id: &str, _width: u16) -> Result<(), TmuxError> {
             Ok(())
         }
+        fn list_keys(&self, _table: &str) -> Result<Vec<KeyBinding>, TmuxError> {
+            self.keys.clone().ok_or_else(|| command_failed("list-keys"))
+        }
+        fn show_options(&self, name: &str, _global: bool) -> Result<String, TmuxError> {
+            match name {
+                "prefix" => self
+                    .prefix
+                    .clone()
+                    .ok_or_else(|| command_failed("show-options")),
+                _ => Err(command_failed("show-options")),
+            }
+        }
+        fn command_prompt(&self, _initial: &str, _template: &str) -> Result<(), TmuxError> {
+            Ok(())
+        }
+    }
+
+    fn command_failed(command: &str) -> TmuxError {
+        TmuxError::CommandFailed {
+            message: format!("{command} failed"),
+            stderr: String::new(),
+            code: Some(1),
+        }
     }
 
     fn test_app() -> App {
         let nested_driver = MockTmux::new();
         let parent_driver = MockTmux::new();
-        App::new(Box::new(nested_driver), Box::new(parent_driver), None).unwrap()
+        App::new(Box::new(nested_driver), Box::new(parent_driver), None, None).unwrap()
     }
 
     fn window(name: &str, command: &str, dir: &str, seconds: u64) -> Window {
@@ -654,6 +686,7 @@ mod tests {
         App::new(
             Box::new(driver),
             Box::new(MockTmux::with_windows(windows)),
+            None,
             None,
         )
         .unwrap()
@@ -737,13 +770,124 @@ mod tests {
     #[test]
     fn test_calculate_footer_height_wide() {
         let app = test_app();
-        assert_eq!(calculate_footer_height(120, &app), 1);
+        assert_eq!(calculate_footer_height(120, &app, &Theme::default()), 1);
     }
 
     #[test]
     fn test_calculate_footer_height_narrow() {
         let app = test_app();
-        assert_eq!(calculate_footer_height(30, &app), 2);
+        assert_eq!(calculate_footer_height(30, &app, &Theme::default()), 3);
+    }
+
+    /// An app whose pane is unfocused while tmux bindings were resolved.
+    fn unfocused_app() -> App {
+        let driver = MockTmux::new();
+        let parent = MockTmux::new();
+        let mut app = App::new(
+            Box::new(driver),
+            Box::new(parent),
+            Some("%7".to_string()),
+            None,
+        )
+        .unwrap();
+        app.set_pane_active(false);
+        app
+    }
+
+    /// Every rendered row joined by newlines, trailing blanks trimmed.
+    fn all_text(buffer: &Buffer) -> String {
+        (0..buffer.area.height)
+            .map(|y| text(buffer, y))
+            .collect::<Vec<String>>()
+            .join("\n")
+            .trim_end()
+            .to_string()
+    }
+
+    #[test]
+    fn test_unfocused_app_tracks_focus_and_hints() {
+        let app = unfocused_app();
+        assert!(!app.pane_active());
+        assert_eq!(app.tmux_hints().len(), 6);
+    }
+
+    #[test]
+    fn test_footer_shows_tui_keys_when_focused() {
+        let mut app = test_app();
+        let buffer = render(&mut app, 35, 12);
+        assert!(all_text(&buffer).contains("quit"));
+        assert!(!all_text(&buffer).contains("C-b"));
+    }
+
+    #[test]
+    fn test_footer_shows_tmux_keys_when_unfocused() {
+        let mut app = unfocused_app();
+        let buffer = render(&mut app, 35, 12);
+        let rendered = all_text(&buffer);
+        assert!(rendered.contains("C-b C-b prefix"));
+        assert!(rendered.contains("c new"));
+        assert!(rendered.contains("n next"));
+        assert!(rendered.contains("p prev"));
+        assert!(rendered.contains("l last"));
+        assert!(rendered.contains(", rename"));
+        assert!(!rendered.contains("quit"));
+    }
+
+    #[test]
+    fn test_footer_falls_back_to_tui_keys_without_hints() {
+        let driver = MockTmux::new();
+        let mut parent = MockTmux::new();
+        parent.keys = None;
+        let mut app = App::new(
+            Box::new(driver),
+            Box::new(parent),
+            Some("%7".to_string()),
+            None,
+        )
+        .unwrap();
+
+        let buffer = render(&mut app, 35, 12);
+        let rendered = all_text(&buffer);
+        assert!(rendered.contains("quit"));
+        assert!(!rendered.contains("C-b"));
+    }
+
+    #[test]
+    fn test_footer_confirmation_wins_over_tmux_keys() {
+        use crate::frontends::tui::event::Action;
+
+        let mut app = unfocused_app();
+        app.handle_action(Action::KillWindow);
+        let buffer = render(&mut app, 35, 12);
+        let rendered = all_text(&buffer);
+        assert!(rendered.contains("kill this window"));
+        assert!(!rendered.contains("C-b"));
+    }
+
+    #[test]
+    fn test_footer_height_covers_tmux_keys() {
+        let app = unfocused_app();
+        let theme = Theme::default();
+        // 31 usable columns: "C-b C-b prefix" + "c new" + "n next" fit on one
+        // line, the rest wraps to a second.
+        assert_eq!(calculate_footer_height(35, &app, &theme), 2);
+        // 16 usable columns: one or two entries per line.
+        assert_eq!(calculate_footer_height(20, &app, &theme), 4);
+    }
+
+    #[test]
+    fn test_footer_height_matches_rendered_lines() {
+        let mut app = unfocused_app();
+        let theme = Theme::default();
+        let expected = calculate_footer_height(35, &app, &theme);
+
+        let buffer = render(&mut app, 35, 12);
+        let footer_rows: Vec<String> = (0..buffer.area.height)
+            .map(|y| text(&buffer, y))
+            .skip(buffer.area.height as usize - expected as usize)
+            .collect();
+        assert_eq!(footer_rows.len(), expected as usize);
+        assert!(footer_rows.iter().all(|row| !row.is_empty()));
     }
 
     #[test]

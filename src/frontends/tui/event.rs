@@ -39,6 +39,7 @@ pub enum Action {
     NavigateUp,
     None,
     Quit,
+    RenameWindow,
     SwitchTabLeft,
     SwitchTabRight,
 }
@@ -57,8 +58,9 @@ pub fn key_to_action(key: KeyEvent) -> Action {
         KeyCode::Up | KeyCode::Char('k') => Action::NavigateUp,
         KeyCode::Down | KeyCode::Char('j') => Action::NavigateDown,
         KeyCode::Enter => Action::FocusWindow,
-        KeyCode::Char('n') => Action::CreateWindow,
+        KeyCode::Char('c') => Action::CreateWindow,
         KeyCode::Char('d') => Action::KillWindow,
+        KeyCode::Char(',') => Action::RenameWindow,
         KeyCode::Left | KeyCode::Char('h') => Action::SwitchTabLeft,
         KeyCode::Right | KeyCode::Char('l') => Action::SwitchTabRight,
         _ => Action::None,
@@ -117,8 +119,17 @@ mod tests {
     #[test]
     fn test_create_window() {
         assert!(matches!(
-            key_to_action(key_event(KeyCode::Char('n'))),
+            key_to_action(key_event(KeyCode::Char('c'))),
             Action::CreateWindow
+        ));
+    }
+
+    #[test]
+    fn test_n_is_not_bound() {
+        // The new-window key follows tmux's `c`; plain `n` does nothing.
+        assert!(matches!(
+            key_to_action(key_event(KeyCode::Char('n'))),
+            Action::None
         ));
     }
 
@@ -127,6 +138,14 @@ mod tests {
         assert!(matches!(
             key_to_action(key_event(KeyCode::Char('d'))),
             Action::KillWindow
+        ));
+    }
+
+    #[test]
+    fn test_rename_window() {
+        assert!(matches!(
+            key_to_action(key_event(KeyCode::Char(','))),
+            Action::RenameWindow
         ));
     }
 

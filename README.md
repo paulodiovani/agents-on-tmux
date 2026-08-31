@@ -14,7 +14,7 @@ A TMUX-based AI Agents orchestrator.
 
 `agents-on-tmux`, or just `aot`, works as a thin wrapper over tmux and a TUI control panel. Its features are divided into three primary modules:
 
-- `tui` The terminal interface provides a control panel for running agents, including actions to focus, stop, or start a new agent.
+- `tui` The terminal interface provides a control panel for running agents, including actions to focus, rename, stop, or start a new agent.
   The TUI run on its own TMUX pane, window, or popup, it does not highjack or wrap your terminal to run agents inside its interface.
   - Windows are organized into two tabs: **Agents** (running AI coding agents) and **Windows** (regular tmux windows).
 - `tmux` The TMUX communication interface, allowing to start and control a dedicated TMUX session.
@@ -119,6 +119,7 @@ All fields are optional. Omitted fields use their defaults (`false`).
 1. Start a new dedicated TMUX session named `agents-on-tmux`, this is the session that will host the agents.
 1. The TUI control panel is started by default on a left panel. Can also be started with `aot --tui` or skipped with `aot --no-tui`. The panel retains its width (`tui_width`, 35 columns by default) when the terminal is resized.
 1. User can interact with the dedicated session using the TUI control or standard TMUX bindings.
+   The TUI footer shows its own keybindings while the TUI pane is focused, and the TMUX bindings for the nested session (resolved from your own `list-keys`) when it is not — including how to reach the nested session's prefix: typed twice (`C-b C-b`) when both sessions share a prefix, or just once (`C-b`) when they differ.
 
 ## Screencast
 

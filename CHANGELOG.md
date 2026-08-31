@@ -9,9 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - `--tui-width` CLI flag and `tui_width` config option to set the TUI side panel width in columns (default: 35)
+- `,` (rename) keybinding in the TUI, renames the selected window through tmux command prompt
+- The TUI footer now switches hints by pane focus: its own keybindings while the TUI pane is focused, and the nested session's tmux bindings (read from `list-keys`) when it is not
 
 ### Changed
 - Redesigned the TUI with compact two-line rows, a new tab bar, full-width background selection, and right-aligned paths
+- The TUI new-window key is now `c` (was `n`), matching tmux's own binding
 
 ### Fixed
 - The side panel now retains its width when the terminal or window is resized (only when started in normal mode, with both the TUI pane and the nested session)
