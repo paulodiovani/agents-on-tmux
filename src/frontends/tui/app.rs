@@ -164,9 +164,10 @@ impl App {
         // Spawn control mode thread (only the session name crosses the thread boundary).
         let (event_tx, event_rx) = mpsc::channel();
         let session = self.nested_driver.session_name().to_string();
+        let socket = self.nested_driver.socket_name().map(|s| s.to_string());
         logger::info(&format!("app: starting control mode: session={session}"));
         std::thread::spawn(move || {
-            control_mode::control_mode_thread(session, event_tx);
+            control_mode::control_mode_thread(session, socket, event_tx);
         });
         self.event_rx = Some(event_rx);
 

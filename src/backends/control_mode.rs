@@ -129,17 +129,25 @@ fn run_with_reconnect<C, R>(
 /// Runs the control-mode client for the given session, sending events on the channel.
 /// Reconnects with exponential backoff; sends `Exit` and returns when the connection
 /// ends cleanly or retries are exhausted.
-pub fn control_mode_thread(session: String, event_tx: mpsc::Sender<TmuxEvent>) {
+pub fn control_mode_thread(
+    session: String,
+    socket: Option<String>,
+    event_tx: mpsc::Sender<TmuxEvent>,
+) {
     run_with_reconnect(
-        || spawn_control_mode(&session),
+        || spawn_control_mode(&session, socket.as_deref()),
         &event_tx,
         |n| Duration::from_secs(2u64.pow(n - 1)), // 1s, 2s, 4s, 8s
     );
 }
 
 /// Spawns `tmux -C attach-session -t <session>` and returns a reader over its stdout.
-fn spawn_control_mode(session: &str) -> std::io::Result<ControlModeReader> {
-    let mut child = Command::new("tmux")
+fn spawn_control_mode(session: &str, socket: Option<&str>) -> std::io::Result<ControlModeReader> {
+    let mut cmd = Command::new("tmux");
+    if let Some(socket) = socket {
+        cmd.args(["-L", socket]);
+    }
+    let mut child = cmd
         .args(["-C", "attach-session", "-t", session])
         .stdin(Stdio::piped()) // must stay open; closing it detaches the client
         .stdout(Stdio::piped())

@@ -84,7 +84,7 @@ Do not continue to the next task until explicitly instructed to do so.
   - Update `MockCommandExecutor` to support socket
   - Update all tests
   
-- [ ] **Task 2:** Control mode socket support (`control_mode.rs`)
+- [x] **Task 2:** Control mode socket support (`control_mode.rs`) ✅
   - Update `control_mode_thread(session: String, ...)` → `control_mode_thread(session: String, socket: Option<String>, ...)`
   - Update `spawn_control_mode(session: &str, ...)` → `spawn_control_mode(session: &str, socket: Option<&str>, ...)`
   - Prepend `-L <socket>` in `Command::new("tmux")` when socket is set
