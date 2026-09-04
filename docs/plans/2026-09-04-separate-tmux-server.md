@@ -117,12 +117,13 @@ Do not continue to the next task until explicitly instructed to do so.
   - Update `MockTmux` in `app.rs` tests to implement `socket_name()`
   - Update `MockTmux` in `ui.rs` tests to implement `socket_name()`
 
-- [x] **Task 4:** Main initialization with socket (`main.rs`) ✅
+- [x] **Task 4:** Main initialization with socket (`main.rs`, `tmux.rs`) ✅
   - Import `SOCKET_NAME` constant
   - Create nested driver with socket: `TmuxDriver::new_with_socket(SESSION_NAME, SOCKET_NAME)`
   - Parent driver remains unchanged: `TmuxDriver::new(&parent_session)`
   - Add `detect_parent_socket()` function to parse TMUX env var
-  - Update guard check to use socket-based detection instead of session-based
+  - Move socket detection into `create_session_if_not_exists()` to prevent nested execution
+  - Keep parent session log in main.rs, log created session/socket in `create_session_if_not_exists()`
   - Update error enum: `InsideOwnSession` → `InsideOwnServer`
   - Add tests for `detect_parent_socket()`
 

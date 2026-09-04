@@ -2,6 +2,8 @@ use std::process::Command;
 use std::time::Instant;
 use thiserror::Error;
 
+use crate::backends::logger;
+
 /// Contract for executing tmux commands.
 pub trait CommandExecutor {
     /// Executes a tmux command and returns stdout on success.
@@ -308,10 +310,28 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
     }
 
     /// Ensures the tmux session exists, creating it if necessary.
+    /// Also checks if we're already running on the same socket to prevent nested execution.
     fn create_session_if_not_exists(&self) -> Result<(), TmuxError> {
+        // Check if we're already running on the same socket
+        if let Some(ref driver_socket) = self.socket
+            && let Ok(parent_socket) = detect_parent_socket()
+        {
+            logger::debug(&format!(
+                "tmux: parent socket: {}, driver socket: {}",
+                parent_socket, driver_socket
+            ));
+            if parent_socket == *driver_socket {
+                return Err(TmuxError::InsideOwnServer(parent_socket));
+            }
+        }
+
         let has_session = self.executor.execute(&["has-session", "-t", &self.session]);
 
         if has_session.is_err() {
+            logger::debug(&format!(
+                "tmux: creating session '{}' on socket {:?}",
+                self.session, self.socket
+            ));
             self.executor
                 .execute(&["new-session", "-d", "-s", &self.session])?;
             self.executor
