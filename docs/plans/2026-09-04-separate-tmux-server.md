@@ -127,7 +127,7 @@ Do not continue to the next task until explicitly instructed to do so.
   - Update error enum: `InsideOwnSession` → `InsideOwnServer`
   - Add tests for `detect_parent_socket()`
 
-- [ ] **Task 5:** Update docs
+- [x] **Task 5:** Update docs ✅
   - **`AGENTS.md`:** Document socket architecture, explain `-L` usage
   - **`README.md`:** 
     - Update architecture diagram to show separate servers

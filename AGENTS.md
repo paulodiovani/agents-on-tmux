@@ -49,7 +49,21 @@ Two top-level modules under `src/`:
 Presentation belongs to the frontend: backends never carry icons, colors, or any other display data
 Colors are named ANSI slots (0-15) or `Color::Reset` only — never `Color::Rgb` or `Color::Indexed`, so the UI follows the user's terminal theme
 
-Entry point: `main.rs` parses CLI args with clap, detects the parent tmux session, creates a nested `TmuxDriver` for the `agents-on-tmux` session, ensures it exists. Without `--tui`, it splits a pane in the parent session to launch the TUI and attaches to the nested session. With `--tui`, it runs the TUI directly.
+### Separate tmux server architecture
+
+The nested `agents-on-tmux` session runs on its own isolated tmux server using the `-L` socket option, providing process isolation and preventing the freeze issues that occur with nested sessions on the same server.
+
+- `SESSION_NAME` constant: `"agents-on-tmux"` (the session name)
+- `SOCKET_NAME` constant: `"agents-on-tmux"` (the socket/server name)
+- `ShellCommandExecutor` stores `socket: Option<String>` and prepends `-L <socket>` to all tmux commands when set
+- `TmuxDriver::new(session)` creates a driver for the default tmux server (used for parent session)
+- `TmuxDriver::new_with_socket(session, socket)` creates a driver for a specific tmux server (used for nested session)
+- `detect_parent_socket()` parses the `TMUX` environment variable to extract the current socket name
+- `create_session_if_not_exists()` checks if we're already running on the same socket to prevent nested execution, returning `TmuxError::InsideOwnServer` if detected
+
+This architecture is similar to how `overmind` works and prevents issues #20 (server freeze) and #31 (session detection failure).
+
+Entry point: `main.rs` parses CLI args with clap, detects the parent tmux session, creates a parent `TmuxDriver` (default server) and a nested `TmuxDriver` with socket (isolated server), ensures the nested session exists. Without `--tui`, it splits a pane in the parent session to launch the TUI and attaches to the nested session. With `--tui`, it runs the TUI directly.
 
 ## Rust conventions (non-default — follow strictly)
 
