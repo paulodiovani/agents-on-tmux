@@ -16,6 +16,16 @@ pub enum TmuxEvent {
     Refresh,
 }
 
+/// Which tmux server a control-mode connection targets.
+/// Determines which events are parsed and forwarded.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EventProducer {
+    /// The parent tmux server — only pane focus events.
+    Parent,
+    /// The nested tmux server — all events except pane focus.
+    Nested,
+}
+
 /// Owns the control-mode child process. Reading delegates to the child's stdout;
 /// dropping closes stdin so tmux detaches the control client, then reaps the child.
 struct ControlModeReader {
@@ -76,16 +86,38 @@ pub fn parse_event(line: &str) -> Option<TmuxEvent> {
 
 /// Reads control-mode lines until the stream ends. Returns `true` if it saw `%exit`
 /// (server/client gone → do not reconnect), `false` on plain EOF (dropped → reconnect).
-fn pump_events(reader: impl BufRead, event_tx: &mpsc::Sender<TmuxEvent>) -> bool {
+/// Filters events based on the producer:
+/// - `Parent`: only forwards `PaneChanged` events (and `Exit` to signal disconnection)
+/// - `Nested`: forwards all events except `PaneChanged`
+fn pump_events(
+    reader: impl BufRead,
+    producer: EventProducer,
+    event_tx: &mpsc::Sender<TmuxEvent>,
+) -> bool {
     for line in reader.lines() {
         let Ok(line) = line else { return false };
+
         if let Some(event) = parse_event(&line) {
-            let is_exit = event == TmuxEvent::Exit;
-            if event_tx.send(event).is_err() {
-                return true; // receiver dropped: app is gone, stop.
-            }
-            if is_exit {
-                return true;
+            // Filter based on producer
+            let should_forward = match (producer, &event) {
+                // Exit is always forwarded to signal disconnection
+                (_, TmuxEvent::Exit) => true,
+                // Parent only forwards pane focus changes
+                (EventProducer::Parent, TmuxEvent::PaneChanged(_)) => true,
+                (EventProducer::Parent, _) => false,
+                // Nested forwards everything except pane focus changes
+                (EventProducer::Nested, TmuxEvent::PaneChanged(_)) => false,
+                (EventProducer::Nested, _) => true,
+            };
+
+            if should_forward {
+                let is_exit = event == TmuxEvent::Exit;
+                if event_tx.send(event).is_err() {
+                    return true; // receiver dropped: app is gone, stop.
+                }
+                if is_exit {
+                    return true;
+                }
             }
         }
     }
@@ -95,6 +127,7 @@ fn pump_events(reader: impl BufRead, event_tx: &mpsc::Sender<TmuxEvent>) -> bool
 /// Retry/backoff loop, decoupled from tmux and from real time for testing.
 fn run_with_reconnect<C, R>(
     mut connect: C,
+    producer: EventProducer,
     event_tx: &mpsc::Sender<TmuxEvent>,
     backoff: impl Fn(u32) -> Duration,
 ) where
@@ -105,7 +138,7 @@ fn run_with_reconnect<C, R>(
     loop {
         match connect() {
             Ok(reader) => {
-                let clean_exit = pump_events(reader, event_tx);
+                let clean_exit = pump_events(reader, producer, event_tx);
                 if clean_exit {
                     let _ = event_tx.send(TmuxEvent::Exit);
                     return;
@@ -132,10 +165,12 @@ fn run_with_reconnect<C, R>(
 pub fn control_mode_thread(
     session: String,
     socket: Option<String>,
+    producer: EventProducer,
     event_tx: mpsc::Sender<TmuxEvent>,
 ) {
     run_with_reconnect(
         || spawn_control_mode(&session, socket.as_deref()),
+        producer,
         &event_tx,
         |n| Duration::from_secs(2u64.pow(n - 1)), // 1s, 2s, 4s, 8s
     );
@@ -250,10 +285,31 @@ mod tests {
     }
 
     #[test]
+    fn test_pump_parent_forwards_only_pane_changed() {
+        let (tx, rx) = mpsc::channel();
+        let input = std::io::Cursor::new("%window-add @3\n%window-pane-changed @1 %5\n%exit\n");
+        assert!(pump_events(input, EventProducer::Parent, &tx));
+        // Parent should only forward PaneChanged, not window-add
+        assert_eq!(rx.recv().unwrap(), TmuxEvent::PaneChanged("%5".to_string()));
+        // Exit is also forwarded by Parent
+        assert_eq!(rx.recv().unwrap(), TmuxEvent::Exit);
+    }
+
+    #[test]
+    fn test_pump_nested_forwards_all_except_pane_changed() {
+        let (tx, rx) = mpsc::channel();
+        let input = std::io::Cursor::new("%window-add @3\n%window-pane-changed @1 %5\n%exit\n");
+        assert!(pump_events(input, EventProducer::Nested, &tx));
+        // Nested should forward window-add and exit, but not pane-changed
+        assert_eq!(rx.recv().unwrap(), TmuxEvent::Refresh); // window-add
+        assert_eq!(rx.recv().unwrap(), TmuxEvent::Exit);
+    }
+
+    #[test]
     fn test_pump_forwards_events_and_stops_on_exit() {
         let (tx, rx) = mpsc::channel();
         let input = std::io::Cursor::new("%window-add @3\n%output %1 hi\n%exit\n");
-        assert!(pump_events(input, &tx)); // saw %exit
+        assert!(pump_events(input, EventProducer::Nested, &tx)); // saw %exit
         assert_eq!(rx.recv().unwrap(), TmuxEvent::Refresh);
         assert_eq!(rx.recv().unwrap(), TmuxEvent::Exit);
     }
@@ -262,7 +318,7 @@ mod tests {
     fn test_pump_returns_false_on_eof() {
         let (tx, rx) = mpsc::channel();
         let input = std::io::Cursor::new("%window-add @3\n");
-        assert!(!pump_events(input, &tx)); // plain EOF, no %exit
+        assert!(!pump_events(input, EventProducer::Nested, &tx)); // plain EOF, no %exit
         assert_eq!(rx.recv().unwrap(), TmuxEvent::Refresh);
     }
 
@@ -271,7 +327,7 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         drop(rx);
         let input = std::io::Cursor::new("%window-add @3\n%window-add @4\n");
-        assert!(pump_events(input, &tx)); // receiver gone: stop for good
+        assert!(pump_events(input, EventProducer::Nested, &tx)); // receiver gone: stop for good
     }
 
     #[test]
@@ -283,6 +339,7 @@ mod tests {
                 attempts += 1;
                 Err(std::io::Error::other("boom"))
             },
+            EventProducer::Nested,
             &tx,
             |_| Duration::ZERO,
         );
@@ -295,6 +352,7 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         run_with_reconnect(
             || Ok(std::io::Cursor::new(b"%exit\n".to_vec())),
+            EventProducer::Nested,
             &tx,
             |_| Duration::ZERO,
         );
@@ -318,6 +376,7 @@ mod tests {
                     _ => Err(std::io::Error::other("boom")),
                 }
             },
+            EventProducer::Nested,
             &tx,
             |_| Duration::ZERO,
         );

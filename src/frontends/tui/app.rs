@@ -7,7 +7,7 @@ use ratatui::DefaultTerminal;
 use ratatui::widgets::ListState;
 
 use crate::backends::agents::is_agent;
-use crate::backends::control_mode::{self, TmuxEvent};
+use crate::backends::control_mode::{self, EventProducer, TmuxEvent};
 use crate::backends::logger;
 use crate::backends::tmux::{Tmux, Window};
 use crate::frontends::tui::event::{Action, PendingAction, Tab, key_to_action};
@@ -161,14 +161,40 @@ impl App {
     pub fn run(&mut self, mut terminal: DefaultTerminal) -> anyhow::Result<()> {
         let theme = Theme::default();
 
-        // Spawn control mode thread (only the session name crosses the thread boundary).
+        // Spawn two control mode threads:
+        // - Parent server: only pane focus events (for keybinding hints)
+        // - Nested server: structural events (window add/remove/rename, etc.)
         let (event_tx, event_rx) = mpsc::channel();
-        let session = self.nested_driver.session_name().to_string();
-        let socket = self.nested_driver.socket_name().map(|s| s.to_string());
-        logger::info(&format!("app: starting control mode: session={session}"));
+
+        let parent_session = self.parent_driver.session_name().to_string();
+        let parent_socket = self.parent_driver.socket_name().map(|s| s.to_string());
+        let parent_tx = event_tx.clone();
+        logger::info(&format!(
+            "app: starting parent control mode: session={parent_session}"
+        ));
         std::thread::spawn(move || {
-            control_mode::control_mode_thread(session, socket, event_tx);
+            control_mode::control_mode_thread(
+                parent_session,
+                parent_socket,
+                EventProducer::Parent,
+                parent_tx,
+            );
         });
+
+        let nested_session = self.nested_driver.session_name().to_string();
+        let nested_socket = self.nested_driver.socket_name().map(|s| s.to_string());
+        logger::info(&format!(
+            "app: starting nested control mode: session={nested_session}"
+        ));
+        std::thread::spawn(move || {
+            control_mode::control_mode_thread(
+                nested_session,
+                nested_socket,
+                EventProducer::Nested,
+                event_tx,
+            );
+        });
+
         self.event_rx = Some(event_rx);
 
         // The terminal may have been resized between the split and TUI
