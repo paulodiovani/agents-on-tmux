@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The TUI footer now switches hints by pane focus: its own keybindings while the TUI pane is focused, and the nested session's tmux bindings (read from `list-keys`) when it is not
 
 ### Changed
+- Window rows now show the window id before the name (e.g. `3 my-window`), styled like the elapsed time and path; the active window shows its accent marker in that slot instead
 - Redesigned the TUI with compact two-line rows, a new tab bar, full-width background selection, and right-aligned paths
 - The TUI new-window key is now `c` (was `n`), matching tmux's own binding
 

@@ -246,25 +246,28 @@ fn window_item<'a>(window: &Window, tab: Tab, styles: &RowStyles, width: usize) 
     ])
 }
 
-/// Window title, an accent marker when this is the active window, then the
-/// elapsed time and the notification slot pinned to the right edge.
+/// Window title: the id, or an accent marker in its place when this is the
+/// active window, then the name, the elapsed time and the notification slot
+/// pinned to the right edge.
 fn title_line<'a>(window: &Window, styles: &RowStyles, width: usize) -> Line<'a> {
     let text_width = width.saturating_sub(PANEL_PADDING * 2);
+    let (prefix, prefix_style) = if window.is_active {
+        ("* ".to_string(), styles.accent)
+    } else {
+        (format!("{} ", window.id), styles.dim)
+    };
     let time = format_elapsed(window.started_at);
-    let marker = if window.is_active { "*" } else { "" };
     let right = time.width() + NOTIFICATION_SLOT;
 
-    let budget = text_width.saturating_sub(right + marker.width() + 1);
+    let budget = text_width.saturating_sub(right + prefix.width() + 1);
     let title = truncate_end(&window.name, budget);
-    let gap = text_width.saturating_sub(title.width() + marker.width() + right);
+    let gap = text_width.saturating_sub(title.width() + prefix.width() + right);
 
     let mut spans = vec![
         Span::styled(" ".repeat(PANEL_PADDING), styles.fill),
+        Span::styled(prefix, prefix_style),
         Span::styled(title, styles.title),
     ];
-    if !marker.is_empty() {
-        spans.push(Span::styled(marker, styles.accent));
-    }
     spans.push(Span::styled(" ".repeat(gap), styles.fill));
     spans.push(Span::styled(time, styles.dim));
     spans.push(Span::styled(" ", styles.fill));
@@ -651,10 +654,10 @@ mod tests {
         App::new(Box::new(nested_driver), Box::new(parent_driver), None, None).unwrap()
     }
 
-    fn window(name: &str, command: &str, dir: &str, seconds: u64) -> Window {
+    fn window(id: u32, name: &str, command: &str, dir: &str, seconds: u64) -> Window {
         Window {
             current_dir: dir.to_string(),
-            id: name.len() as u32 + command.len() as u32 * 100,
+            id,
             is_active: false,
             name: name.to_string(),
             notification_pending: false,
@@ -663,18 +666,30 @@ mod tests {
         }
     }
 
+    /// Columns the row prefix (id, or the active marker) adds before the name.
+    fn prefix_width(id: u32) -> usize {
+        id.to_string().width() + 1
+    }
+
     /// Three agent windows, the first active, the second notifying. The directories
     /// sit outside any home, so rendering does not depend on who runs the tests.
     fn agents_app() -> App {
         let mut windows = vec![
             window(
+                1,
                 "fix-auth-bug",
                 "claude",
                 "/opt/work/Development/Rust/aot",
                 29,
             ),
-            window("docs-review", "opencode", "/opt/work/Development/docs", 25),
-            window("billing-api", "pi", "/opt/clients/acme/billing-api", 17),
+            window(
+                2,
+                "docs-review",
+                "opencode",
+                "/opt/work/Development/docs",
+                25,
+            ),
+            window(3, "billing-api", "pi", "/opt/clients/acme/billing-api", 17),
         ];
         windows[0].is_active = true;
         windows[1].notification_pending = true;
@@ -981,8 +996,8 @@ mod tests {
     #[test]
     fn test_tab_bar_accent_follows_the_active_tab() {
         let mut app = app_with(vec![
-            window("fix-auth-bug", "claude", "/opt/work/aot", 29),
-            window("shell", "zsh", "/opt/work/aot", 5),
+            window(1, "fix-auth-bug", "claude", "/opt/work/aot", 29),
+            window(2, "shell", "zsh", "/opt/work/aot", 5),
         ]);
         app.switch_tab(Tab::Windows);
         assert_eq!(app.active_tab(), Tab::Windows);
@@ -1016,12 +1031,12 @@ mod tests {
         let mut app = agents_app();
         let buffer = render(&mut app, 80, 24);
 
-        assert!(text(&buffer, 3).starts_with("fix-auth-bug*"));
+        assert!(text(&buffer, 3).starts_with("* fix-auth-bug"));
         assert!(text(&buffer, 4).ends_with("/opt/work/Development/Rust/aot"));
-        assert!(text(&buffer, 6).starts_with("docs-review"));
+        assert!(text(&buffer, 6).starts_with("2 docs-review"));
         assert!(text(&buffer, 7).ends_with("/opt/work/Development/docs"));
         assert_eq!(text(&buffer, 8), "");
-        assert!(text(&buffer, 9).starts_with("billing-api"));
+        assert!(text(&buffer, 9).starts_with("3 billing-api"));
         assert!(text(&buffer, 10).ends_with("/opt/clients/acme/billing-api"));
         assert_eq!(text(&buffer, 11), "");
     }
@@ -1030,13 +1045,14 @@ mod tests {
     fn test_active_window_marker_uses_the_accent() {
         let mut app = agents_app();
         let buffer = render(&mut app, 80, 24);
-        let marker_x = (PANEL_PADDING + "fix-auth-bug".width()) as u16;
-        assert_eq!(buffer[(marker_x, 3)].symbol(), "*");
-        assert_eq!(buffer[(marker_x, 3)].style().fg, Theme::default().accent.fg);
-        assert_ne!(
-            buffer[((PANEL_PADDING + "docs-review".width()) as u16, 6)].symbol(),
-            "*"
-        );
+        // The active window shows the marker in place of its id.
+        assert_eq!(buffer[(1, 3)].symbol(), "*");
+        assert_eq!(buffer[(2, 3)].symbol(), " ");
+        assert_eq!(buffer[(3, 3)].symbol(), "f");
+        assert_eq!(buffer[(1, 3)].style().fg, Theme::default().accent.fg);
+        // Inactive windows keep their dim id in that slot.
+        assert_eq!(buffer[(1, 6)].symbol(), "2");
+        assert_ne!(buffer[(1, 6)].style().fg, Theme::default().accent.fg);
     }
 
     #[test]
@@ -1118,9 +1134,14 @@ mod tests {
                 .contains(Modifier::DIM)
         );
 
-        assert!(buffer[(1, 3)].style().add_modifier.contains(Modifier::BOLD));
-        let marker = (PANEL_PADDING + "fix-auth-bug".width()) as u16;
-        assert_eq!(buffer[(marker, 3)].style().fg, Theme::default().accent.fg);
+        let title = (PANEL_PADDING + prefix_width(1)) as u16;
+        assert!(
+            buffer[(title, 3)]
+                .style()
+                .add_modifier
+                .contains(Modifier::BOLD)
+        );
+        assert_eq!(buffer[(1, 3)].style().fg, Theme::default().accent.fg);
     }
 
     #[test]
@@ -1166,10 +1187,10 @@ mod tests {
         let buffer = render(&mut app, 30, 20);
 
         assert_eq!(text(&buffer, 1), "Agents (3)   Windows (0)");
-        assert!(text(&buffer, 3).starts_with("fix-auth-bug*"));
+        assert!(text(&buffer, 3).starts_with("* fix-auth-bug"));
         assert_eq!(time_column(&row(&buffer, 3)), Some(25));
         assert_eq!(row(&buffer, 5), HALF_BLOCK_UPPER.repeat(30));
-        assert!(text(&buffer, 6).starts_with("docs-review"));
+        assert!(text(&buffer, 6).starts_with("2 docs-review"));
         assert!(
             text(&buffer, 4).ends_with("/o/w/D/R/aot"),
             "{:?}",
@@ -1184,10 +1205,10 @@ mod tests {
         let buffer = render(&mut app, 40, 12);
 
         assert_eq!(text(&buffer, 1), "Agents (3)   Windows (0)");
-        assert!(text(&buffer, 3).starts_with("fix-auth-bug*"));
+        assert!(text(&buffer, 3).starts_with("* fix-auth-bug"));
         assert_eq!(time_column(&row(&buffer, 3)), Some(35));
         assert_eq!(row(&buffer, 5), HALF_BLOCK_UPPER.repeat(40));
-        assert!(text(&buffer, 6).starts_with("docs-review"));
+        assert!(text(&buffer, 6).starts_with("2 docs-review"));
         assert!(text(&buffer, 7).ends_with("/o/w/D/docs"));
     }
 
@@ -1201,20 +1222,20 @@ mod tests {
 
     #[test]
     fn test_agent_name_is_suppressed_when_it_is_the_window_title() {
-        let mut app = app_with(vec![window("Claude", "claude", "/opt/project", 5)]);
+        let mut app = app_with(vec![window(1, "Claude", "claude", "/opt/project", 5)]);
         let buffer = render(&mut app, 80, 24);
-        assert!(text(&buffer, 3).starts_with("Claude"));
+        assert!(text(&buffer, 3).starts_with("1 Claude"));
         assert!(text(&buffer, 4).starts_with("[cc]"));
         assert!(text(&buffer, 4).ends_with("/opt/project"));
     }
 
     #[test]
     fn test_windows_tab_uses_the_window_icon_and_no_agent_name() {
-        let mut app = app_with(vec![window("shell", "zsh", "/opt/work/aot", 240)]);
+        let mut app = app_with(vec![window(1, "shell", "zsh", "/opt/work/aot", 240)]);
         assert_eq!(app.active_tab(), Tab::Windows);
 
         let buffer = render(&mut app, 80, 24);
-        assert!(text(&buffer, 3).starts_with("shell"));
+        assert!(text(&buffer, 3).starts_with("1 shell"));
         assert_eq!(time_column(&row(&buffer, 3)), Some(75));
         assert!(text(&buffer, 4).starts_with("[w]"));
         assert!(text(&buffer, 4).ends_with("/opt/work/aot"));
@@ -1222,7 +1243,7 @@ mod tests {
 
     #[test]
     fn test_empty_tab_message() {
-        let mut app = app_with(vec![window("shell", "zsh", "/opt/work", 5)]);
+        let mut app = app_with(vec![window(1, "shell", "zsh", "/opt/work", 5)]);
         app.kill_window();
         assert_eq!(app.current_tab_len(), 0);
 
@@ -1234,6 +1255,7 @@ mod tests {
     #[test]
     fn test_long_title_is_truncated_before_the_time() {
         let mut app = app_with(vec![window(
+            1,
             "a-very-long-window-name-that-cannot-possibly-fit",
             "claude",
             "/opt/work",
@@ -1241,6 +1263,51 @@ mod tests {
         )]);
         let buffer = render(&mut app, 30, 20);
         let title_row = row(&buffer, 3);
+        assert!(title_row.contains(ELLIPSIS), "{title_row:?}");
+        assert_eq!(time_column(&title_row), Some(25));
+        assert!(title_row.width() <= 30);
+    }
+
+    #[test]
+    fn test_title_shows_the_window_id_before_the_name() {
+        let mut app = agents_app();
+        let buffer = render(&mut app, 80, 24);
+
+        assert_eq!(buffer[(1, 6)].symbol(), "2");
+        assert_eq!(buffer[(2, 6)].symbol(), " ");
+        assert_eq!(buffer[(3, 6)].symbol(), "d");
+        // The dim tier colors nothing: the cell keeps the terminal's default fg.
+        assert_eq!(buffer[(1, 6)].style().fg, Some(Color::Reset));
+        assert!(buffer[(1, 6)].style().add_modifier.contains(Modifier::DIM));
+        // The name itself keeps the title tier.
+        assert!(buffer[(3, 6)].style().add_modifier.contains(Modifier::BOLD));
+    }
+
+    #[test]
+    fn test_window_id_follows_the_selection_like_the_time() {
+        let mut app = agents_app();
+        let buffer = render(&mut app, 80, 24);
+
+        assert!(selection_bg(&buffer, 1, 3));
+        assert!(!buffer[(1, 3)].style().add_modifier.contains(Modifier::DIM));
+        assert!(buffer[(1, 6)].style().add_modifier.contains(Modifier::DIM));
+    }
+
+    #[test]
+    fn test_title_truncation_accounts_for_the_id_width() {
+        let mut app = app_with(vec![window(
+            12345,
+            "a-very-long-window-name-that-cannot-possibly-fit",
+            "claude",
+            "/opt/work",
+            5,
+        )]);
+        let buffer = render(&mut app, 30, 20);
+        let title_row = row(&buffer, 3);
+        assert!(
+            title_row.trim_start().starts_with("12345 "),
+            "{title_row:?}"
+        );
         assert!(title_row.contains(ELLIPSIS), "{title_row:?}");
         assert_eq!(time_column(&title_row), Some(25));
         assert!(title_row.width() <= 30);
