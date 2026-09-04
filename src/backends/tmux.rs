@@ -2,6 +2,8 @@ use std::process::Command;
 use std::time::Instant;
 use thiserror::Error;
 
+use crate::backends::logger;
+
 /// Contract for executing tmux commands.
 pub trait CommandExecutor {
     /// Executes a tmux command and returns stdout on success.
@@ -14,6 +16,8 @@ pub trait CommandExecutor {
 pub trait Tmux {
     /// Returns the session name this driver targets.
     fn session_name(&self) -> &str;
+    /// Returns the socket name this driver targets, if any.
+    fn socket_name(&self) -> Option<&str>;
     /// Ensures the tmux session exists, creating it if necessary.
     fn create_session_if_not_exists(&self) -> Result<(), TmuxError>;
     /// Attaches to the tmux session, inheriting stdio. Blocks until detached.
@@ -44,6 +48,7 @@ pub trait Tmux {
 }
 
 pub const SESSION_NAME: &str = "agents-on-tmux";
+pub const SOCKET_NAME: &str = "agents-on-tmux";
 
 /// Errors that can occur during tmux operations.
 #[derive(Debug, Error)]
@@ -54,8 +59,8 @@ pub enum TmuxError {
         stderr: String,
         code: Option<i32>,
     },
-    #[error("Cannot run aot inside its own dedicated session '{0}'.")]
-    InsideOwnSession(String),
+    #[error("Cannot run aot inside its own tmux server (socket '{0}')")]
+    InsideOwnServer(String),
     #[error("Not running inside a tmux session")]
     NotInsideTmux,
     #[error("Window not found")]
@@ -109,20 +114,56 @@ pub fn detect_parent_session() -> Result<String, TmuxError> {
     }
 }
 
+/// Detects the parent tmux server socket by parsing the TMUX environment variable.
+/// Returns the socket name (e.g., "default", "agents-on-tmux").
+pub fn detect_parent_socket() -> Result<String, TmuxError> {
+    check_inside_tmux()?;
+
+    let tmux_env = std::env::var("TMUX").map_err(|_| TmuxError::NotInsideTmux)?;
+
+    // TMUX format: <socket-path>,<server-pid>,<session-id>
+    // Example: /tmp/tmux-1000/agents-on-tmux,12345,0
+    let socket_path = tmux_env.split(',').next().ok_or(TmuxError::NotInsideTmux)?;
+
+    // Extract socket name from path (last component)
+    let socket_name = socket_path.rsplit('/').next().unwrap_or("default");
+
+    Ok(socket_name.to_string())
+}
+
 /// Real tmux command executor that calls the tmux binary.
-pub struct ShellCommandExecutor;
+pub struct ShellCommandExecutor {
+    socket: Option<String>,
+}
+
+impl ShellCommandExecutor {
+    /// Creates a new executor targeting the default tmux server.
+    pub fn new() -> Self {
+        Self { socket: None }
+    }
+
+    /// Creates a new executor targeting a specific tmux server via `-L <socket>`.
+    pub fn new_with_socket(socket: &str) -> Self {
+        Self {
+            socket: Some(socket.to_string()),
+        }
+    }
+}
 
 impl CommandExecutor for ShellCommandExecutor {
     fn execute(&self, args: &[&str]) -> Result<String, TmuxError> {
-        let output =
-            Command::new("tmux")
-                .args(args)
-                .output()
-                .map_err(|e| TmuxError::CommandFailed {
-                    message: format!("Failed to execute tmux: {}", e),
-                    stderr: String::new(),
-                    code: None,
-                })?;
+        let mut cmd = Command::new("tmux");
+        if let Some(ref socket) = self.socket {
+            cmd.args(["-L", socket]);
+        }
+        let output = cmd
+            .args(args)
+            .output()
+            .map_err(|e| TmuxError::CommandFailed {
+                message: format!("Failed to execute tmux: {}", e),
+                stderr: String::new(),
+                code: None,
+            })?;
 
         if output.status.success() {
             Ok(String::from_utf8_lossy(&output.stdout).into_owned())
@@ -136,7 +177,11 @@ impl CommandExecutor for ShellCommandExecutor {
     }
 
     fn execute_inherit_stdio(&self, args: &[&str]) -> Result<(), TmuxError> {
-        let status = Command::new("tmux")
+        let mut cmd = Command::new("tmux");
+        if let Some(ref socket) = self.socket {
+            cmd.args(["-L", socket]);
+        }
+        let status = cmd
             .args(args)
             .env_remove("TMUX")
             .env_remove("TMUX_TMPDIR")
@@ -166,14 +211,25 @@ impl CommandExecutor for ShellCommandExecutor {
 pub struct TmuxDriver<E: CommandExecutor = ShellCommandExecutor> {
     executor: E,
     session: String,
+    socket: Option<String>,
 }
 
 impl TmuxDriver<ShellCommandExecutor> {
-    /// Creates a new TmuxDriver with the real command executor.
+    /// Creates a new TmuxDriver with the real command executor targeting the default tmux server.
     pub fn new(session: &str) -> Self {
         Self {
-            executor: ShellCommandExecutor,
+            executor: ShellCommandExecutor::new(),
             session: session.to_string(),
+            socket: None,
+        }
+    }
+
+    /// Creates a new TmuxDriver with the real command executor targeting a specific tmux server.
+    pub fn new_with_socket(session: &str, socket: &str) -> Self {
+        Self {
+            executor: ShellCommandExecutor::new_with_socket(socket),
+            session: session.to_string(),
+            socket: Some(socket.to_string()),
         }
     }
 }
@@ -191,6 +247,7 @@ impl<E: CommandExecutor> TmuxDriver<E> {
         Self {
             executor,
             session: SESSION_NAME.to_string(),
+            socket: None,
         }
     }
 }
@@ -247,11 +304,34 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
         &self.session
     }
 
+    /// Returns the socket name this driver targets, if any.
+    fn socket_name(&self) -> Option<&str> {
+        self.socket.as_deref()
+    }
+
     /// Ensures the tmux session exists, creating it if necessary.
+    /// Also checks if we're already running on the same socket to prevent nested execution.
     fn create_session_if_not_exists(&self) -> Result<(), TmuxError> {
+        // Check if we're already running on the same socket
+        if let Some(ref driver_socket) = self.socket
+            && let Ok(parent_socket) = detect_parent_socket()
+        {
+            logger::debug(&format!(
+                "tmux: parent socket: {}, driver socket: {}",
+                parent_socket, driver_socket
+            ));
+            if parent_socket == *driver_socket {
+                return Err(TmuxError::InsideOwnServer(parent_socket));
+            }
+        }
+
         let has_session = self.executor.execute(&["has-session", "-t", &self.session]);
 
         if has_session.is_err() {
+            logger::debug(&format!(
+                "tmux: creating session '{}' on socket {:?}",
+                self.session, self.socket
+            ));
             self.executor
                 .execute(&["new-session", "-d", "-s", &self.session])?;
             self.executor
@@ -534,9 +614,26 @@ mod tests {
     }
 
     #[test]
+    fn test_socket_name() {
+        assert_eq!(SOCKET_NAME, "agents-on-tmux");
+    }
+
+    #[test]
     fn test_driver_session_name() {
         let driver = TmuxDriver::new("test-session");
         assert_eq!(driver.session_name(), "test-session");
+    }
+
+    #[test]
+    fn test_driver_socket_name_none() {
+        let driver = TmuxDriver::new("test-session");
+        assert_eq!(driver.socket_name(), None);
+    }
+
+    #[test]
+    fn test_driver_socket_name_some() {
+        let driver = TmuxDriver::new_with_socket("test-session", "test-socket");
+        assert_eq!(driver.socket_name(), Some("test-socket"));
     }
 
     #[test]
@@ -781,13 +878,39 @@ mod tests {
     }
 
     #[test]
-    fn test_inside_own_session_error_message() {
-        let error = TmuxError::InsideOwnSession("agents-on-tmux".to_string());
+    fn test_inside_own_server_error_message() {
+        let error = TmuxError::InsideOwnServer("agents-on-tmux".to_string());
         let message = error.to_string();
         assert_eq!(
             message,
-            "Cannot run aot inside its own dedicated session 'agents-on-tmux'."
+            "Cannot run aot inside its own tmux server (socket 'agents-on-tmux')"
         );
+    }
+
+    #[test]
+    fn test_detect_parent_socket_custom() {
+        unsafe { std::env::set_var("TMUX", "/tmp/tmux-1000/agents-on-tmux,1234,0") };
+        let result = detect_parent_socket();
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "agents-on-tmux");
+        unsafe { std::env::remove_var("TMUX") };
+    }
+
+    #[test]
+    fn test_detect_parent_socket_default() {
+        unsafe { std::env::set_var("TMUX", "/tmp/tmux-1000/default,1234,0") };
+        let result = detect_parent_socket();
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "default");
+        unsafe { std::env::remove_var("TMUX") };
+    }
+
+    #[test]
+    fn test_detect_parent_socket_not_inside_tmux() {
+        unsafe { std::env::remove_var("TMUX") };
+        let result = detect_parent_socket();
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), TmuxError::NotInsideTmux));
     }
 
     #[test]
