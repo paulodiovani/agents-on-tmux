@@ -4,7 +4,10 @@ mod frontends;
 use std::fmt::Display;
 
 use backends::config::{Config, LaunchMode};
+use backends::tmux::{SESSION_NAME, Tmux, TmuxDriver, TmuxError, detect_parent_session};
 use clap::Parser;
+
+use crate::backends::logger;
 
 #[derive(Parser)]
 #[command(name = "aot", about = "Agents on tmux", version)]
@@ -81,7 +84,6 @@ fn parse_bool(value: &str) -> Result<bool, String> {
 }
 
 fn main() -> anyhow::Result<()> {
-    use backends::tmux::{SESSION_NAME, Tmux, TmuxDriver, TmuxError, detect_parent_session};
     let config = Config::parse()?;
     let cli = Cli::parse();
     let config = config.merge(&cli);
@@ -103,6 +105,8 @@ fn main() -> anyhow::Result<()> {
     );
 
     let parent_session = detect_parent_session()?;
+    logger::debug(&format!("main: parent session: {}", parent_session));
+
     if parent_session == SESSION_NAME {
         return Err(TmuxError::InsideOwnSession(parent_session).into());
     }
