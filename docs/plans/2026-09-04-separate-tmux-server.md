@@ -90,7 +90,7 @@ Do not continue to the next task until explicitly instructed to do so.
   - Prepend `-L <socket>` in `Command::new("tmux")` when socket is set
   - Update tests
 
-- [ ] **Task 3:** App & mock socket plumbing (`app.rs`, `ui.rs`)
+- [x] **Task 3:** App & mock socket plumbing (`app.rs`, `ui.rs`) ✅
   - In `App::run()`, read socket from `nested_driver.socket_name()`
   - Pass socket to `control_mode_thread()`
   - Update `MockTmux` in `app.rs` tests to implement `socket_name()`
