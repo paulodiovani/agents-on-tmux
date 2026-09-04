@@ -121,10 +121,6 @@ All fields are optional. Omitted fields use their defaults (`false`).
 1. User can interact with the dedicated session using the TUI control or standard TMUX bindings.
    The TUI footer shows its own keybindings while the TUI pane is focused, and the TMUX bindings for the nested session (resolved from your own `list-keys`) when it is not — including how to reach the nested session's prefix: typed twice (`C-b C-b`) when both sessions share a prefix, or just once (`C-b`) when they differ.
 
-## Screencast
-
-https://github.com/user-attachments/assets/e85bea40-2204-4f9d-9644-72dfd7c74dce
-
 ## Supported Agents
 
 | AI Agent    | Detect | Listen | Remote Control |
