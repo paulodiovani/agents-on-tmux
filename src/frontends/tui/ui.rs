@@ -246,28 +246,28 @@ fn window_item<'a>(window: &Window, tab: Tab, styles: &RowStyles, width: usize) 
     ])
 }
 
-/// Window title: the window id and name, an accent marker when this is the
-/// active window, then the elapsed time and the notification slot pinned to
-/// the right edge.
+/// Window title: the id, or an accent marker in its place when this is the
+/// active window, then the name, the elapsed time and the notification slot
+/// pinned to the right edge.
 fn title_line<'a>(window: &Window, styles: &RowStyles, width: usize) -> Line<'a> {
     let text_width = width.saturating_sub(PANEL_PADDING * 2);
-    let id = format!("{} ", window.id);
-    let marker = if window.is_active { "*" } else { "" };
+    let (prefix, prefix_style) = if window.is_active {
+        ("* ".to_string(), styles.accent)
+    } else {
+        (format!("{} ", window.id), styles.dim)
+    };
     let time = format_elapsed(window.started_at);
     let right = time.width() + NOTIFICATION_SLOT;
 
-    let budget = text_width.saturating_sub(right + marker.width() + id.width() + 1);
+    let budget = text_width.saturating_sub(right + prefix.width() + 1);
     let title = truncate_end(&window.name, budget);
-    let gap = text_width.saturating_sub(title.width() + marker.width() + id.width() + right);
+    let gap = text_width.saturating_sub(title.width() + prefix.width() + right);
 
     let mut spans = vec![
         Span::styled(" ".repeat(PANEL_PADDING), styles.fill),
-        Span::styled(id, styles.dim),
+        Span::styled(prefix, prefix_style),
         Span::styled(title, styles.title),
     ];
-    if !marker.is_empty() {
-        spans.push(Span::styled(marker, styles.accent));
-    }
     spans.push(Span::styled(" ".repeat(gap), styles.fill));
     spans.push(Span::styled(time, styles.dim));
     spans.push(Span::styled(" ", styles.fill));
@@ -666,8 +666,8 @@ mod tests {
         }
     }
 
-    /// Columns the id prefix adds before the name: digits plus one space.
-    fn id_prefix_width(id: u32) -> usize {
+    /// Columns the row prefix (id, or the active marker) adds before the name.
+    fn prefix_width(id: u32) -> usize {
         id.to_string().width() + 1
     }
 
@@ -1031,7 +1031,7 @@ mod tests {
         let mut app = agents_app();
         let buffer = render(&mut app, 80, 24);
 
-        assert!(text(&buffer, 3).starts_with("1 fix-auth-bug*"));
+        assert!(text(&buffer, 3).starts_with("* fix-auth-bug"));
         assert!(text(&buffer, 4).ends_with("/opt/work/Development/Rust/aot"));
         assert!(text(&buffer, 6).starts_with("2 docs-review"));
         assert!(text(&buffer, 7).ends_with("/opt/work/Development/docs"));
@@ -1045,17 +1045,14 @@ mod tests {
     fn test_active_window_marker_uses_the_accent() {
         let mut app = agents_app();
         let buffer = render(&mut app, 80, 24);
-        let marker_x = (PANEL_PADDING + id_prefix_width(1) + "fix-auth-bug".width()) as u16;
-        assert_eq!(buffer[(marker_x, 3)].symbol(), "*");
-        assert_eq!(buffer[(marker_x, 3)].style().fg, Theme::default().accent.fg);
-        assert_ne!(
-            buffer[(
-                (PANEL_PADDING + id_prefix_width(2) + "docs-review".width()) as u16,
-                6
-            )]
-                .symbol(),
-            "*"
-        );
+        // The active window shows the marker in place of its id.
+        assert_eq!(buffer[(1, 3)].symbol(), "*");
+        assert_eq!(buffer[(2, 3)].symbol(), " ");
+        assert_eq!(buffer[(3, 3)].symbol(), "f");
+        assert_eq!(buffer[(1, 3)].style().fg, Theme::default().accent.fg);
+        // Inactive windows keep their dim id in that slot.
+        assert_eq!(buffer[(1, 6)].symbol(), "2");
+        assert_ne!(buffer[(1, 6)].style().fg, Theme::default().accent.fg);
     }
 
     #[test]
@@ -1137,15 +1134,14 @@ mod tests {
                 .contains(Modifier::DIM)
         );
 
-        let title = (PANEL_PADDING + id_prefix_width(1)) as u16;
+        let title = (PANEL_PADDING + prefix_width(1)) as u16;
         assert!(
             buffer[(title, 3)]
                 .style()
                 .add_modifier
                 .contains(Modifier::BOLD)
         );
-        let marker = (PANEL_PADDING + id_prefix_width(1) + "fix-auth-bug".width()) as u16;
-        assert_eq!(buffer[(marker, 3)].style().fg, Theme::default().accent.fg);
+        assert_eq!(buffer[(1, 3)].style().fg, Theme::default().accent.fg);
     }
 
     #[test]
@@ -1191,7 +1187,7 @@ mod tests {
         let buffer = render(&mut app, 30, 20);
 
         assert_eq!(text(&buffer, 1), "Agents (3)   Windows (0)");
-        assert!(text(&buffer, 3).starts_with("1 fix-auth-bug*"));
+        assert!(text(&buffer, 3).starts_with("* fix-auth-bug"));
         assert_eq!(time_column(&row(&buffer, 3)), Some(25));
         assert_eq!(row(&buffer, 5), HALF_BLOCK_UPPER.repeat(30));
         assert!(text(&buffer, 6).starts_with("2 docs-review"));
@@ -1209,7 +1205,7 @@ mod tests {
         let buffer = render(&mut app, 40, 12);
 
         assert_eq!(text(&buffer, 1), "Agents (3)   Windows (0)");
-        assert!(text(&buffer, 3).starts_with("1 fix-auth-bug*"));
+        assert!(text(&buffer, 3).starts_with("* fix-auth-bug"));
         assert_eq!(time_column(&row(&buffer, 3)), Some(35));
         assert_eq!(row(&buffer, 5), HALF_BLOCK_UPPER.repeat(40));
         assert!(text(&buffer, 6).starts_with("2 docs-review"));
