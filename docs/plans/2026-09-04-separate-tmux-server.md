@@ -63,6 +63,27 @@ let parent_driver = TmuxDriver::new(&parent_session);
 let nested_driver = TmuxDriver::new_with_socket(SESSION_NAME, SOCKET_NAME);
 ```
 
+### Socket-based detection
+
+The guard that prevents running `aot` inside its own session now uses socket detection instead of session name detection:
+
+- `detect_parent_socket()` parses the `TMUX` environment variable to extract the socket name
+- Compares against `SOCKET_NAME` instead of `SESSION_NAME`
+- Prevents running `aot` when already connected to the `agents-on-tmux` server, regardless of session name
+- `detect_parent_session()` is still used for creating the parent driver (session name is still useful for targeting)
+
+```rust
+// Before: session-based check
+if parent_session == SESSION_NAME {
+    return Err(TmuxError::InsideOwnSession(parent_session).into());
+}
+
+// After: socket-based check
+if parent_socket == SOCKET_NAME {
+    return Err(TmuxError::InsideOwnServer(parent_socket).into());
+}
+```
+
 ## Tasks
 
 **IMPORTANT:** After completing each task, the agent MUST:
@@ -100,6 +121,10 @@ Do not continue to the next task until explicitly instructed to do so.
   - Import `SOCKET_NAME` constant
   - Create nested driver with socket: `TmuxDriver::new_with_socket(SESSION_NAME, SOCKET_NAME)`
   - Parent driver remains unchanged: `TmuxDriver::new(&parent_session)`
+  - Add `detect_parent_socket()` function to parse TMUX env var
+  - Update guard check to use socket-based detection instead of session-based
+  - Update error enum: `InsideOwnSession` → `InsideOwnServer`
+  - Add tests for `detect_parent_socket()`
 
 - [ ] **Task 5:** Update docs
   - **`AGENTS.md`:** Document socket architecture, explain `-L` usage

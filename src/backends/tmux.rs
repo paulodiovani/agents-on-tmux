@@ -57,8 +57,8 @@ pub enum TmuxError {
         stderr: String,
         code: Option<i32>,
     },
-    #[error("Cannot run aot inside its own dedicated session '{0}'.")]
-    InsideOwnSession(String),
+    #[error("Cannot run aot inside its own tmux server (socket '{0}')")]
+    InsideOwnServer(String),
     #[error("Not running inside a tmux session")]
     NotInsideTmux,
     #[error("Window not found")]
@@ -110,6 +110,23 @@ pub fn detect_parent_session() -> Result<String, TmuxError> {
     } else {
         Err(TmuxError::NotInsideTmux)
     }
+}
+
+/// Detects the parent tmux server socket by parsing the TMUX environment variable.
+/// Returns the socket name (e.g., "default", "agents-on-tmux").
+pub fn detect_parent_socket() -> Result<String, TmuxError> {
+    check_inside_tmux()?;
+
+    let tmux_env = std::env::var("TMUX").map_err(|_| TmuxError::NotInsideTmux)?;
+
+    // TMUX format: <socket-path>,<server-pid>,<session-id>
+    // Example: /tmp/tmux-1000/agents-on-tmux,12345,0
+    let socket_path = tmux_env.split(',').next().ok_or(TmuxError::NotInsideTmux)?;
+
+    // Extract socket name from path (last component)
+    let socket_name = socket_path.rsplit('/').next().unwrap_or("default");
+
+    Ok(socket_name.to_string())
 }
 
 /// Real tmux command executor that calls the tmux binary.
@@ -841,13 +858,39 @@ mod tests {
     }
 
     #[test]
-    fn test_inside_own_session_error_message() {
-        let error = TmuxError::InsideOwnSession("agents-on-tmux".to_string());
+    fn test_inside_own_server_error_message() {
+        let error = TmuxError::InsideOwnServer("agents-on-tmux".to_string());
         let message = error.to_string();
         assert_eq!(
             message,
-            "Cannot run aot inside its own dedicated session 'agents-on-tmux'."
+            "Cannot run aot inside its own tmux server (socket 'agents-on-tmux')"
         );
+    }
+
+    #[test]
+    fn test_detect_parent_socket_custom() {
+        unsafe { std::env::set_var("TMUX", "/tmp/tmux-1000/agents-on-tmux,1234,0") };
+        let result = detect_parent_socket();
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "agents-on-tmux");
+        unsafe { std::env::remove_var("TMUX") };
+    }
+
+    #[test]
+    fn test_detect_parent_socket_default() {
+        unsafe { std::env::set_var("TMUX", "/tmp/tmux-1000/default,1234,0") };
+        let result = detect_parent_socket();
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), "default");
+        unsafe { std::env::remove_var("TMUX") };
+    }
+
+    #[test]
+    fn test_detect_parent_socket_not_inside_tmux() {
+        unsafe { std::env::remove_var("TMUX") };
+        let result = detect_parent_socket();
+        assert!(result.is_err());
+        assert!(matches!(result.unwrap_err(), TmuxError::NotInsideTmux));
     }
 
     #[test]
