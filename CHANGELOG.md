@@ -7,19 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-04
+
 ### Added
-- `--tui-width` CLI flag and `tui_width` config option to set the TUI side panel width in columns (default: 35)
-- `,` (rename) keybinding in the TUI, renames the selected window through tmux command prompt
-- The TUI footer now switches hints by pane focus: its own keybindings while the TUI pane is focused, and the nested session's tmux bindings (read from `list-keys`) when it is not
+- `--tui-width` CLI flag and `tui_width` config option to set the side panel width (default: 35)
+- `,` keybinding to rename the selected window via tmux command prompt
+- Context-aware footer: shows TUI keys when focused, tmux bindings when the nested session is focused
 
 ### Changed
-- Window rows now show the window id before the name (e.g. `3 my-window`), styled like the elapsed time and path; the active window shows its accent marker in that slot instead
-- Redesigned the TUI with compact two-line rows, a new tab bar, full-width background selection, and right-aligned paths
-- The TUI new-window key is now `c` (was `n`), matching tmux's own binding
+- Display the window id before the name (e.g. `3 my-window`); replaced by `*` for the active window
+- Redesigned the TUI with compact two-line rows, a tab bar, full-width selection, and right-aligned paths
+- New-window key changed from `n` to `c`, matching tmux's default binding
 
 ### Fixed
-- The side panel now retains its width when the terminal or window is resized (only when started in normal mode, with both the TUI pane and the nested session)
-- TUI selection no longer jumps to the active window on refresh when the TUI pane is focused, so navigating through windows while agents are producing output is stable
+- Side panel retains its width on terminal resize
+- Selection no longer jumps to the active window on refresh when the TUI is focused
 
 ## [0.3.0] - 2026-08-09
 
