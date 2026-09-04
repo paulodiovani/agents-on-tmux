@@ -15,7 +15,6 @@ pub trait Tmux {
     /// Returns the session name this driver targets.
     fn session_name(&self) -> &str;
     /// Returns the socket name this driver targets, if any.
-    #[allow(dead_code)]
     fn socket_name(&self) -> Option<&str>;
     /// Ensures the tmux session exists, creating it if necessary.
     fn create_session_if_not_exists(&self) -> Result<(), TmuxError>;
@@ -47,7 +46,6 @@ pub trait Tmux {
 }
 
 pub const SESSION_NAME: &str = "agents-on-tmux";
-#[allow(dead_code)]
 pub const SOCKET_NAME: &str = "agents-on-tmux";
 
 /// Errors that can occur during tmux operations.
@@ -126,7 +124,6 @@ impl ShellCommandExecutor {
     }
 
     /// Creates a new executor targeting a specific tmux server via `-L <socket>`.
-    #[allow(dead_code)]
     pub fn new_with_socket(socket: &str) -> Self {
         Self {
             socket: Some(socket.to_string()),
@@ -195,7 +192,6 @@ impl CommandExecutor for ShellCommandExecutor {
 pub struct TmuxDriver<E: CommandExecutor = ShellCommandExecutor> {
     executor: E,
     session: String,
-    #[allow(dead_code)]
     socket: Option<String>,
 }
 
@@ -210,7 +206,6 @@ impl TmuxDriver<ShellCommandExecutor> {
     }
 
     /// Creates a new TmuxDriver with the real command executor targeting a specific tmux server.
-    #[allow(dead_code)]
     pub fn new_with_socket(session: &str, socket: &str) -> Self {
         Self {
             executor: ShellCommandExecutor::new_with_socket(socket),

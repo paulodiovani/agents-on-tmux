@@ -96,7 +96,7 @@ Do not continue to the next task until explicitly instructed to do so.
   - Update `MockTmux` in `app.rs` tests to implement `socket_name()`
   - Update `MockTmux` in `ui.rs` tests to implement `socket_name()`
 
-- [ ] **Task 4:** Main initialization with socket (`main.rs`)
+- [x] **Task 4:** Main initialization with socket (`main.rs`) ✅
   - Import `SOCKET_NAME` constant
   - Create nested driver with socket: `TmuxDriver::new_with_socket(SESSION_NAME, SOCKET_NAME)`
   - Parent driver remains unchanged: `TmuxDriver::new(&parent_session)`
