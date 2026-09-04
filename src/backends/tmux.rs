@@ -183,8 +183,6 @@ impl CommandExecutor for ShellCommandExecutor {
         }
         let status = cmd
             .args(args)
-            .env_remove("TMUX")
-            .env_remove("TMUX_TMPDIR")
             .stdin(std::process::Stdio::inherit())
             .stdout(std::process::Stdio::inherit())
             .stderr(std::process::Stdio::inherit())

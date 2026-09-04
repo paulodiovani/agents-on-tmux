@@ -152,8 +152,6 @@ fn spawn_control_mode(session: &str, socket: Option<&str>) -> std::io::Result<Co
         .stdin(Stdio::piped()) // must stay open; closing it detaches the client
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
-        .env_remove("TMUX")
-        .env_remove("TMUX_TMPDIR")
         .spawn()?;
 
     let stdin = child.stdin.take();
