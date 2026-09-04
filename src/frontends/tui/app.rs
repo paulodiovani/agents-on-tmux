@@ -429,14 +429,19 @@ impl App {
             }
         }
 
-        let active_window_info = self
-            .windows
-            .iter()
-            .find(|w| w.is_active)
-            .map(|w| (w.id, w.running_command.clone()));
+        self.clamp_selections();
+        self.list_state.select(Some(self.current_selected()));
 
-        if let Some((active_id, active_command)) = active_window_info {
-            if self.last_focused_id != Some(active_id) {
+        if !self.pane_active {
+            let active_window_info = self
+                .windows
+                .iter()
+                .find(|w| w.is_active)
+                .map(|w| (w.id, w.running_command.clone()));
+
+            if let Some((active_id, active_command)) = active_window_info
+                && self.last_focused_id != Some(active_id)
+            {
                 let target_tab = if is_agent(&active_command).is_some() {
                     Tab::Agents
                 } else {
@@ -454,9 +459,6 @@ impl App {
                     self.list_state.select(Some(self.current_selected()));
                 }
             }
-        } else {
-            self.clamp_selections();
-            self.list_state.select(Some(self.current_selected()));
         }
 
         Ok(())
@@ -1328,6 +1330,7 @@ mod tests {
     #[test]
     fn test_external_tmux_change_syncs_selection() {
         let (mut app, windows, _) = test_app();
+        app.set_pane_active(false);
         assert_eq!(app.current_selected(), 0);
 
         windows.borrow_mut()[3].is_active = true;
@@ -1338,6 +1341,7 @@ mod tests {
     #[test]
     fn test_external_tmux_change_switches_tab() {
         let (mut app, windows, _) = test_app();
+        app.set_pane_active(false);
         assert_eq!(app.active_tab(), Tab::Agents);
 
         windows.borrow_mut()[0].is_active = true;
@@ -1348,6 +1352,7 @@ mod tests {
     #[test]
     fn test_external_tmux_change_syncs_after_navigation() {
         let (mut app, windows, _) = test_app();
+        app.set_pane_active(false);
         assert_eq!(app.current_selected(), 0);
 
         app.navigate_down();
@@ -1359,6 +1364,19 @@ mod tests {
         assert_eq!(app.active_tab(), Tab::Windows);
         assert_eq!(app.current_selected(), 0);
         assert_eq!(app.last_focused_id, Some(1));
+    }
+
+    #[test]
+    fn test_refresh_windows_does_not_override_selection_when_pane_active() {
+        let (mut app, windows, _) = test_app();
+        assert_eq!(app.current_selected(), 0);
+
+        app.navigate_down();
+        assert_eq!(app.current_selected(), 1);
+
+        windows.borrow_mut()[0].is_active = true;
+        app.refresh_windows().unwrap();
+        assert_eq!(app.current_selected(), 1);
     }
 
     #[test]

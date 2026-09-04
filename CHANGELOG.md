@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - The side panel now retains its width when the terminal or window is resized (only when started in normal mode, with both the TUI pane and the nested session)
+- TUI selection no longer jumps to the active window on refresh when the TUI pane is focused, so navigating through windows while agents are producing output is stable
 
 ## [0.3.0] - 2026-08-09
 
