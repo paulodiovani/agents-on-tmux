@@ -67,13 +67,14 @@ let nested_driver = TmuxDriver::new_with_socket(SESSION_NAME, SOCKET_NAME);
 
 **IMPORTANT:** After completing each task, the agent MUST:
 1. Run `cargo fmt --check && cargo clippy -- -D warnings && cargo test` to verify the changes
-2. Stop and wait for human review before proceeding to the next task
-3. List the changes made in that task for the human to review
+2. Update the task tracker below (mark the task as complete with `[x]`)
+3. Stop and wait for human review before proceeding to the next task
+4. List the changes made in that task for the human to review
 
 Do not continue to the next task until explicitly instructed to do so.
 
-- [ ] **Task 0:** Create plan file ✅
-- [ ] **Task 1:** Socket-aware executor & driver (`tmux.rs`)
+- [x] **Task 0:** Create plan file ✅
+- [x] **Task 1:** Socket-aware executor & driver (`tmux.rs`) ✅
   - Add `socket: Option<String>` to `ShellCommandExecutor`
   - Add `socket: String` to `TmuxDriver`
   - Prepend `-L <socket>` in `execute`/`execute_inherit_stdio` when socket is set

@@ -14,6 +14,9 @@ pub trait CommandExecutor {
 pub trait Tmux {
     /// Returns the session name this driver targets.
     fn session_name(&self) -> &str;
+    /// Returns the socket name this driver targets, if any.
+    #[allow(dead_code)]
+    fn socket_name(&self) -> Option<&str>;
     /// Ensures the tmux session exists, creating it if necessary.
     fn create_session_if_not_exists(&self) -> Result<(), TmuxError>;
     /// Attaches to the tmux session, inheriting stdio. Blocks until detached.
@@ -44,6 +47,8 @@ pub trait Tmux {
 }
 
 pub const SESSION_NAME: &str = "agents-on-tmux";
+#[allow(dead_code)]
+pub const SOCKET_NAME: &str = "agents-on-tmux";
 
 /// Errors that can occur during tmux operations.
 #[derive(Debug, Error)]
@@ -110,19 +115,39 @@ pub fn detect_parent_session() -> Result<String, TmuxError> {
 }
 
 /// Real tmux command executor that calls the tmux binary.
-pub struct ShellCommandExecutor;
+pub struct ShellCommandExecutor {
+    socket: Option<String>,
+}
+
+impl ShellCommandExecutor {
+    /// Creates a new executor targeting the default tmux server.
+    pub fn new() -> Self {
+        Self { socket: None }
+    }
+
+    /// Creates a new executor targeting a specific tmux server via `-L <socket>`.
+    #[allow(dead_code)]
+    pub fn new_with_socket(socket: &str) -> Self {
+        Self {
+            socket: Some(socket.to_string()),
+        }
+    }
+}
 
 impl CommandExecutor for ShellCommandExecutor {
     fn execute(&self, args: &[&str]) -> Result<String, TmuxError> {
-        let output =
-            Command::new("tmux")
-                .args(args)
-                .output()
-                .map_err(|e| TmuxError::CommandFailed {
-                    message: format!("Failed to execute tmux: {}", e),
-                    stderr: String::new(),
-                    code: None,
-                })?;
+        let mut cmd = Command::new("tmux");
+        if let Some(ref socket) = self.socket {
+            cmd.args(["-L", socket]);
+        }
+        let output = cmd
+            .args(args)
+            .output()
+            .map_err(|e| TmuxError::CommandFailed {
+                message: format!("Failed to execute tmux: {}", e),
+                stderr: String::new(),
+                code: None,
+            })?;
 
         if output.status.success() {
             Ok(String::from_utf8_lossy(&output.stdout).into_owned())
@@ -136,7 +161,11 @@ impl CommandExecutor for ShellCommandExecutor {
     }
 
     fn execute_inherit_stdio(&self, args: &[&str]) -> Result<(), TmuxError> {
-        let status = Command::new("tmux")
+        let mut cmd = Command::new("tmux");
+        if let Some(ref socket) = self.socket {
+            cmd.args(["-L", socket]);
+        }
+        let status = cmd
             .args(args)
             .env_remove("TMUX")
             .env_remove("TMUX_TMPDIR")
@@ -166,14 +195,27 @@ impl CommandExecutor for ShellCommandExecutor {
 pub struct TmuxDriver<E: CommandExecutor = ShellCommandExecutor> {
     executor: E,
     session: String,
+    #[allow(dead_code)]
+    socket: Option<String>,
 }
 
 impl TmuxDriver<ShellCommandExecutor> {
-    /// Creates a new TmuxDriver with the real command executor.
+    /// Creates a new TmuxDriver with the real command executor targeting the default tmux server.
     pub fn new(session: &str) -> Self {
         Self {
-            executor: ShellCommandExecutor,
+            executor: ShellCommandExecutor::new(),
             session: session.to_string(),
+            socket: None,
+        }
+    }
+
+    /// Creates a new TmuxDriver with the real command executor targeting a specific tmux server.
+    #[allow(dead_code)]
+    pub fn new_with_socket(session: &str, socket: &str) -> Self {
+        Self {
+            executor: ShellCommandExecutor::new_with_socket(socket),
+            session: session.to_string(),
+            socket: Some(socket.to_string()),
         }
     }
 }
@@ -191,6 +233,7 @@ impl<E: CommandExecutor> TmuxDriver<E> {
         Self {
             executor,
             session: SESSION_NAME.to_string(),
+            socket: None,
         }
     }
 }
@@ -245,6 +288,11 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
     /// Returns the session name this driver targets.
     fn session_name(&self) -> &str {
         &self.session
+    }
+
+    /// Returns the socket name this driver targets, if any.
+    fn socket_name(&self) -> Option<&str> {
+        self.socket.as_deref()
     }
 
     /// Ensures the tmux session exists, creating it if necessary.
@@ -534,9 +582,26 @@ mod tests {
     }
 
     #[test]
+    fn test_socket_name() {
+        assert_eq!(SOCKET_NAME, "agents-on-tmux");
+    }
+
+    #[test]
     fn test_driver_session_name() {
         let driver = TmuxDriver::new("test-session");
         assert_eq!(driver.session_name(), "test-session");
+    }
+
+    #[test]
+    fn test_driver_socket_name_none() {
+        let driver = TmuxDriver::new("test-session");
+        assert_eq!(driver.socket_name(), None);
+    }
+
+    #[test]
+    fn test_driver_socket_name_some() {
+        let driver = TmuxDriver::new_with_socket("test-session", "test-socket");
+        assert_eq!(driver.socket_name(), Some("test-socket"));
     }
 
     #[test]

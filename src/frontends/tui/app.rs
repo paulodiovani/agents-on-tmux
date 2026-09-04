@@ -674,6 +674,10 @@ mod tests {
             "agents-on-tmux"
         }
 
+        fn socket_name(&self) -> Option<&str> {
+            None
+        }
+
         fn create_session_if_not_exists(&self) -> Result<(), TmuxError> {
             Ok(())
         }
