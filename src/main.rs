@@ -4,7 +4,7 @@ mod frontends;
 use std::fmt::Display;
 
 use backends::config::{Config, LaunchMode};
-use backends::tmux::{SESSION_NAME, Tmux, TmuxDriver, TmuxError, detect_parent_session};
+use backends::tmux::{SESSION_NAME, SOCKET_NAME, Tmux, TmuxDriver, detect_parent_session};
 use clap::Parser;
 
 use crate::backends::logger;
@@ -107,12 +107,9 @@ fn main() -> anyhow::Result<()> {
     let parent_session = detect_parent_session()?;
     logger::debug(&format!("main: parent session: {}", parent_session));
 
-    if parent_session == SESSION_NAME {
-        return Err(TmuxError::InsideOwnSession(parent_session).into());
-    }
     let parent_driver = TmuxDriver::new(&parent_session);
 
-    let nested_driver = TmuxDriver::new(SESSION_NAME);
+    let nested_driver = TmuxDriver::new_with_socket(SESSION_NAME, SOCKET_NAME);
     nested_driver.create_session_if_not_exists()?;
 
     let pane_id = std::env::var("TMUX_PANE").ok();

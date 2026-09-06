@@ -37,9 +37,9 @@ A TMUX-based AI Agents orchestrator.
 └──────────────────────────────┴───────────────────────────────────┘
 
 ┌──────────────────────────────────────────────────────────────────┐
-│                      Parent TMUX Session                         │
+│                      Parent TMUX Server                          │
 │  ┌────────────┐   ┌──────────────────────────────────────────┐   │
-│  │  TUI Pane  │   │  Nested: agents-on-tmux Session          │   │
+│  │  TUI Pane  │   │  Isolated TMUX Server (-L agents-on-tmux)│   │
 │  │            │   │   ┌──────────┐ ┌──────────┐ ┌──────────┐ │   │
 │  │            │   │   │  Agent   │ │  Agent   │ │  Agent   │ │   │
 │  │            │   │   │  Window  │ │  Window  │ │  Window  │ │   │
@@ -116,7 +116,7 @@ All fields are optional. Omitted fields use their defaults (`false`).
 
 1. Start the application with `aot`.
 1. The application checks if a parent TMUX session is running or stops if not.
-1. Start a new dedicated TMUX session named `agents-on-tmux`, this is the session that will host the agents.
+1. Creates an isolated TMUX server using `tmux -L agents-on-tmux` and starts a dedicated session named `agents-on-tmux` on it.
 1. The TUI control panel is started by default on a left panel. Can also be started with `aot --tui` or skipped with `aot --no-tui`. The panel retains its width (`tui_width`, 35 columns by default) when the terminal is resized.
 1. User can interact with the dedicated session using the TUI control or standard TMUX bindings.
    The TUI footer shows its own keybindings while the TUI pane is focused, and the TMUX bindings for the nested session (resolved from your own `list-keys`) when it is not — including how to reach the nested session's prefix: typed twice (`C-b C-b`) when both sessions share a prefix, or just once (`C-b`) when they differ.
