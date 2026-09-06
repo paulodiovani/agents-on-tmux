@@ -3,6 +3,8 @@ use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
 
+use crate::backends::logger;
+
 const MAX_RETRIES: usize = 5;
 
 /// Events emitted by the tmux control-mode client.
@@ -24,6 +26,15 @@ pub enum EventProducer {
     Parent,
     /// The nested tmux server — all events except pane focus.
     Nested,
+}
+
+/// Outcome of pumping events from a control-mode connection.
+#[derive(Debug, PartialEq, Eq)]
+enum PumpOutcome {
+    /// Stop reconnecting (exit received or receiver dropped).
+    Exit,
+    /// Connection lost, should reconnect.
+    Reconnect,
 }
 
 /// Owns the control-mode child process. Reading delegates to the child's stdout;
@@ -84,8 +95,8 @@ pub fn parse_event(line: &str) -> Option<TmuxEvent> {
     }
 }
 
-/// Reads control-mode lines until the stream ends. Returns `true` if it saw `%exit`
-/// (server/client gone → do not reconnect), `false` on plain EOF (dropped → reconnect).
+/// Reads control-mode lines until the stream ends. Returns `PumpOutcome::Exit` if it saw `%exit`
+/// (server/client gone → do not reconnect), `PumpOutcome::Reconnect` on plain EOF (dropped → reconnect).
 /// Filters events based on the producer:
 /// - `Parent`: only forwards `PaneChanged` events (and `Exit` to signal disconnection)
 /// - `Nested`: forwards all events except `PaneChanged`
@@ -93,35 +104,43 @@ fn pump_events(
     reader: impl BufRead,
     producer: EventProducer,
     event_tx: &mpsc::Sender<TmuxEvent>,
-) -> bool {
+) -> PumpOutcome {
     for line in reader.lines() {
-        let Ok(line) = line else { return false };
+        let Ok(line) = line else {
+            return PumpOutcome::Reconnect;
+        };
 
-        if let Some(event) = parse_event(&line) {
-            // Filter based on producer
-            let should_forward = match (producer, &event) {
-                // Exit is always forwarded to signal disconnection
-                (_, TmuxEvent::Exit) => true,
-                // Parent only forwards pane focus changes
-                (EventProducer::Parent, TmuxEvent::PaneChanged(_)) => true,
-                (EventProducer::Parent, _) => false,
-                // Nested forwards everything except pane focus changes
-                (EventProducer::Nested, TmuxEvent::PaneChanged(_)) => false,
-                (EventProducer::Nested, _) => true,
-            };
+        match (producer, parse_event(&line)) {
+            // No event parsed, continue to next line
+            (_, None) => continue,
 
-            if should_forward {
-                let is_exit = event == TmuxEvent::Exit;
-                if event_tx.send(event).is_err() {
-                    return true; // receiver dropped: app is gone, stop.
-                }
-                if is_exit {
-                    return true;
+            // Exit event: always forward and stop
+            (_, Some(TmuxEvent::Exit)) => {
+                let _ = event_tx.send(TmuxEvent::Exit);
+                return PumpOutcome::Exit;
+            }
+
+            // Parent producer: only forward pane focus changes
+            (EventProducer::Parent, Some(event @ TmuxEvent::PaneChanged(_))) => {
+                if let Err(error) = event_tx.send(event) {
+                    logger::error(&format!("control_mode: failed to send event: {error}"));
+                    return PumpOutcome::Exit;
                 }
             }
+
+            // Nested producer: forward everything except pane focus changes
+            (EventProducer::Nested, Some(event)) if !matches!(event, TmuxEvent::PaneChanged(_)) => {
+                if let Err(error) = event_tx.send(event) {
+                    logger::error(&format!("control_mode: failed to send event: {error}"));
+                    return PumpOutcome::Exit;
+                }
+            }
+
+            // All other combinations: skip (filtered out by producer)
+            _ => continue,
         }
     }
-    false
+    PumpOutcome::Reconnect
 }
 
 /// Retry/backoff loop, decoupled from tmux and from real time for testing.
@@ -138,8 +157,8 @@ fn run_with_reconnect<C, R>(
     loop {
         match connect() {
             Ok(reader) => {
-                let clean_exit = pump_events(reader, producer, event_tx);
-                if clean_exit {
+                let outcome = pump_events(reader, producer, event_tx);
+                if matches!(outcome, PumpOutcome::Exit) {
                     let _ = event_tx.send(TmuxEvent::Exit);
                     return;
                 }
@@ -288,7 +307,10 @@ mod tests {
     fn test_pump_parent_forwards_only_pane_changed() {
         let (tx, rx) = mpsc::channel();
         let input = std::io::Cursor::new("%window-add @3\n%window-pane-changed @1 %5\n%exit\n");
-        assert!(pump_events(input, EventProducer::Parent, &tx));
+        assert_eq!(
+            pump_events(input, EventProducer::Parent, &tx),
+            PumpOutcome::Exit
+        );
         // Parent should only forward PaneChanged, not window-add
         assert_eq!(rx.recv().unwrap(), TmuxEvent::PaneChanged("%5".to_string()));
         // Exit is also forwarded by Parent
@@ -299,7 +321,10 @@ mod tests {
     fn test_pump_nested_forwards_all_except_pane_changed() {
         let (tx, rx) = mpsc::channel();
         let input = std::io::Cursor::new("%window-add @3\n%window-pane-changed @1 %5\n%exit\n");
-        assert!(pump_events(input, EventProducer::Nested, &tx));
+        assert_eq!(
+            pump_events(input, EventProducer::Nested, &tx),
+            PumpOutcome::Exit
+        );
         // Nested should forward window-add and exit, but not pane-changed
         assert_eq!(rx.recv().unwrap(), TmuxEvent::Refresh); // window-add
         assert_eq!(rx.recv().unwrap(), TmuxEvent::Exit);
@@ -309,16 +334,22 @@ mod tests {
     fn test_pump_forwards_events_and_stops_on_exit() {
         let (tx, rx) = mpsc::channel();
         let input = std::io::Cursor::new("%window-add @3\n%output %1 hi\n%exit\n");
-        assert!(pump_events(input, EventProducer::Nested, &tx)); // saw %exit
+        assert_eq!(
+            pump_events(input, EventProducer::Nested, &tx),
+            PumpOutcome::Exit
+        ); // saw %exit
         assert_eq!(rx.recv().unwrap(), TmuxEvent::Refresh);
         assert_eq!(rx.recv().unwrap(), TmuxEvent::Exit);
     }
 
     #[test]
-    fn test_pump_returns_false_on_eof() {
+    fn test_pump_returns_reconnect_on_eof() {
         let (tx, rx) = mpsc::channel();
         let input = std::io::Cursor::new("%window-add @3\n");
-        assert!(!pump_events(input, EventProducer::Nested, &tx)); // plain EOF, no %exit
+        assert_eq!(
+            pump_events(input, EventProducer::Nested, &tx),
+            PumpOutcome::Reconnect
+        ); // plain EOF, no %exit
         assert_eq!(rx.recv().unwrap(), TmuxEvent::Refresh);
     }
 
@@ -327,7 +358,10 @@ mod tests {
         let (tx, rx) = mpsc::channel();
         drop(rx);
         let input = std::io::Cursor::new("%window-add @3\n%window-add @4\n");
-        assert!(pump_events(input, EventProducer::Nested, &tx)); // receiver gone: stop for good
+        assert_eq!(
+            pump_events(input, EventProducer::Nested, &tx),
+            PumpOutcome::Exit
+        ); // receiver gone: stop for good
     }
 
     #[test]
