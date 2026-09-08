@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Use separate tmux server (`-L agents-on-tmux`) for the nested session, providing process isolation and preventing server freezes (#20, #31)
+- Hermes agent icon changed to ⚕ (Rod of Asclepius)
 
 ## [0.4.0] - 2026-09-04
 
