@@ -91,6 +91,7 @@ no_tui = false
 tui_width = 35
 nerd_font = true
 font_awesome = true
+debug = false
 ```
 
 All fields are optional. Omitted fields use their defaults (`false`).
@@ -104,6 +105,7 @@ All fields are optional. Omitted fields use their defaults (`false`).
 | `--tui-width <N>` | TUI panel width in columns (default: 35) |
 | `--nerd-font[=true\|false]` | Enable Nerd Font icons |
 | `--font-awesome[=true\|false]` | Enable Font Awesome icons |
+| `--debug[=true\|false]` | Enable debug logging to a file |
 
 ### Environment Variables
 
@@ -111,6 +113,21 @@ All fields are optional. Omitted fields use their defaults (`false`).
 |----------|-------------|
 | `NERD_FONT` | Enable Nerd Font icons (`1`, `true`, `yes`, `on`) |
 | `FONT_AWESOME` | Enable Font Awesome icons (`1`, `true`, `yes`, `on`) |
+| `AOT_DEBUG` | Enable debug logging (`1`, `true`, `yes`, `on`) |
+
+### Logging
+
+Debug logging is disabled by default. Enable it with `--debug` or `AOT_DEBUG=1`.
+
+Logs are written to `<cache_dir>/aot/aot.log`:
+
+| OS      | Path                           |
+|---------|--------------------------------|
+| macOS   | `~/Library/Caches/aot/aot.log` |
+| Linux   | `~/.cache/aot/aot.log`         |
+| Windows | `%LOCALAPPDATA%\aot\aot.log`   |
+
+Falls back to `/tmp/aot/aot.log` if the cache directory cannot be determined.
 
 ## How does it work
 
