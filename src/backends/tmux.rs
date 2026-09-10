@@ -250,6 +250,18 @@ impl<E: CommandExecutor> TmuxDriver<E> {
     }
 }
 
+/// Formats a tmux target string from session, window, and pane components.
+/// Returns "session:window.pane", "session:window", "session:.pane", or "session:"
+/// depending on which components are provided.
+fn target(session: &str, window: Option<&str>, pane: Option<&str>) -> String {
+    match (window, pane) {
+        (Some(w), Some(p)) => format!("{}:{}.{}", session, w, p),
+        (Some(w), None) => format!("{}:{}", session, w),
+        (None, Some(p)) => format!("{}:.{}", session, p),
+        (None, None) => format!("{}:", session),
+    }
+}
+
 fn parse_window_line(line: &str) -> Option<Window> {
     let parts: Vec<&str> = line.split('\t').collect();
     if parts.len() != 6 {
@@ -350,7 +362,7 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
         let output = self.executor.execute(&[
             "list-windows",
             "-t",
-            &self.session,
+            &target(&self.session, None, None),
             "-F",
             "#{pane_current_command}\t#{pane_current_path}\t#{window_activity_flag}\t#{window_active}\t#{window_index}\t#{window_name}",
         ])?;
@@ -362,8 +374,13 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
 
     /// Creates a new window with the given name.
     fn create_window(&self, name: &str) -> Result<Window, TmuxError> {
-        self.executor
-            .execute(&["new-window", "-t", &self.session, "-n", name])?;
+        self.executor.execute(&[
+            "new-window",
+            "-t",
+            &target(&self.session, None, None),
+            "-n",
+            name,
+        ])?;
 
         let windows = self.list_windows()?;
         windows
@@ -374,21 +391,24 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
 
     /// Kills the window with the given id.
     fn kill_window(&self, id: u32) -> Result<(), TmuxError> {
-        let target = format!("{}:{}", self.session, id);
+        let id_str = id.to_string();
+        let target = target(&self.session, Some(&id_str), None);
         self.executor.execute(&["kill-window", "-t", &target])?;
         Ok(())
     }
 
     /// Selects (focuses) the window with the given id.
     fn select_window(&self, id: u32) -> Result<(), TmuxError> {
-        let target = format!("{}:{}", self.session, id);
+        let id_str = id.to_string();
+        let target = target(&self.session, Some(&id_str), None);
         self.executor.execute(&["select-window", "-t", &target])?;
         Ok(())
     }
 
     /// Switches to the last-active pane in the session.
     fn last_pane(&self) -> Result<(), TmuxError> {
-        self.executor.execute(&["last-pane", "-t", &self.session])?;
+        self.executor
+            .execute(&["last-pane", "-t", &target(&self.session, None, None)])?;
         Ok(())
     }
 
@@ -407,7 +427,7 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
                 "-F",
                 "#{pane_id}",
                 "-t",
-                &self.session,
+                &target(&self.session, None, None),
                 command,
             ])
             .map(|s| s.trim().to_string())
@@ -821,7 +841,7 @@ mod tests {
         assert!(split_cmd.contains(&"-l".to_string()));
         assert!(split_cmd.contains(&"35".to_string()));
         assert!(split_cmd.contains(&"-t".to_string()));
-        assert!(split_cmd.contains(&SESSION_NAME.to_string()));
+        assert!(split_cmd.contains(&format!("{}:", SESSION_NAME)));
         assert!(split_cmd.contains(&"aot --tui".to_string()));
     }
 
