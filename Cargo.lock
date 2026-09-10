@@ -12,6 +12,7 @@ dependencies = [
  "dirs",
  "ratatui",
  "serde",
+ "signal-hook",
  "thiserror 2.0.20",
  "toml",
  "unicode-width",

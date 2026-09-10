@@ -88,16 +88,25 @@ fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let config = config.merge(&cli);
 
-    // Initialize before ratatui takes over the screen; the logger only ever
-    // writes to this file, never to stdout/stderr.
+    // Logger setup must precede any tmux session/thread creation, so a fatal
+    // --debug failure leaves no server, session, or thread behind.
     if config.debug.unwrap_or(false) {
         let path = dirs::cache_dir()
             .unwrap_or_else(std::env::temp_dir)
             .join("aot");
-        let _ = std::fs::create_dir_all(&path);
-        let _ = backends::logger::init(&path.join("aot.log"));
+        std::fs::create_dir_all(&path)?;
+        backends::logger::init(&path.join("aot.log"))?;
         backends::logger::info("main: starting aot");
     }
+
+    // Install panic hook before ratatui::init() so panics are logged to the
+    // file and the terminal is restored. ratatui::init() installs its own
+    // restore hook and requires other hooks to be installed first.
+    let previous_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        logger::error(&format!("panic: {info}"));
+        previous_hook(info);
+    }));
 
     frontends::tui::icons::set_icon_fonts(
         config.nerd_font.unwrap_or(false),
@@ -113,13 +122,24 @@ fn main() -> anyhow::Result<()> {
     nested_driver.create_session_if_not_exists()?;
 
     let pane_id = std::env::var("TMUX_PANE").ok();
+    if pane_id.is_none() {
+        logger::debug("main: TMUX_PANE not set; focus tracking disabled");
+    }
 
     match config.launch_mode() {
         LaunchMode::NoTui => {
+            // Blocking attach: signals must exit the process immediately.
+            if let Err(error) = backends::signals::install(backends::signals::OnSignal::Exit) {
+                logger::error(&format!("main: signal install failed: {error}"));
+            }
             nested_driver.attach_session()?;
         }
         LaunchMode::TuiOnly { width } => {
             backends::logger::info("main: starting tui");
+            // TUI mode: signals set a flag; the run loop polls it.
+            if let Err(error) = backends::signals::install(backends::signals::OnSignal::Shutdown) {
+                logger::error(&format!("main: signal install failed: {error}"));
+            }
             let terminal = ratatui::init();
             let mut app = frontends::tui::app::App::new(
                 Box::new(nested_driver),
@@ -127,10 +147,17 @@ fn main() -> anyhow::Result<()> {
                 pane_id,
                 width,
             )?;
-            app.run(terminal)?;
-            ratatui::restore();
+            let result = app.run(terminal);
+            if let Err(error) = ratatui::try_restore() {
+                logger::error(&format!("main: failed to restore terminal: {error}"));
+            }
+            result?;
         }
         LaunchMode::Split { width } => {
+            // Blocking attach: signals must exit the process immediately.
+            if let Err(error) = backends::signals::install(backends::signals::OnSignal::Exit) {
+                logger::error(&format!("main: signal install failed: {error}"));
+            }
             let exe = std::env::current_exe()?;
             let command = format!(
                 "{}{} --tui=true --tui-width={}",
@@ -141,6 +168,11 @@ fn main() -> anyhow::Result<()> {
             parent_driver.split_window(&command, width)?;
             nested_driver.attach_session()?;
         }
+    }
+
+    // If a signal was received (TUI mode), exit with 128 + signo.
+    if let Some((signo, _name)) = backends::signals::received() {
+        std::process::exit(128 + signo);
     }
 
     Ok(())

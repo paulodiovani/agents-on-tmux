@@ -17,3 +17,4 @@ serde = { version = "1", features = ["derive"] }
 toml = "1.1"
 dirs = "6"
 unicode-width = "0.2"
+signal-hook = "0.3"
