@@ -74,19 +74,25 @@ pub fn parse_event(line: &str) -> Option<TmuxEvent> {
     let mut parts = line.split(' ');
     let command = parts.next()?;
 
-    super::logger::debug(&format!("control_mode: {command}"));
-
     match command {
-        "%exit" => Some(TmuxEvent::Exit),
+        "%exit" => {
+            super::logger::debug(&format!("control_mode: {command}"));
+            Some(TmuxEvent::Exit)
+        }
         // Activity changes: keep the active window live.
-        "%session-changed" | "%session-window-changed" => Some(TmuxEvent::Refresh),
+        "%session-changed" | "%session-window-changed" => {
+            super::logger::debug(&format!("control_mode: {command}"));
+            Some(TmuxEvent::Refresh)
+        }
         // Structural changes: validate the id so malformed lines are ignored.
         "%window-add" | "%window-close" | "%window-renamed" => {
+            super::logger::debug(&format!("control_mode: {command}"));
             let id = parts.next()?.strip_prefix('@')?;
             id.parse::<u32>().ok().map(|_| TmuxEvent::Refresh)
         }
         // Pane focus changes: extract the pane-id so the TUI can compare it.
         "%window-pane-changed" => {
+            super::logger::debug(&format!("control_mode: {command}"));
             let id = parts.nth(1); // skip window id and pick pane id
             let id = id.filter(|id| id.starts_with("%"));
             id.map(|id| TmuxEvent::PaneChanged(id.to_string()))
