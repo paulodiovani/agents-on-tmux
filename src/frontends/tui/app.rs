@@ -31,8 +31,29 @@ const HINTED_COMMANDS: [(&str, &str); 5] = [
 fn effective_prefix(driver: &dyn Tmux) -> Option<String> {
     match driver.show_options("prefix", false) {
         Ok(value) if !value.is_empty() => Some(value),
+        Err(error) => {
+            logger::debug(&format!(
+                "app: show-options prefix (session) failed: {error}"
+            ));
+            match driver.show_options("prefix", true) {
+                Ok(value) if !value.is_empty() => Some(value),
+                Err(error) => {
+                    logger::debug(&format!(
+                        "app: show-options prefix (global) failed: {error}"
+                    ));
+                    None
+                }
+                _ => None,
+            }
+        }
         _ => match driver.show_options("prefix", true) {
             Ok(value) if !value.is_empty() => Some(value),
+            Err(error) => {
+                logger::debug(&format!(
+                    "app: show-options prefix (global) failed: {error}"
+                ));
+                None
+            }
             _ => None,
         },
     }
@@ -50,13 +71,21 @@ fn resolve_tmux_hints(nested: &dyn Tmux, parent: &dyn Tmux) -> Vec<(String, Stri
     let Some(parent_prefix) = effective_prefix(parent) else {
         return Vec::new();
     };
-    let Ok(keys) = nested.list_keys("prefix") else {
-        return Vec::new();
+    let keys = match nested.list_keys("prefix") {
+        Ok(keys) => keys,
+        Err(error) => {
+            logger::debug(&format!("app: list-keys nested failed: {error}"));
+            return Vec::new();
+        }
     };
 
     let prefix_entry = if nested_prefix == parent_prefix {
-        let Ok(parent_keys) = parent.list_keys("prefix") else {
-            return Vec::new();
+        let parent_keys = match parent.list_keys("prefix") {
+            Ok(keys) => keys,
+            Err(error) => {
+                logger::debug(&format!("app: list-keys parent failed: {error}"));
+                return Vec::new();
+            }
         };
         let send_prefix = parent_keys
             .iter()
@@ -151,7 +180,9 @@ impl App {
             logger::debug(&format!(
                 "app: enforce panel width {target} (was {current_width})"
             ));
-            let _ = self.parent_driver.resize_pane(pane_id, target);
+            if let Err(error) = self.parent_driver.resize_pane(pane_id, target) {
+                logger::error(&format!("app: resize pane failed: {error}"));
+            }
         }
     }
 
@@ -230,6 +261,12 @@ impl App {
             if self.process_tmux_events() {
                 last_draw = Instant::now() - redraw_tick;
             }
+
+            // Check for signals (SIGTERM, SIGINT, etc.). If received, shut down cleanly.
+            if let Some((signo, name)) = crate::backends::signals::received() {
+                logger::error(&format!("app: received {name} ({signo}), shutting down"));
+                self.running = false;
+            }
         }
 
         Ok(())
@@ -261,8 +298,8 @@ impl App {
             needs_refresh = true;
         }
 
-        if needs_refresh {
-            let _ = self.refresh_windows();
+        if needs_refresh && let Err(error) = self.refresh_windows() {
+            logger::error(&format!("app: refresh windows failed: {error}"));
         }
         if should_exit {
             self.running = false;
@@ -341,8 +378,12 @@ impl App {
     pub fn focus_window(&self) {
         if let Some(window) = self.current_tab_window() {
             logger::debug(&format!("app: focus window @{}", window.id));
-            let _ = self.nested_driver.select_window(window.id);
-            let _ = self.parent_driver.last_pane();
+            if let Err(error) = self.nested_driver.select_window(window.id) {
+                logger::error(&format!("app: select window failed: {error}"));
+            }
+            if let Err(error) = self.parent_driver.last_pane() {
+                logger::error(&format!("app: last pane failed: {error}"));
+            }
         }
     }
 
@@ -351,17 +392,24 @@ impl App {
         self.active_tab = Tab::Windows;
         let name = format!("agent-{}", self.windows.len() + 1);
         logger::debug(&format!("app: create window {name}"));
-        if let Ok(new_window) = self.nested_driver.create_window(&name) {
-            let _ = self.refresh_windows();
-            let indices = self.current_tab_indices();
-            if let Some(pos) = indices
-                .iter()
-                .position(|&i| self.windows[i].id == new_window.id)
-            {
-                self.windows_selected = pos;
-                self.list_state.select(Some(self.windows_selected));
+        match self.nested_driver.create_window(&name) {
+            Ok(new_window) => {
+                if let Err(error) = self.refresh_windows() {
+                    logger::error(&format!("app: refresh windows failed: {error}"));
+                }
+                let indices = self.current_tab_indices();
+                if let Some(pos) = indices
+                    .iter()
+                    .position(|&i| self.windows[i].id == new_window.id)
+                {
+                    self.windows_selected = pos;
+                    self.list_state.select(Some(self.windows_selected));
+                }
+                self.focus_window();
             }
-            self.focus_window();
+            Err(error) => {
+                logger::error(&format!("app: create window failed: {error}"));
+            }
         }
     }
 
@@ -369,8 +417,12 @@ impl App {
     pub fn kill_window(&mut self) {
         if let Some(window) = self.current_tab_window() {
             logger::debug(&format!("app: kill window @{}", window.id));
-            let _ = self.nested_driver.kill_window(window.id);
-            let _ = self.refresh_windows();
+            if let Err(error) = self.nested_driver.kill_window(window.id) {
+                logger::error(&format!("app: kill window failed: {error}"));
+            }
+            if let Err(error) = self.refresh_windows() {
+                logger::error(&format!("app: refresh windows failed: {error}"));
+            }
         }
     }
 
@@ -383,7 +435,9 @@ impl App {
             logger::debug(&format!("app: rename window @{}", window.id));
             let target = format!("{}:{}", self.nested_driver.session_name(), window.id);
             let template = format!("rename-window -t \"{target}\" \"%%\"");
-            let _ = self.nested_driver.command_prompt(&window.name, &template);
+            if let Err(error) = self.nested_driver.command_prompt(&window.name, &template) {
+                logger::error(&format!("app: command prompt failed: {error}"));
+            }
         }
     }
 
@@ -637,6 +691,7 @@ mod tests {
         next_id: Rc<std::cell::RefCell<u32>>,
         prefix: Option<String>,
         windows: Rc<std::cell::RefCell<Vec<Window>>>,
+        resize_should_fail: bool,
     }
 
     impl MockTmux {
@@ -684,6 +739,7 @@ mod tests {
                         started_at: Some(Instant::now() - Duration::from_secs(10)),
                     },
                 ])),
+                resize_should_fail: false,
             }
         }
 
@@ -758,7 +814,15 @@ mod tests {
             self.calls
                 .borrow_mut()
                 .push(format!("resize_pane {pane_id} {width}"));
-            Ok(())
+            if self.resize_should_fail {
+                Err(TmuxError::CommandFailed {
+                    message: "resize failed".to_string(),
+                    stderr: "mock error".to_string(),
+                    code: Some(1),
+                })
+            } else {
+                Ok(())
+            }
         }
 
         fn list_keys(&self, _table: &str) -> Result<Vec<KeyBinding>, TmuxError> {
@@ -1612,5 +1676,26 @@ mod tests {
         app.enforce_panel_width(50);
 
         assert!(parent_calls.borrow().is_empty());
+    }
+
+    #[test]
+    fn test_enforce_panel_width_logs_error_on_failure() {
+        let path = crate::backends::logger::tests::temp_log_path();
+        let _guard = crate::backends::logger::tests::init_for_test(&path);
+
+        let mut parent = MockTmux::new();
+        parent.resize_should_fail = true;
+        let app = App::new(
+            Box::new(MockTmux::new()),
+            Box::new(parent),
+            Some("%5".to_string()),
+            Some(35),
+        )
+        .unwrap();
+
+        app.enforce_panel_width(50);
+
+        let log_content = std::fs::read_to_string(&path).unwrap();
+        assert!(log_content.contains("ERROR app: resize pane failed"));
     }
 }

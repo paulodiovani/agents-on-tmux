@@ -1,6 +1,7 @@
 use std::io::{BufRead, BufReader, Read};
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
 use std::sync::mpsc;
+use std::thread::JoinHandle;
 use std::time::Duration;
 
 use crate::backends::logger;
@@ -43,6 +44,7 @@ struct ControlModeReader {
     child: Child,
     stdin: Option<ChildStdin>,
     stdout: BufReader<ChildStdout>,
+    stderr_thread: Option<JoinHandle<()>>,
 }
 
 impl Read for ControlModeReader {
@@ -65,7 +67,19 @@ impl Drop for ControlModeReader {
     fn drop(&mut self) {
         // Closing stdin makes tmux detach the control client and exit.
         drop(self.stdin.take());
-        let _ = self.child.wait();
+        match self.child.wait() {
+            Ok(status) => {
+                if !status.success() {
+                    logger::debug(&format!("control_mode: tmux exited with {status}"));
+                }
+            }
+            Err(error) => {
+                logger::error(&format!("control_mode: failed to wait for tmux: {error}"));
+            }
+        }
+        if let Some(handle) = self.stderr_thread.take() {
+            let _ = handle.join();
+        }
     }
 }
 
@@ -87,15 +101,28 @@ pub fn parse_event(line: &str) -> Option<TmuxEvent> {
         // Structural changes: validate the id so malformed lines are ignored.
         "%window-add" | "%window-close" | "%window-renamed" => {
             super::logger::debug(&format!("control_mode: {command}"));
-            let id = parts.next()?.strip_prefix('@')?;
-            id.parse::<u32>().ok().map(|_| TmuxEvent::Refresh)
+            let raw = parts.next()?;
+            let id = raw.strip_prefix('@')?;
+            match id.parse::<u32>() {
+                Ok(_) => Some(TmuxEvent::Refresh),
+                Err(_) => {
+                    logger::debug(&format!("control_mode: malformed window id '{id}'"));
+                    None
+                }
+            }
         }
         // Pane focus changes: extract the pane-id so the TUI can compare it.
         "%window-pane-changed" => {
             super::logger::debug(&format!("control_mode: {command}"));
             let id = parts.nth(1); // skip window id and pick pane id
             let id = id.filter(|id| id.starts_with("%"));
-            id.map(|id| TmuxEvent::PaneChanged(id.to_string()))
+            match id {
+                Some(id) => Some(TmuxEvent::PaneChanged(id.to_string())),
+                None => {
+                    logger::debug(&format!("control_mode: {} missing pane id", command));
+                    None
+                }
+            }
         }
         _ => None,
     }
@@ -112,8 +139,12 @@ fn pump_events(
     event_tx: &mpsc::Sender<TmuxEvent>,
 ) -> PumpOutcome {
     for line in reader.lines() {
-        let Ok(line) = line else {
-            return PumpOutcome::Reconnect;
+        let line = match line {
+            Ok(line) => line,
+            Err(error) => {
+                logger::error(&format!("control_mode: read error: {error}"));
+                return PumpOutcome::Reconnect;
+            }
         };
 
         match (producer, parse_event(&line)) {
@@ -122,7 +153,9 @@ fn pump_events(
 
             // Exit event: always forward and stop
             (_, Some(TmuxEvent::Exit)) => {
-                let _ = event_tx.send(TmuxEvent::Exit);
+                if let Err(error) = event_tx.send(TmuxEvent::Exit) {
+                    logger::error(&format!("control_mode: failed to send exit: {error}"));
+                }
                 return PumpOutcome::Exit;
             }
 
@@ -165,17 +198,24 @@ fn run_with_reconnect<C, R>(
             Ok(reader) => {
                 let outcome = pump_events(reader, producer, event_tx);
                 if matches!(outcome, PumpOutcome::Exit) {
-                    let _ = event_tx.send(TmuxEvent::Exit);
+                    if let Err(error) = event_tx.send(TmuxEvent::Exit) {
+                        logger::error(&format!("control_mode: failed to send exit: {error}"));
+                    }
                     return;
                 }
                 retries = 0; // connection worked; a later drop restarts backoff.
             }
             Err(e) => {
+                let error_msg = e.to_string();
                 super::logger::debug(&format!("control_mode: connect failed: {e}"));
                 retries += 1;
                 if retries as usize >= MAX_RETRIES {
-                    super::logger::error("control_mode: max reconnection attempts reached");
-                    let _ = event_tx.send(TmuxEvent::Exit);
+                    super::logger::error(&format!(
+                        "control_mode: max reconnection attempts reached: {error_msg}"
+                    ));
+                    if let Err(error) = event_tx.send(TmuxEvent::Exit) {
+                        logger::error(&format!("control_mode: failed to send exit: {error}"));
+                    }
                     return;
                 }
                 std::thread::sleep(backoff(retries));
@@ -211,7 +251,7 @@ fn spawn_control_mode(session: &str, socket: Option<&str>) -> std::io::Result<Co
         .args(["-C", "attach-session", "-t", session])
         .stdin(Stdio::piped()) // must stay open; closing it detaches the client
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::piped())
         .spawn()?;
 
     let stdin = child.stdin.take();
@@ -220,10 +260,25 @@ fn spawn_control_mode(session: &str, socket: Option<&str>) -> std::io::Result<Co
         .take()
         .ok_or_else(|| std::io::Error::other("failed to capture tmux stdout"))?;
 
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| std::io::Error::other("failed to capture tmux stderr"))?;
+
+    let stderr_thread = std::thread::spawn(move || {
+        let reader = BufReader::new(stderr);
+        for line in reader.lines().map_while(Result::ok) {
+            if !line.is_empty() {
+                logger::error(&format!("control_mode: tmux: {line}"));
+            }
+        }
+    });
+
     Ok(ControlModeReader {
         child,
         stdin,
         stdout: BufReader::new(stdout),
+        stderr_thread: Some(stderr_thread),
     })
 }
 

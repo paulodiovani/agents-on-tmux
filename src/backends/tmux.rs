@@ -53,7 +53,10 @@ pub const SOCKET_NAME: &str = "agents-on-tmux";
 /// Errors that can occur during tmux operations.
 #[derive(Debug, Error)]
 pub enum TmuxError {
-    #[error("Command failed: {message}")]
+    #[error("Command failed: {message}{}{}",
+        if stderr.is_empty() { String::new() } else { format!(": {stderr}") },
+        code.map(|c| format!(" (exit {c})")).unwrap_or_default()
+    )]
     CommandFailed {
         message: String,
         stderr: String,
@@ -87,7 +90,7 @@ pub struct KeyBinding {
 }
 
 pub fn check_inside_tmux() -> Result<(), TmuxError> {
-    if let Err(_err) = std::env::var("TMUX") {
+    if std::env::var("TMUX").is_err() {
         Err(TmuxError::NotInsideTmux)
     } else {
         Ok(())
@@ -110,7 +113,11 @@ pub fn detect_parent_session() -> Result<String, TmuxError> {
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     } else {
-        Err(TmuxError::NotInsideTmux)
+        Err(TmuxError::CommandFailed {
+            message: "tmux display-message -p #S failed".to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+            code: output.status.code(),
+        })
     }
 }
 
@@ -263,8 +270,16 @@ fn target(session: &str, window: Option<&str>, pane: Option<&str>) -> String {
 }
 
 fn parse_window_line(line: &str) -> Option<Window> {
+    if line.is_empty() {
+        return None;
+    }
     let parts: Vec<&str> = line.split('\t').collect();
     if parts.len() != 6 {
+        logger::debug(&format!(
+            "tmux: malformed window line (expected 6 fields, got {}): {}",
+            parts.len(),
+            truncate(line, 80)
+        ));
         return None;
     }
 
@@ -272,7 +287,17 @@ fn parse_window_line(line: &str) -> Option<Window> {
     let current_dir = parts[1].to_string();
     let notification_pending = parts[2] == "1";
     let is_active = parts[3] == "1";
-    let id = parts[4].parse::<u32>().ok()?;
+    let id = match parts[4].parse::<u32>() {
+        Ok(id) => id,
+        Err(_) => {
+            logger::debug(&format!(
+                "tmux: malformed window id '{}': {}",
+                parts[4],
+                truncate(line, 80)
+            ));
+            return None;
+        }
+    };
     let name = parts[5].to_string();
 
     Some(Window {
@@ -290,22 +315,43 @@ fn parse_window_line(line: &str) -> Option<Window> {
 /// <key> <command…>`. Fields split on any whitespace because list-keys pads
 /// its columns; single quotes around escaped keys (e.g. '"') are stripped.
 fn parse_key_line(line: &str) -> Option<KeyBinding> {
+    if line.is_empty() {
+        return None;
+    }
     let fields: Vec<&str> = line.split_whitespace().collect();
     let (key, command) = match fields.as_slice() {
         ["bind-key", "-T", _, key, cmd @ ..] | ["bind-key", "-r", "-T", _, key, cmd @ ..] => {
             (*key, cmd.join(" "))
         }
-        _ => return None,
+        _ => {
+            logger::debug(&format!(
+                "tmux: malformed key binding line: {}",
+                truncate(line, 80)
+            ));
+            return None;
+        }
     };
     let key = key.trim_matches('\'');
 
     if key.is_empty() || command.is_empty() {
+        logger::debug(&format!(
+            "tmux: empty key or command in binding: {}",
+            truncate(line, 80)
+        ));
         return None;
     }
     Some(KeyBinding {
         command,
         key: key.to_string(),
     })
+}
+
+fn truncate(s: &str, max_len: usize) -> String {
+    if s.len() <= max_len {
+        s.to_string()
+    } else {
+        format!("{}...", &s[..max_len])
+    }
 }
 
 impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
@@ -323,19 +369,30 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
     /// Also checks if we're already running on the same socket to prevent nested execution.
     fn create_session_if_not_exists(&self) -> Result<(), TmuxError> {
         // Check if we're already running on the same socket
-        if let Some(ref driver_socket) = self.socket
-            && let Ok(parent_socket) = detect_parent_socket()
-        {
-            logger::debug(&format!(
-                "tmux: parent socket: {}, driver socket: {}",
-                parent_socket, driver_socket
-            ));
-            if parent_socket == *driver_socket {
-                return Err(TmuxError::InsideOwnServer(parent_socket));
+        if let Some(ref driver_socket) = self.socket {
+            match detect_parent_socket() {
+                Ok(parent_socket) => {
+                    logger::debug(&format!(
+                        "tmux: parent socket: {}, driver socket: {}",
+                        parent_socket, driver_socket
+                    ));
+                    if parent_socket == *driver_socket {
+                        return Err(TmuxError::InsideOwnServer(parent_socket));
+                    }
+                }
+                Err(error) => {
+                    logger::debug(&format!(
+                        "tmux: could not detect parent socket (skipping own-server check): {error}"
+                    ));
+                }
             }
         }
 
         let has_session = self.executor.execute(&["has-session", "-t", &self.session]);
+
+        if let Err(error) = &has_session {
+            logger::debug(&format!("tmux: has-session failed (will create): {error}"));
+        }
 
         if has_session.is_err() {
             logger::debug(&format!(
@@ -903,6 +960,30 @@ mod tests {
             message,
             "Cannot run aot inside its own tmux server (socket 'agents-on-tmux')"
         );
+    }
+
+    #[test]
+    fn test_command_failed_error_includes_stderr_and_code() {
+        let error = TmuxError::CommandFailed {
+            message: "tmux list-windows failed".to_string(),
+            stderr: "no server running on /tmp/tmux-1000/default".to_string(),
+            code: Some(1),
+        };
+        let message = error.to_string();
+        assert!(message.contains("tmux list-windows failed"));
+        assert!(message.contains("no server running on /tmp/tmux-1000/default"));
+        assert!(message.contains("(exit 1)"));
+    }
+
+    #[test]
+    fn test_command_failed_error_without_stderr_or_code() {
+        let error = TmuxError::CommandFailed {
+            message: "tmux command failed".to_string(),
+            stderr: String::new(),
+            code: None,
+        };
+        let message = error.to_string();
+        assert_eq!(message, "Command failed: tmux command failed");
     }
 
     #[test]
