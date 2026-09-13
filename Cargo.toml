@@ -15,6 +15,6 @@ clap = { version = "4", features = ["derive", "env"] }
 anyhow = "1.0"
 serde = { version = "1", features = ["derive"] }
 toml = "1.1"
-dirs = "6"
+dirs = "7"
 unicode-width = "0.2"
 signal-hook = "0.3"
