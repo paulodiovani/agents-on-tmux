@@ -1698,4 +1698,21 @@ mod tests {
         let log_content = std::fs::read_to_string(&path).unwrap();
         assert!(log_content.contains("ERROR app: resize pane failed"));
     }
+
+    #[test]
+    fn test_cursor_follows_active_window_after_navigation_then_lose_focus() {
+        let (mut app, windows, _) = test_app();
+
+        app.navigate_down();
+        assert_eq!(app.current_selected(), 1);
+        assert_eq!(app.last_focused_id, Some(4));
+
+        app.set_pane_active(false);
+
+        windows.borrow_mut()[0].is_active = true;
+        app.refresh_windows().unwrap();
+
+        assert_eq!(app.active_tab(), Tab::Windows);
+        assert_eq!(app.current_selected(), 0);
+    }
 }
