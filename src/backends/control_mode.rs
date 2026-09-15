@@ -134,18 +134,22 @@ pub fn parse_event(line: &str) -> Option<TmuxEvent> {
 /// - `Parent`: only forwards `PaneChanged` events (and `Exit` to signal disconnection)
 /// - `Nested`: forwards all events except `PaneChanged`
 fn pump_events(
-    reader: impl BufRead,
+    mut reader: impl BufRead,
     producer: EventProducer,
     event_tx: &mpsc::Sender<TmuxEvent>,
 ) -> PumpOutcome {
-    for line in reader.lines() {
-        let line = match line {
-            Ok(line) => line,
+    let mut buf = Vec::new();
+    loop {
+        buf.clear();
+        match reader.read_until(b'\n', &mut buf) {
+            Ok(0) => break,
+            Ok(_) => {}
             Err(error) => {
                 logger::error(&format!("control_mode: read error: {error}"));
                 return PumpOutcome::Reconnect;
             }
-        };
+        }
+        let line = String::from_utf8_lossy(&buf).trim_end().to_string();
 
         match (producer, parse_event(&line)) {
             // No event parsed, continue to next line
@@ -203,7 +207,7 @@ fn run_with_reconnect<C, R>(
                     }
                     return;
                 }
-                retries = 0; // connection worked; a later drop restarts backoff.
+                retries = 0;
             }
             Err(e) => {
                 let error_msg = e.to_string();
@@ -479,5 +483,20 @@ mod tests {
         assert_eq!(attempts, 10);
         assert_eq!(rx.recv().unwrap(), TmuxEvent::Refresh);
         assert_eq!(rx.recv().unwrap(), TmuxEvent::Exit);
+    }
+
+    #[test]
+    fn test_pump_handles_invalid_utf8() {
+        let (tx, rx) = mpsc::channel();
+        let data = b"%window-add @1\n\xff\xfe invalid utf-8\n%session-changed\n";
+        pump_events(
+            std::io::Cursor::new(data.to_vec()),
+            EventProducer::Nested,
+            &tx,
+        );
+        let events: Vec<_> = rx.try_iter().collect();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0], TmuxEvent::Refresh);
+        assert_eq!(events[1], TmuxEvent::Refresh);
     }
 }
