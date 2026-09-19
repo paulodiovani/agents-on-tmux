@@ -531,21 +531,23 @@ mod tests {
         fn new() -> Self {
             Self::with_windows(vec![
                 Window {
-                    current_dir: "/home/user".to_string(),
                     id: 1,
-                    is_active: false,
                     name: "w1".to_string(),
-                    notification_pending: false,
+                    pane_pid: 10001,
                     running_command: "bash".to_string(),
+                    current_dir: "/home/user".to_string(),
+                    is_active: false,
+                    notification_pending: false,
                     started_at: Some(Instant::now() - Duration::from_secs(125)),
                 },
                 Window {
-                    current_dir: "/home/user".to_string(),
                     id: 2,
-                    is_active: false,
                     name: "w2".to_string(),
-                    notification_pending: false,
+                    pane_pid: 10002,
                     running_command: "claude".to_string(),
+                    current_dir: "/home/user".to_string(),
+                    is_active: false,
+                    notification_pending: false,
                     started_at: Some(Instant::now() - Duration::from_secs(45)),
                 },
             ])
@@ -599,12 +601,13 @@ mod tests {
         fn create_window(&self, name: &str) -> Result<Window, TmuxError> {
             let mut next_id = self.next_id.borrow_mut();
             let window = Window {
-                current_dir: "/home/user".to_string(),
                 id: *next_id,
-                is_active: false,
                 name: name.to_string(),
-                notification_pending: false,
+                pane_pid: 12345,
                 running_command: String::new(),
+                current_dir: "/home/user".to_string(),
+                is_active: false,
+                notification_pending: false,
                 started_at: None,
             };
             *next_id += 1;
@@ -660,12 +663,13 @@ mod tests {
 
     fn window(id: u32, name: &str, command: &str, dir: &str, seconds: u64) -> Window {
         Window {
-            current_dir: dir.to_string(),
             id,
-            is_active: false,
             name: name.to_string(),
-            notification_pending: false,
+            pane_pid: 12345,
             running_command: command.to_string(),
+            current_dir: dir.to_string(),
+            is_active: false,
+            notification_pending: false,
             started_at: Some(Instant::now() - Duration::from_secs(seconds)),
         }
     }
