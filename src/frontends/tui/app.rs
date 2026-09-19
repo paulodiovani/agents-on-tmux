@@ -433,10 +433,14 @@ impl App {
     pub fn rename_window(&self) {
         if let Some(window) = self.current_tab_window() {
             logger::debug(&format!("app: rename window @{}", window.id));
-            let target = format!("{}:{}", self.nested_driver.session_name(), window.id);
-            let template = format!("rename-window -t \"{target}\" \"%%\"");
-            if let Err(error) = self.nested_driver.command_prompt(&window.name, &template) {
-                logger::error(&format!("app: command prompt failed: {error}"));
+            if let Err(error) = self.parent_driver.last_pane() {
+                logger::error(&format!("app: last pane failed: {error}"));
+            }
+            if let Err(error) = self.nested_driver.rename_window(window.id, &window.name) {
+                logger::error(&format!("app: rename window failed: {error}"));
+            }
+            if let Err(error) = self.parent_driver.last_pane() {
+                logger::error(&format!("app: last pane failed: {error}"));
             }
         }
     }
@@ -839,10 +843,10 @@ mod tests {
             }
         }
 
-        fn command_prompt(&self, initial: &str, template: &str) -> Result<(), TmuxError> {
+        fn rename_window(&self, id: u32, name: &str) -> Result<(), TmuxError> {
             self.calls
                 .borrow_mut()
-                .push(format!("command_prompt {initial} {template}"));
+                .push(format!("rename_window {id} {name}"));
             Ok(())
         }
     }
@@ -981,16 +985,22 @@ mod tests {
     #[test]
     fn test_rename_window_prompts_for_selected_window() {
         let nested = MockTmux::new();
-        let calls = nested.calls_rc();
-        let app = App::new(Box::new(nested), Box::new(MockTmux::new()), None, None).unwrap();
+        let nested_calls = nested.calls_rc();
+        let parent = MockTmux::new();
+        let parent_calls = parent.calls_rc();
+        let app = App::new(Box::new(nested), Box::new(parent), None, None).unwrap();
 
         // Agents tab, first selection: agent-2, the claude window (id 2).
         app.rename_window();
 
         assert_eq!(
-            calls.borrow().last().unwrap(),
-            "command_prompt agent-2 rename-window -t \"agents-on-tmux:2\" \"%%\""
+            nested_calls.borrow().last().unwrap(),
+            "rename_window 2 agent-2"
         );
+        let parent_recorded = parent_calls.borrow();
+        assert_eq!(parent_recorded.len(), 2);
+        assert_eq!(parent_recorded[0], "last_pane");
+        assert_eq!(parent_recorded[1], "last_pane");
     }
 
     #[test]
@@ -1005,7 +1015,7 @@ mod tests {
             calls
                 .borrow()
                 .iter()
-                .any(|call| call.starts_with("command_prompt"))
+                .any(|call| call.starts_with("rename_window"))
         );
     }
 

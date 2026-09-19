@@ -639,7 +639,7 @@ mod tests {
                 _ => Err(command_failed("show-options")),
             }
         }
-        fn command_prompt(&self, _initial: &str, _template: &str) -> Result<(), TmuxError> {
+        fn rename_window(&self, _id: u32, _name: &str) -> Result<(), TmuxError> {
             Ok(())
         }
     }
