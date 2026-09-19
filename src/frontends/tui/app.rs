@@ -510,7 +510,10 @@ impl App {
                     .or_else(|| get_pane_start_time(window.pane_pid))
                     .or(Some(Instant::now()));
 
-                Window { started_at, ..window }
+                Window {
+                    started_at,
+                    ..window
+                }
             })
             .collect();
 
