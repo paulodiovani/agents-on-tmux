@@ -72,12 +72,13 @@ pub enum TmuxError {
 /// Represents a tmux window and its runtime state.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Window {
-    pub current_dir: String,
     pub id: u32,
-    pub is_active: bool,
     pub name: String,
-    pub notification_pending: bool,
+    pub pane_pid: u32,
     pub running_command: String,
+    pub current_dir: String,
+    pub is_active: bool,
+    pub notification_pending: bool,
     pub started_at: Option<Instant>,
 }
 
@@ -273,39 +274,51 @@ fn parse_window_line(line: &str) -> Option<Window> {
         return None;
     }
     let parts: Vec<&str> = line.split('\t').collect();
-    if parts.len() != 6 {
+    if parts.len() != 7 {
         logger::debug(&format!(
-            "tmux: malformed window line (expected 6 fields, got {}): {}",
+            "tmux: malformed window line (expected 7 fields, got {}): {}",
             parts.len(),
             truncate(line, 80)
         ));
         return None;
     }
 
-    let running_command = parts[0].to_string();
-    let current_dir = parts[1].to_string();
-    let notification_pending = parts[2] == "1";
-    let is_active = parts[3] == "1";
-    let id = match parts[4].parse::<u32>() {
+    let id = match parts[0].parse::<u32>() {
         Ok(id) => id,
         Err(_) => {
             logger::debug(&format!(
                 "tmux: malformed window id '{}': {}",
-                parts[4],
+                parts[0],
                 truncate(line, 80)
             ));
             return None;
         }
     };
-    let name = parts[5].to_string();
+    let name = parts[1].to_string();
+    let pane_pid = match parts[2].parse::<u32>() {
+        Ok(pid) => pid,
+        Err(_) => {
+            logger::debug(&format!(
+                "tmux: malformed pane pid '{}': {}",
+                parts[2],
+                truncate(line, 80)
+            ));
+            return None;
+        }
+    };
+    let running_command = parts[3].to_string();
+    let current_dir = parts[4].to_string();
+    let is_active = parts[5] == "1";
+    let notification_pending = parts[6] == "1";
 
     Some(Window {
-        current_dir,
         id,
-        is_active,
         name,
-        notification_pending,
+        pane_pid,
         running_command,
+        current_dir,
+        is_active,
+        notification_pending,
         started_at: None,
     })
 }
@@ -420,7 +433,7 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
             "-t",
             &target(&self.session, None, None),
             "-F",
-            "#{pane_current_command}\t#{pane_current_path}\t#{window_activity_flag}\t#{window_active}\t#{window_index}\t#{window_name}",
+            "#{window_index}\t#{window_name}\t#{pane_pid}\t#{pane_current_command}\t#{pane_current_path}\t#{window_active}\t#{window_activity_flag}",
         ])?;
 
         let windows: Vec<Window> = output.lines().filter_map(parse_window_line).collect();
@@ -593,13 +606,14 @@ mod tests {
                         .iter()
                         .map(|w| {
                             format!(
-                                "{}\t{}\t{}\t{}\t{}\t{}",
+                                "{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                                w.id,
+                                w.name,
+                                w.pane_pid,
                                 w.running_command,
                                 w.current_dir,
-                                if w.notification_pending { "1" } else { "0" },
                                 if w.is_active { "1" } else { "0" },
-                                w.id,
-                                w.name
+                                if w.notification_pending { "1" } else { "0" }
                             )
                         })
                         .collect();
@@ -618,12 +632,13 @@ mod tests {
                     let mut windows = self.windows.borrow_mut();
                     let id = windows.iter().map(|w| w.id).max().unwrap_or(0) + 1;
                     let window = Window {
-                        current_dir: "/home/user".to_string(),
                         id,
-                        is_active: false,
                         name,
-                        notification_pending: false,
+                        pane_pid: 12345,
                         running_command: "bash".to_string(),
+                        current_dir: "/home/user".to_string(),
+                        is_active: false,
+                        notification_pending: false,
                         started_at: None,
                     };
                     windows.push(window.clone());
@@ -743,7 +758,7 @@ mod tests {
 
     #[test]
     fn test_parse_window_line_valid() {
-        let line = "bash\t/home/user/project\t0\t0\t1\tagent-1";
+        let line = "1\tagent-1\t12345\tbash\t/home/user/project\t0\t0";
         let window = parse_window_line(line).unwrap();
         assert_eq!(window.id, 1);
         assert_eq!(window.name, "agent-1");
@@ -752,11 +767,12 @@ mod tests {
         assert!(window.started_at.is_none());
         assert!(!window.is_active);
         assert_eq!(window.current_dir, "/home/user/project");
+        assert_eq!(window.pane_pid, 12345);
     }
 
     #[test]
     fn test_parse_window_line_with_notification() {
-        let line = "zsh\t/home/user\t1\t0\t2\tagent-2";
+        let line = "2\tagent-2\t23456\tzsh\t/home/user\t0\t1";
         let window = parse_window_line(line).unwrap();
         assert_eq!(window.id, 2);
         assert_eq!(window.name, "agent-2");
@@ -764,15 +780,17 @@ mod tests {
         assert_eq!(window.running_command, "zsh");
         assert!(!window.is_active);
         assert_eq!(window.current_dir, "/home/user");
+        assert_eq!(window.pane_pid, 23456);
     }
 
     #[test]
     fn test_parse_window_line_active() {
-        let line = "bash\t/tmp\t0\t1\t3\tagent-3";
+        let line = "3\tagent-3\t34567\tbash\t/tmp\t1\t0";
         let window = parse_window_line(line).unwrap();
         assert_eq!(window.id, 3);
         assert!(window.is_active);
         assert_eq!(window.current_dir, "/tmp");
+        assert_eq!(window.pane_pid, 34567);
     }
 
     #[test]
@@ -782,7 +800,8 @@ mod tests {
         assert!(parse_window_line("1\tname\t0").is_none());
         assert!(parse_window_line("1\tname\t0\tbash").is_none());
         assert!(parse_window_line("1\tname\t0\tbash\t0").is_none());
-        assert!(parse_window_line("bash\t/path\t0\t0\tnotanumber\tname").is_none());
+        assert!(parse_window_line("1\tname\tnotanumber\tbash\t/path\t0\t0").is_none());
+        assert!(parse_window_line("notanumber\tname\t12345\tbash\t/path\t0\t0").is_none());
     }
 
     #[test]
@@ -797,12 +816,13 @@ mod tests {
     fn test_list_windows_with_windows() {
         let executor = MockCommandExecutor::with_session();
         executor.windows.borrow_mut().push(Window {
-            current_dir: "/home/user".to_string(),
             id: 1,
-            is_active: false,
             name: "test-window".to_string(),
-            notification_pending: false,
+            pane_pid: 12345,
             running_command: "bash".to_string(),
+            current_dir: "/home/user".to_string(),
+            is_active: false,
+            notification_pending: false,
             started_at: None,
         });
         let driver = TmuxDriver::with_executor(executor);
@@ -825,12 +845,13 @@ mod tests {
     fn test_kill_window() {
         let executor = MockCommandExecutor::with_session();
         executor.windows.borrow_mut().push(Window {
-            current_dir: "/home/user".to_string(),
             id: 1,
-            is_active: false,
             name: "to-kill".to_string(),
-            notification_pending: false,
+            pane_pid: 12345,
             running_command: "bash".to_string(),
+            current_dir: "/home/user".to_string(),
+            is_active: false,
+            notification_pending: false,
             started_at: None,
         });
         let driver = TmuxDriver::with_executor(executor);
@@ -856,12 +877,13 @@ mod tests {
     #[test]
     fn test_window_struct_fields() {
         let window = Window {
-            current_dir: "/home/user/project".to_string(),
             id: 42,
-            is_active: true,
             name: "test".to_string(),
-            notification_pending: true,
+            pane_pid: 12345,
             running_command: "echo hello".to_string(),
+            current_dir: "/home/user/project".to_string(),
+            is_active: true,
+            notification_pending: true,
             started_at: Some(Instant::now() - Duration::from_secs(60)),
         };
         assert_eq!(window.id, 42);
@@ -871,6 +893,7 @@ mod tests {
         assert!(window.notification_pending);
         assert!(window.is_active);
         assert_eq!(window.current_dir, "/home/user/project");
+        assert_eq!(window.pane_pid, 12345);
     }
 
     #[test]
