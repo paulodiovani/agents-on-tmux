@@ -42,9 +42,8 @@ pub trait Tmux {
     /// Returns the value of a single option: this driver's session by
     /// default, or the global scope when `global` is set.
     fn show_options(&self, name: &str, global: bool) -> Result<String, TmuxError>;
-    /// Opens the tmux command prompt on the calling client, pre-filled with
-    /// `initial`, running `template` on accept (`%%` expands to the input).
-    fn command_prompt(&self, initial: &str, template: &str) -> Result<(), TmuxError>;
+    /// Prompts the user to rename the window via the tmux command prompt.
+    fn rename_window(&self, id: u32, name: &str) -> Result<(), TmuxError>;
 }
 
 pub const SESSION_NAME: &str = "agents-on-tmux";
@@ -517,11 +516,12 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
         self.executor.execute(&args).map(|s| s.trim().to_string())
     }
 
-    /// Opens the tmux command prompt on the calling client, pre-filled with
-    /// `initial`, running `template` on accept (`%%` expands to the input).
-    fn command_prompt(&self, initial: &str, template: &str) -> Result<(), TmuxError> {
+    /// Prompts the user to rename the window via the tmux command prompt.
+    fn rename_window(&self, id: u32, name: &str) -> Result<(), TmuxError> {
+        let target = format!("{}:{}", self.session, id);
+        let template = format!("rename-window -t \"{target}\" \"%%\"");
         self.executor
-            .execute(&["command-prompt", "-I", initial, template])
+            .execute(&["command-prompt", "-I", name, &template])
             .map(|_| ())
     }
 }
@@ -1162,12 +1162,10 @@ mod tests {
     }
 
     #[test]
-    fn test_command_prompt_command_args() {
+    fn test_rename_window_command_args() {
         let executor = MockCommandExecutor::with_session();
         let driver = TmuxDriver::with_executor(executor);
-        driver
-            .command_prompt("#W", "rename-window -t \"aot:1\" \"%%\"")
-            .unwrap();
+        driver.rename_window(1, "my-window").unwrap();
 
         let commands = driver.executor.commands.borrow();
         let prompt_cmd = commands
@@ -1179,8 +1177,8 @@ mod tests {
             [
                 "command-prompt".to_string(),
                 "-I".to_string(),
-                "#W".to_string(),
-                "rename-window -t \"aot:1\" \"%%\"".to_string(),
+                "my-window".to_string(),
+                "rename-window -t \"agents-on-tmux:1\" \"%%\"".to_string(),
             ]
         );
     }

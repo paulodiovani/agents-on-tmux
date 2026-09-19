@@ -436,10 +436,8 @@ impl App {
             if let Err(error) = self.parent_driver.last_pane() {
                 logger::error(&format!("app: last pane failed: {error}"));
             }
-            let target = format!("{}:{}", self.nested_driver.session_name(), window.id);
-            let template = format!("rename-window -t \"{target}\" \"%%\"");
-            if let Err(error) = self.nested_driver.command_prompt(&window.name, &template) {
-                logger::error(&format!("app: command prompt failed: {error}"));
+            if let Err(error) = self.nested_driver.rename_window(window.id, &window.name) {
+                logger::error(&format!("app: rename window failed: {error}"));
             }
             if let Err(error) = self.parent_driver.last_pane() {
                 logger::error(&format!("app: last pane failed: {error}"));
@@ -845,10 +843,10 @@ mod tests {
             }
         }
 
-        fn command_prompt(&self, initial: &str, template: &str) -> Result<(), TmuxError> {
+        fn rename_window(&self, id: u32, name: &str) -> Result<(), TmuxError> {
             self.calls
                 .borrow_mut()
-                .push(format!("command_prompt {initial} {template}"));
+                .push(format!("rename_window {id} {name}"));
             Ok(())
         }
     }
@@ -997,7 +995,7 @@ mod tests {
 
         assert_eq!(
             nested_calls.borrow().last().unwrap(),
-            "command_prompt agent-2 rename-window -t \"agents-on-tmux:2\" \"%%\""
+            "rename_window 2 agent-2"
         );
         let parent_recorded = parent_calls.borrow();
         assert_eq!(parent_recorded.len(), 2);
@@ -1017,7 +1015,7 @@ mod tests {
             calls
                 .borrow()
                 .iter()
-                .any(|call| call.starts_with("command_prompt"))
+                .any(|call| call.starts_with("rename_window"))
         );
     }
 
