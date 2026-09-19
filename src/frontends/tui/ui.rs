@@ -531,21 +531,23 @@ mod tests {
         fn new() -> Self {
             Self::with_windows(vec![
                 Window {
-                    current_dir: "/home/user".to_string(),
                     id: 1,
-                    is_active: false,
                     name: "w1".to_string(),
-                    notification_pending: false,
+                    pane_pid: 10001,
                     running_command: "bash".to_string(),
+                    current_dir: "/home/user".to_string(),
+                    is_active: false,
+                    notification_pending: false,
                     started_at: Some(Instant::now() - Duration::from_secs(125)),
                 },
                 Window {
-                    current_dir: "/home/user".to_string(),
                     id: 2,
-                    is_active: false,
                     name: "w2".to_string(),
-                    notification_pending: false,
+                    pane_pid: 10002,
                     running_command: "claude".to_string(),
+                    current_dir: "/home/user".to_string(),
+                    is_active: true,
+                    notification_pending: false,
                     started_at: Some(Instant::now() - Duration::from_secs(45)),
                 },
             ])
@@ -599,12 +601,13 @@ mod tests {
         fn create_window(&self, name: &str) -> Result<Window, TmuxError> {
             let mut next_id = self.next_id.borrow_mut();
             let window = Window {
-                current_dir: "/home/user".to_string(),
                 id: *next_id,
-                is_active: false,
                 name: name.to_string(),
-                notification_pending: false,
+                pane_pid: 12345,
                 running_command: String::new(),
+                current_dir: "/home/user".to_string(),
+                is_active: false,
+                notification_pending: false,
                 started_at: None,
             };
             *next_id += 1;
@@ -660,12 +663,13 @@ mod tests {
 
     fn window(id: u32, name: &str, command: &str, dir: &str, seconds: u64) -> Window {
         Window {
-            current_dir: dir.to_string(),
             id,
-            is_active: false,
             name: name.to_string(),
-            notification_pending: false,
+            pane_pid: 12345,
             running_command: command.to_string(),
+            current_dir: dir.to_string(),
+            is_active: true,
+            notification_pending: false,
             started_at: Some(Instant::now() - Duration::from_secs(seconds)),
         }
     }
@@ -695,7 +699,8 @@ mod tests {
             ),
             window(3, "billing-api", "pi", "/opt/clients/acme/billing-api", 17),
         ];
-        windows[0].is_active = true;
+        windows[1].is_active = false;
+        windows[2].is_active = false;
         windows[1].notification_pending = true;
         app_with(windows)
     }
@@ -1226,7 +1231,11 @@ mod tests {
 
     #[test]
     fn test_agent_name_is_suppressed_when_it_is_the_window_title() {
-        let mut app = app_with(vec![window(1, "Claude", "claude", "/opt/project", 5)]);
+        let mut app = app_with(vec![{
+            let mut w = window(1, "Claude", "claude", "/opt/project", 5);
+            w.is_active = false;
+            w
+        }]);
         let buffer = render(&mut app, 80, 24);
         assert!(text(&buffer, 3).starts_with("1 Claude"));
         assert!(text(&buffer, 4).starts_with("[cc]"));
@@ -1235,7 +1244,11 @@ mod tests {
 
     #[test]
     fn test_windows_tab_uses_the_window_icon_and_no_agent_name() {
-        let mut app = app_with(vec![window(1, "shell", "zsh", "/opt/work/aot", 240)]);
+        let mut app = app_with(vec![{
+            let mut w = window(1, "shell", "zsh", "/opt/work/aot", 240);
+            w.is_active = false;
+            w
+        }]);
         assert_eq!(app.active_tab(), Tab::Windows);
 
         let buffer = render(&mut app, 80, 24);
@@ -1299,13 +1312,17 @@ mod tests {
 
     #[test]
     fn test_title_truncation_accounts_for_the_id_width() {
-        let mut app = app_with(vec![window(
-            12345,
-            "a-very-long-window-name-that-cannot-possibly-fit",
-            "claude",
-            "/opt/work",
-            5,
-        )]);
+        let mut app = app_with(vec![{
+            let mut w = window(
+                12345,
+                "a-very-long-window-name-that-cannot-possibly-fit",
+                "claude",
+                "/opt/work",
+                5,
+            );
+            w.is_active = false;
+            w
+        }]);
         let buffer = render(&mut app, 30, 20);
         let title_row = row(&buffer, 3);
         assert!(

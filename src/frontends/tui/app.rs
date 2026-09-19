@@ -1,10 +1,10 @@
-use std::collections::HashMap;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
 use crossterm::event;
 use ratatui::DefaultTerminal;
 use ratatui::widgets::ListState;
+use sysinfo::{Pid, ProcessesToUpdate, System};
 
 use crate::backends::agents::is_agent;
 use crate::backends::control_mode::{self, EventProducer, TmuxEvent};
@@ -25,6 +25,25 @@ const HINTED_COMMANDS: [(&str, &str); 5] = [
         "rename",
     ),
 ];
+
+/// Gets the start time of a pane process using sysinfo.
+/// Returns None if the process cannot be found.
+fn get_pane_start_time(pid: u32) -> Option<Instant> {
+    let mut system = System::new();
+    system.refresh_processes(ProcessesToUpdate::All, true);
+
+    if let Some(process) = system.process(Pid::from_u32(pid)) {
+        let start_time = process.start_time();
+        let now_epoch = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .ok()?
+            .as_secs();
+        let elapsed = now_epoch.saturating_sub(start_time);
+        Instant::now().checked_sub(Duration::from_secs(elapsed))
+    } else {
+        None
+    }
+}
 
 /// Effective prefix of a driver's session: its own override, else the
 /// server-wide default.
@@ -120,7 +139,6 @@ pub struct App {
     pending_action: Option<PendingAction>,
     running: bool,
     tmux_hints: Vec<(String, String)>,
-    window_starts: HashMap<u32, Instant>,
     windows: Vec<Window>,
     windows_selected: usize,
 }
@@ -157,14 +175,10 @@ impl App {
             pending_action: None,
             running: true,
             tmux_hints,
-            window_starts: HashMap::new(),
             windows: Vec::new(),
             windows_selected: 0,
         };
         app.refresh_windows()?;
-        if !app.is_tab_empty(Tab::Agents) {
-            app.active_tab = Tab::Agents;
-        }
         Ok(app)
     }
 
@@ -473,22 +487,33 @@ impl App {
     /// Reloads the window list from the tmux driver and tracks start times.
     pub fn refresh_windows(&mut self) -> anyhow::Result<()> {
         let windows = self.nested_driver.list_windows()?;
-        let now = Instant::now();
 
         let selected_window_id = self.current_tab_window().map(|w| w.id);
+        let is_first_refresh = self.windows.is_empty();
 
-        let current_ids: std::collections::HashSet<u32> = windows.iter().map(|w| w.id).collect();
+        let enriched_windows: Vec<Window> = windows
+            .into_iter()
+            .map(|window| {
+                let started_at = self
+                    .windows
+                    .iter()
+                    .find(|w| w.id == window.id)
+                    .and_then(|old| {
+                        if old.pane_pid == window.pane_pid {
+                            old.started_at
+                        } else {
+                            None
+                        }
+                    })
+                    .or_else(|| get_pane_start_time(window.pane_pid))
+                    .or(Some(Instant::now()));
 
-        for window in &windows {
-            self.window_starts.entry(window.id).or_insert(now);
-        }
-
-        self.window_starts.retain(|id, _| current_ids.contains(id));
-
-        let mut enriched_windows: Vec<Window> = windows;
-        for window in &mut enriched_windows {
-            window.started_at = self.window_starts.get(&window.id).copied();
-        }
+                Window {
+                    started_at,
+                    ..window
+                }
+            })
+            .collect();
 
         self.windows = enriched_windows;
 
@@ -517,7 +542,7 @@ impl App {
         self.clamp_selections();
         self.list_state.select(Some(self.current_selected()));
 
-        if !self.pane_active {
+        if is_first_refresh || !self.pane_active {
             let active_window_info = self
                 .windows
                 .iter()
@@ -543,6 +568,8 @@ impl App {
                     self.last_focused_id = Some(active_id);
                     self.list_state.select(Some(self.current_selected()));
                 }
+            } else if is_first_refresh && !self.is_tab_empty(Tab::Agents) {
+                self.active_tab = Tab::Agents;
             }
         }
 
@@ -707,39 +734,43 @@ mod tests {
                 prefix: Some("C-b".to_string()),
                 windows: Rc::new(std::cell::RefCell::new(vec![
                     Window {
-                        current_dir: "/home/user/project1".to_string(),
                         id: 1,
-                        is_active: false,
                         name: "agent-1".to_string(),
-                        notification_pending: false,
+                        pane_pid: 10001,
                         running_command: "cargo build".to_string(),
+                        current_dir: "/home/user/project1".to_string(),
+                        is_active: false,
+                        notification_pending: false,
                         started_at: Some(Instant::now() - Duration::from_secs(125)),
                     },
                     Window {
-                        current_dir: "/home/user/project2".to_string(),
                         id: 2,
-                        is_active: false,
                         name: "agent-2".to_string(),
-                        notification_pending: true,
+                        pane_pid: 10002,
                         running_command: "claude".to_string(),
+                        current_dir: "/home/user/project2".to_string(),
+                        is_active: true,
+                        notification_pending: true,
                         started_at: Some(Instant::now() - Duration::from_secs(45)),
                     },
                     Window {
-                        current_dir: "/home/user/project3".to_string(),
                         id: 3,
-                        is_active: false,
                         name: "agent-3".to_string(),
-                        notification_pending: false,
+                        pane_pid: 10003,
                         running_command: "python main.py".to_string(),
+                        current_dir: "/home/user/project3".to_string(),
+                        is_active: false,
+                        notification_pending: false,
                         started_at: Some(Instant::now() - Duration::from_secs(300)),
                     },
                     Window {
-                        current_dir: "/home/user/project4".to_string(),
                         id: 4,
-                        is_active: false,
                         name: "agent-4".to_string(),
-                        notification_pending: false,
+                        pane_pid: 10004,
                         running_command: "opencode".to_string(),
+                        current_dir: "/home/user/project4".to_string(),
+                        is_active: false,
+                        notification_pending: false,
                         started_at: Some(Instant::now() - Duration::from_secs(10)),
                     },
                 ])),
@@ -782,12 +813,13 @@ mod tests {
             self.calls.borrow_mut().push("create_window".to_string());
             let mut next_id = self.next_id.borrow_mut();
             let window = Window {
-                current_dir: "/home/user".to_string(),
                 id: *next_id,
-                is_active: false,
                 name: name.to_string(),
-                notification_pending: false,
+                pane_pid: 12345,
                 running_command: String::new(),
+                current_dir: "/home/user".to_string(),
+                is_active: false,
+                notification_pending: false,
                 started_at: None,
             };
             *next_id += 1;
@@ -882,6 +914,8 @@ mod tests {
     #[test]
     fn test_new_defaults_to_windows_when_no_agents() {
         let driver = MockTmux::new();
+        driver.windows.borrow_mut()[0].is_active = true;
+        driver.windows.borrow_mut()[0].running_command = "bash".to_string();
         driver.windows.borrow_mut()[1].running_command = "bash".to_string();
         driver.windows.borrow_mut()[3].running_command = "zsh".to_string();
         let app = App::new(Box::new(driver), Box::new(MockTmux::new()), None, None).unwrap();
@@ -1318,12 +1352,13 @@ mod tests {
 
         // A structural change happened externally; the event tells us to reload.
         windows.borrow_mut().push(Window {
-            current_dir: "/home/user/project5".to_string(),
             id: 99,
-            is_active: false,
             name: "agent-5".to_string(),
-            notification_pending: false,
+            pane_pid: 10005,
             running_command: "bash".to_string(),
+            current_dir: "/home/user/project5".to_string(),
+            is_active: false,
+            notification_pending: false,
             started_at: None,
         });
         let _ = tx.send(TmuxEvent::Refresh);
@@ -1424,12 +1459,12 @@ mod tests {
     #[test]
     fn test_refresh_windows_removed_windows_cleaned_up() {
         let (mut app, windows, _) = test_app();
-        assert_eq!(app.window_starts.len(), 4);
+        assert_eq!(app.windows().len(), 4);
         let window_id = app.windows()[0].id;
         windows.borrow_mut().retain(|w| w.id != window_id);
         app.refresh_windows().unwrap();
-        assert_eq!(app.window_starts.len(), 3);
-        assert!(!app.window_starts.contains_key(&window_id));
+        assert_eq!(app.windows().len(), 3);
+        assert!(!app.windows().iter().any(|w| w.id == window_id));
     }
 
     #[test]
@@ -1438,6 +1473,7 @@ mod tests {
         app.set_pane_active(false);
         assert_eq!(app.current_selected(), 0);
 
+        windows.borrow_mut()[1].is_active = false;
         windows.borrow_mut()[3].is_active = true;
         app.refresh_windows().unwrap();
         assert_eq!(app.current_selected(), 1);
@@ -1724,5 +1760,18 @@ mod tests {
 
         assert_eq!(app.active_tab(), Tab::Windows);
         assert_eq!(app.current_selected(), 0);
+    }
+
+    #[test]
+    fn test_resolve_pane_start_time_current_process() {
+        let pid = std::process::id();
+        let start_time = get_pane_start_time(pid);
+        assert!(start_time.is_some());
+    }
+
+    #[test]
+    fn test_resolve_pane_start_time_invalid_pid() {
+        let start_time = get_pane_start_time(999999999);
+        assert!(start_time.is_none());
     }
 }
