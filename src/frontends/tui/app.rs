@@ -179,9 +179,6 @@ impl App {
             windows_selected: 0,
         };
         app.refresh_windows()?;
-        if !app.is_tab_empty(Tab::Agents) {
-            app.active_tab = Tab::Agents;
-        }
         Ok(app)
     }
 
@@ -492,6 +489,7 @@ impl App {
         let windows = self.nested_driver.list_windows()?;
 
         let selected_window_id = self.current_tab_window().map(|w| w.id);
+        let is_first_refresh = self.windows.is_empty();
 
         let enriched_windows: Vec<Window> = windows
             .into_iter()
@@ -544,7 +542,7 @@ impl App {
         self.clamp_selections();
         self.list_state.select(Some(self.current_selected()));
 
-        if !self.pane_active {
+        if is_first_refresh || !self.pane_active {
             let active_window_info = self
                 .windows
                 .iter()
@@ -570,6 +568,8 @@ impl App {
                     self.last_focused_id = Some(active_id);
                     self.list_state.select(Some(self.current_selected()));
                 }
+            } else if is_first_refresh && !self.is_tab_empty(Tab::Agents) {
+                self.active_tab = Tab::Agents;
             }
         }
 
@@ -749,7 +749,7 @@ mod tests {
                         pane_pid: 10002,
                         running_command: "claude".to_string(),
                         current_dir: "/home/user/project2".to_string(),
-                        is_active: false,
+                        is_active: true,
                         notification_pending: true,
                         started_at: Some(Instant::now() - Duration::from_secs(45)),
                     },
@@ -914,6 +914,8 @@ mod tests {
     #[test]
     fn test_new_defaults_to_windows_when_no_agents() {
         let driver = MockTmux::new();
+        driver.windows.borrow_mut()[0].is_active = true;
+        driver.windows.borrow_mut()[0].running_command = "bash".to_string();
         driver.windows.borrow_mut()[1].running_command = "bash".to_string();
         driver.windows.borrow_mut()[3].running_command = "zsh".to_string();
         let app = App::new(Box::new(driver), Box::new(MockTmux::new()), None, None).unwrap();
@@ -1471,6 +1473,7 @@ mod tests {
         app.set_pane_active(false);
         assert_eq!(app.current_selected(), 0);
 
+        windows.borrow_mut()[1].is_active = false;
         windows.borrow_mut()[3].is_active = true;
         app.refresh_windows().unwrap();
         assert_eq!(app.current_selected(), 1);
