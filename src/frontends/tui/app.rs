@@ -140,7 +140,7 @@ pub struct App {
     pending_action: Option<PendingAction>,
     running: bool,
     tmux_hints: Vec<(String, String)>,
-    window_starts: HashMap<u32, Instant>,
+    window_starts: HashMap<u32, (u32, Instant)>,
     windows: Vec<Window>,
     windows_selected: usize,
 }
@@ -499,16 +499,22 @@ impl App {
         let current_ids: std::collections::HashSet<u32> = windows.iter().map(|w| w.id).collect();
 
         for window in &windows {
-            self.window_starts.entry(window.id).or_insert_with(|| {
-                get_pane_start_time(window.pane_pid).unwrap_or_else(Instant::now)
-            });
+            if !matches!(
+                self.window_starts.get(&window.id),
+                Some((pid, _)) if *pid == window.pane_pid
+            ) {
+                let start_time =
+                    get_pane_start_time(window.pane_pid).unwrap_or_else(Instant::now);
+                self.window_starts
+                    .insert(window.id, (window.pane_pid, start_time));
+            }
         }
 
         self.window_starts.retain(|id, _| current_ids.contains(id));
 
         let mut enriched_windows: Vec<Window> = windows;
         for window in &mut enriched_windows {
-            window.started_at = self.window_starts.get(&window.id).copied();
+            window.started_at = self.window_starts.get(&window.id).map(|(_, instant)| *instant);
         }
 
         self.windows = enriched_windows;
