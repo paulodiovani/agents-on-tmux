@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Use correct target format (e.g. `session:window.pane`) for tmux commands, so they run on intended target
+- Rename prompt now focuses the nested session before showing, so the user can interact with it and the TUI returns to focus after
 
 ## [0.4.0] - 2026-09-04
 
