@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
@@ -140,7 +139,6 @@ pub struct App {
     pending_action: Option<PendingAction>,
     running: bool,
     tmux_hints: Vec<(String, String)>,
-    window_starts: HashMap<u32, (u32, Instant)>,
     windows: Vec<Window>,
     windows_selected: usize,
 }
@@ -177,7 +175,6 @@ impl App {
             pending_action: None,
             running: true,
             tmux_hints,
-            window_starts: HashMap::new(),
             windows: Vec::new(),
             windows_selected: 0,
         };
@@ -496,26 +493,26 @@ impl App {
 
         let selected_window_id = self.current_tab_window().map(|w| w.id);
 
-        let current_ids: std::collections::HashSet<u32> = windows.iter().map(|w| w.id).collect();
+        let enriched_windows: Vec<Window> = windows
+            .into_iter()
+            .map(|window| {
+                let started_at = self
+                    .windows
+                    .iter()
+                    .find(|w| w.id == window.id)
+                    .and_then(|old| {
+                        if old.pane_pid == window.pane_pid {
+                            old.started_at
+                        } else {
+                            None
+                        }
+                    })
+                    .or_else(|| get_pane_start_time(window.pane_pid))
+                    .or(Some(Instant::now()));
 
-        for window in &windows {
-            if !matches!(
-                self.window_starts.get(&window.id),
-                Some((pid, _)) if *pid == window.pane_pid
-            ) {
-                let start_time =
-                    get_pane_start_time(window.pane_pid).unwrap_or_else(Instant::now);
-                self.window_starts
-                    .insert(window.id, (window.pane_pid, start_time));
-            }
-        }
-
-        self.window_starts.retain(|id, _| current_ids.contains(id));
-
-        let mut enriched_windows: Vec<Window> = windows;
-        for window in &mut enriched_windows {
-            window.started_at = self.window_starts.get(&window.id).map(|(_, instant)| *instant);
-        }
+                Window { started_at, ..window }
+            })
+            .collect();
 
         self.windows = enriched_windows;
 
@@ -1457,12 +1454,12 @@ mod tests {
     #[test]
     fn test_refresh_windows_removed_windows_cleaned_up() {
         let (mut app, windows, _) = test_app();
-        assert_eq!(app.window_starts.len(), 4);
+        assert_eq!(app.windows().len(), 4);
         let window_id = app.windows()[0].id;
         windows.borrow_mut().retain(|w| w.id != window_id);
         app.refresh_windows().unwrap();
-        assert_eq!(app.window_starts.len(), 3);
-        assert!(!app.window_starts.contains_key(&window_id));
+        assert_eq!(app.windows().len(), 3);
+        assert!(!app.windows().iter().any(|w| w.id == window_id));
     }
 
     #[test]
