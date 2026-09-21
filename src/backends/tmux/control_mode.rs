@@ -90,17 +90,17 @@ pub fn parse_event(line: &str) -> Option<TmuxEvent> {
 
     match command {
         "%exit" => {
-            super::logger::debug(&format!("control_mode: {command}"));
+            crate::backends::logger::debug(&format!("control_mode: {command}"));
             Some(TmuxEvent::Exit)
         }
         // Activity changes: keep the active window live.
         "%session-changed" | "%session-window-changed" => {
-            super::logger::debug(&format!("control_mode: {command}"));
+            crate::backends::logger::debug(&format!("control_mode: {command}"));
             Some(TmuxEvent::Refresh)
         }
         // Structural changes: validate the id so malformed lines are ignored.
         "%window-add" | "%window-close" | "%window-renamed" => {
-            super::logger::debug(&format!("control_mode: {command}"));
+            crate::backends::logger::debug(&format!("control_mode: {command}"));
             let raw = parts.next()?;
             let id = raw.strip_prefix('@')?;
             match id.parse::<u32>() {
@@ -113,7 +113,7 @@ pub fn parse_event(line: &str) -> Option<TmuxEvent> {
         }
         // Pane focus changes: extract the pane-id so the TUI can compare it.
         "%window-pane-changed" => {
-            super::logger::debug(&format!("control_mode: {command}"));
+            crate::backends::logger::debug(&format!("control_mode: {command}"));
             let id = parts.nth(1); // skip window id and pick pane id
             let id = id.filter(|id| id.starts_with("%"));
             match id {
@@ -211,10 +211,10 @@ fn run_with_reconnect<C, R>(
             }
             Err(e) => {
                 let error_msg = e.to_string();
-                super::logger::debug(&format!("control_mode: connect failed: {e}"));
+                crate::backends::logger::debug(&format!("control_mode: connect failed: {e}"));
                 retries += 1;
                 if retries as usize >= MAX_RETRIES {
-                    super::logger::error(&format!(
+                    crate::backends::logger::error(&format!(
                         "control_mode: max reconnection attempts reached: {error_msg}"
                     ));
                     if let Err(error) = event_tx.send(TmuxEvent::Exit) {
