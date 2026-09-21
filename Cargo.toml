@@ -17,5 +17,5 @@ serde = { version = "1", features = ["derive"] }
 toml = "1.1"
 dirs = "7"
 unicode-width = "0.2"
-signal-hook = "0.3"
+signal-hook = "0.4"
 sysinfo = "0.39"
