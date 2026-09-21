@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Change Hermes agent icon to ⚕ (Rod of Asclepius)
 - Moved window rename logic into the tmux backend, improving separation of concerns
 - Track pane process start time instead of detection time, recalculate when pane PID changes
+- Reorganize backend modules: group tmux-related code under `tmux/` directory
 
 ### Fixed
 - Use correct target format (e.g. `session:window.pane`) for tmux commands, so they run on intended target

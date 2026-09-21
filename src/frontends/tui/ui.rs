@@ -513,7 +513,10 @@ fn count_windows_for_tab(app: &App, tab: Tab) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backends::tmux::{KeyBinding, Tmux, TmuxError};
+    use crate::backends::tmux::{
+        Tmux,
+        commands::{KeyBinding, TmuxError},
+    };
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::buffer::Buffer;

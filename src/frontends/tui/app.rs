@@ -7,8 +7,8 @@ use ratatui::widgets::ListState;
 use sysinfo::{Pid, ProcessesToUpdate, System};
 
 use crate::backends::agents::is_agent;
-use crate::backends::control_mode::{self, EventProducer, TmuxEvent};
 use crate::backends::logger;
+use crate::backends::tmux::{self, EventProducer, TmuxEvent};
 use crate::backends::tmux::{Tmux, Window};
 use crate::frontends::tui::event::{Action, PendingAction, Tab, key_to_action};
 use crate::frontends::tui::theme::Theme;
@@ -218,7 +218,7 @@ impl App {
             "app: starting parent control mode: session={parent_session}"
         ));
         std::thread::spawn(move || {
-            control_mode::control_mode_thread(
+            tmux::control_mode_thread(
                 parent_session,
                 parent_socket,
                 EventProducer::Parent,
@@ -232,7 +232,7 @@ impl App {
             "app: starting nested control mode: session={nested_session}"
         ));
         std::thread::spawn(move || {
-            control_mode::control_mode_thread(
+            tmux::control_mode_thread(
                 nested_session,
                 nested_socket,
                 EventProducer::Nested,
@@ -712,7 +712,10 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backends::tmux::{KeyBinding, Tmux, TmuxError, Window};
+    use crate::backends::tmux::{
+        Tmux, Window,
+        commands::{KeyBinding, TmuxError},
+    };
     use std::rc::Rc;
     use std::time::{Duration, Instant};
 
