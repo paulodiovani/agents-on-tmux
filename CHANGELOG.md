@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-09-21
+
 ### Changed
 - Use separate tmux server (`-L agents-on-tmux`) for the nested session, providing process isolation and preventing server freezes (#20, #31)
 - Change Hermes agent icon to ⚕ (Rod of Asclepius)
@@ -16,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Use correct target format (e.g. `session:window.pane`) for tmux commands, so they run on intended target
+- Handle invalid UTF-8 in tmux control mode output, preventing parent session from being killed (#37)
 - Rename prompt now focuses the nested session before showing, so the user can interact with it and the TUI returns to focus after
 - Select the active window at startup instead of defaulting to the first agent
 - Fixed flaky test caused by race condition on TMUX environment variable
