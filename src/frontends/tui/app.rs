@@ -799,7 +799,7 @@ mod tests {
             None
         }
 
-        fn create_session_if_not_exists(&self) -> Result<(), TmuxError> {
+        fn create_session_if_not_exists(&self, _tmux_env: Option<&str>) -> Result<(), TmuxError> {
             Ok(())
         }
 

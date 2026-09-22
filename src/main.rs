@@ -35,6 +35,14 @@ struct Cli {
     /// Enable debug logging to a file
     #[arg(long, env = "AOT_DEBUG", value_parser = parse_bool, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
     debug: Option<bool>,
+
+    /// TMUX environment variable (hidden, read from env)
+    #[arg(long, env = "TMUX", hide = true)]
+    tmux_env: Option<String>,
+
+    /// TMUX_PANE environment variable (hidden, read from env)
+    #[arg(long, env = "TMUX_PANE", hide = true)]
+    tmux_pane: Option<String>,
 }
 
 // Implement Display so we can extract the cli options to forward to TUI side-panel
@@ -113,15 +121,16 @@ fn main() -> anyhow::Result<()> {
         config.font_awesome.unwrap_or(false),
     );
 
-    let parent_session = detect_parent_session()?;
+    let tmux_env = cli.tmux_env.as_deref();
+    let parent_session = detect_parent_session(tmux_env)?;
     logger::debug(&format!("main: parent session: {}", parent_session));
 
     let parent_driver = TmuxDriver::new(&parent_session);
 
     let nested_driver = TmuxDriver::new_with_socket(SESSION_NAME, SOCKET_NAME);
-    nested_driver.create_session_if_not_exists()?;
+    nested_driver.create_session_if_not_exists(tmux_env)?;
 
-    let pane_id = std::env::var("TMUX_PANE").ok();
+    let pane_id = cli.tmux_pane.clone();
     if pane_id.is_none() {
         logger::debug("main: TMUX_PANE not set; focus tracking disabled");
     }
