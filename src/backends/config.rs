@@ -9,7 +9,7 @@ pub enum LaunchMode {
 }
 
 /// Application configuration options
-#[derive(serde::Deserialize, Clone, Copy, Default)]
+#[derive(serde::Deserialize, Clone, Default)]
 pub struct Config {
     #[serde(default)]
     pub tui: Option<bool>,
@@ -23,6 +23,10 @@ pub struct Config {
     pub font_awesome: Option<bool>,
     #[serde(default)]
     pub debug: Option<bool>,
+    #[serde(default)]
+    pub tmux_env: Option<String>,
+    #[serde(default)]
+    pub tui_pane: Option<String>,
 }
 
 /// Possible errors when reading config file
@@ -62,6 +66,8 @@ impl Config {
             nerd_font: other.nerd_font.or(self.nerd_font),
             font_awesome: other.font_awesome.or(self.font_awesome),
             debug: other.debug.or(self.debug),
+            tmux_env: other.tmux_env.or(self.tmux_env),
+            tui_pane: other.tui_pane.or(self.tui_pane),
         }
     }
 
@@ -106,6 +112,8 @@ mod tests {
             font_awesome: None,
             debug: Some(false),
             tui_width: Some(20),
+            tmux_env: None,
+            tui_pane: None,
         };
         let other = Config {
             tui: Some(true),
@@ -114,6 +122,8 @@ mod tests {
             font_awesome: None,
             debug: Some(true),
             tui_width: Some(50),
+            tmux_env: None,
+            tui_pane: None,
         };
         let merged = base.merge(other);
         assert_eq!(merged.tui, Some(true));
@@ -133,6 +143,8 @@ mod tests {
             font_awesome: Some(true),
             debug: Some(true),
             tui_width: Some(50),
+            tmux_env: None,
+            tui_pane: None,
         };
         let other = Config::default();
         let merged = base.merge(other);

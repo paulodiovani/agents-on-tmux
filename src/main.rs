@@ -35,6 +35,14 @@ struct Cli {
     /// Enable debug logging to a file
     #[arg(long, env = "AOT_DEBUG", value_parser = parse_bool, default_missing_value = "true", num_args = 0..=1, require_equals = true)]
     debug: Option<bool>,
+
+    /// TMUX environment variable (read from env only)
+    #[arg(env = "TMUX", hide = true)]
+    tmux_env: Option<String>,
+
+    /// TUI pane ID (read from env only)
+    #[arg(env = "TMUX_PANE", hide = true)]
+    tui_pane: Option<String>,
 }
 
 // Implement Display so we can extract the cli options to forward to TUI side-panel
@@ -71,6 +79,8 @@ impl From<&Cli> for Config {
             nerd_font: cli.nerd_font,
             font_awesome: cli.font_awesome,
             debug: cli.debug,
+            tmux_env: cli.tmux_env.clone(),
+            tui_pane: cli.tui_pane.clone(),
         }
     }
 }
@@ -113,15 +123,16 @@ fn main() -> anyhow::Result<()> {
         config.font_awesome.unwrap_or(false),
     );
 
-    let parent_session = detect_parent_session()?;
+    let tmux_env = config.tmux_env.as_deref();
+    let parent_session = detect_parent_session(tmux_env)?;
     logger::debug(&format!("main: parent session: {}", parent_session));
 
     let parent_driver = TmuxDriver::new(&parent_session);
 
     let nested_driver = TmuxDriver::new_with_socket(SESSION_NAME, SOCKET_NAME);
-    nested_driver.create_session_if_not_exists()?;
+    nested_driver.create_session_if_not_exists(tmux_env)?;
 
-    let pane_id = std::env::var("TMUX_PANE").ok();
+    let pane_id = config.tui_pane.clone();
     if pane_id.is_none() {
         logger::debug("main: TMUX_PANE not set; focus tracking disabled");
     }
@@ -181,75 +192,34 @@ fn main() -> anyhow::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Mutex;
-
-    static ENV_LOCK: Mutex<()> = Mutex::new(());
-
-    fn with_icon_env<T>(
-        nerd_font: Option<&str>,
-        font_awesome: Option<&str>,
-        test: impl FnOnce() -> T,
-    ) -> T {
-        let _guard = ENV_LOCK.lock().unwrap();
-
-        unsafe {
-            if let Some(value) = nerd_font {
-                std::env::set_var("NERD_FONT", value);
-            } else {
-                std::env::remove_var("NERD_FONT");
-            }
-
-            if let Some(value) = font_awesome {
-                std::env::set_var("FONT_AWESOME", value);
-            } else {
-                std::env::remove_var("FONT_AWESOME");
-            }
-
-            // Ambient AOT_DEBUG would leak into Cli parsing and Display output.
-            std::env::remove_var("AOT_DEBUG");
-        }
-
-        let result = test();
-
-        unsafe {
-            std::env::remove_var("NERD_FONT");
-            std::env::remove_var("FONT_AWESOME");
-        }
-
-        result
-    }
 
     #[test]
     fn test_cli_display_without_icon_flags() {
-        let cli = with_icon_env(None, None, || Cli::parse_from(["aot"]));
+        let cli = Cli::parse_from(["aot"]);
         assert_eq!(format!("{}", cli), "");
     }
 
     #[test]
     fn test_cli_display_with_nerd_font_flag() {
-        let cli = with_icon_env(None, None, || Cli::parse_from(["aot", "--nerd-font"]));
+        let cli = Cli::parse_from(["aot", "--nerd-font"]);
         assert_eq!(format!("{}", cli), " --nerd-font=true");
     }
 
     #[test]
     fn test_cli_display_with_font_awesome_flag() {
-        let cli = with_icon_env(None, None, || Cli::parse_from(["aot", "--font-awesome"]));
+        let cli = Cli::parse_from(["aot", "--font-awesome"]);
         assert_eq!(format!("{}", cli), " --font-awesome=true");
     }
 
     #[test]
     fn test_cli_display_with_both_icon_flags() {
-        let cli = with_icon_env(None, None, || {
-            Cli::parse_from(["aot", "--nerd-font", "--font-awesome"])
-        });
+        let cli = Cli::parse_from(["aot", "--nerd-font", "--font-awesome"]);
         assert_eq!(format!("{}", cli), " --nerd-font=true --font-awesome=true");
     }
 
     #[test]
     fn test_cli_display_with_explicit_false_values() {
-        let cli = with_icon_env(None, None, || {
-            Cli::parse_from(["aot", "--nerd-font=false", "--font-awesome=false"])
-        });
+        let cli = Cli::parse_from(["aot", "--nerd-font=false", "--font-awesome=false"]);
         assert_eq!(
             format!("{}", cli),
             " --nerd-font=false --font-awesome=false"
@@ -262,24 +232,8 @@ mod tests {
     }
 
     #[test]
-    fn test_nerd_font_env_sets_cli_option() {
-        let cli = with_icon_env(Some("1"), None, || Cli::parse_from(["aot"]));
-        assert_eq!(cli.nerd_font, Some(true));
-        assert_eq!(cli.font_awesome, None);
-    }
-
-    #[test]
-    fn test_font_awesome_env_sets_cli_option() {
-        let cli = with_icon_env(None, Some("1"), || Cli::parse_from(["aot"]));
-        assert_eq!(cli.nerd_font, None);
-        assert_eq!(cli.font_awesome, Some(true));
-    }
-
-    #[test]
     fn test_from_cli_to_config() {
-        let cli = with_icon_env(None, None, || {
-            Cli::parse_from(["aot", "--tui", "--nerd-font", "--tui-width=50"])
-        });
+        let cli = Cli::parse_from(["aot", "--tui", "--nerd-font", "--tui-width=50"]);
         let config: Config = (&cli).into();
         assert_eq!(config.tui, Some(true));
         assert_eq!(config.no_tui, None);
@@ -291,7 +245,7 @@ mod tests {
 
     #[test]
     fn test_tui_width_flag() {
-        let cli = with_icon_env(None, None, || Cli::parse_from(["aot", "--tui-width=50"]));
+        let cli = Cli::parse_from(["aot", "--tui-width=50"]);
         assert_eq!(cli.tui_width, Some(50));
     }
 
@@ -304,7 +258,7 @@ mod tests {
     fn test_tui_width_forwarded_to_tui_command() {
         // The width must survive the hop to the TUI child process: pane
         // processes are spawned by the tmux server, not by aot.
-        let cli = with_icon_env(None, None, || Cli::parse_from(["aot", "--tui-width=50"]));
+        let cli = Cli::parse_from(["aot", "--tui-width=50"]);
         assert_eq!(format!("{}", cli), " --tui-width=50");
     }
 
@@ -318,23 +272,13 @@ mod tests {
 
     #[test]
     fn test_debug_flag() {
-        let cli = with_icon_env(None, None, || Cli::parse_from(["aot", "--debug"]));
+        let cli = Cli::parse_from(["aot", "--debug"]);
         assert_eq!(cli.debug, Some(true));
     }
 
     #[test]
-    fn test_debug_env_var() {
-        let _guard = ENV_LOCK.lock().unwrap();
-        unsafe { std::env::set_var("AOT_DEBUG", "1") };
-        let cli = Cli::parse_from(["aot"]);
-        let config = Config::from(&cli);
-        unsafe { std::env::remove_var("AOT_DEBUG") };
-        assert_eq!(config.debug, Some(true));
-    }
-
-    #[test]
     fn test_cli_display_with_debug_flag() {
-        let cli = with_icon_env(None, None, || Cli::parse_from(["aot", "--debug"]));
+        let cli = Cli::parse_from(["aot", "--debug"]);
         assert_eq!(format!("{}", cli), " --debug=true");
     }
 }

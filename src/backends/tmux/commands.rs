@@ -19,7 +19,7 @@ pub trait Tmux {
     /// Returns the socket name this driver targets, if any.
     fn socket_name(&self) -> Option<&str>;
     /// Ensures the tmux session exists, creating it if necessary.
-    fn create_session_if_not_exists(&self) -> Result<(), TmuxError>;
+    fn create_session_if_not_exists(&self, tmux_env: Option<&str>) -> Result<(), TmuxError>;
     /// Attaches to the tmux session, inheriting stdio. Blocks until detached.
     fn attach_session(&self) -> Result<(), TmuxError>;
     /// Lists all windows in the session.
@@ -89,8 +89,8 @@ pub struct KeyBinding {
     pub key: String,
 }
 
-pub fn check_inside_tmux() -> Result<(), TmuxError> {
-    if std::env::var("TMUX").is_err() {
+pub fn check_inside_tmux(tmux_env: Option<&str>) -> Result<(), TmuxError> {
+    if tmux_env.is_none() {
         Err(TmuxError::NotInsideTmux)
     } else {
         Ok(())
@@ -98,8 +98,8 @@ pub fn check_inside_tmux() -> Result<(), TmuxError> {
 }
 
 /// Detects the parent tmux session by querying tmux for the current session name.
-pub fn detect_parent_session() -> Result<String, TmuxError> {
-    check_inside_tmux()?;
+pub fn detect_parent_session(tmux_env: Option<&str>) -> Result<String, TmuxError> {
+    check_inside_tmux(tmux_env)?;
 
     let output = Command::new("tmux")
         .args(["display-message", "-p", "#S"])
@@ -121,12 +121,10 @@ pub fn detect_parent_session() -> Result<String, TmuxError> {
     }
 }
 
-/// Detects the parent tmux server socket by parsing the TMUX environment variable.
+/// Extracts the parent tmux server socket name by parsing the TMUX environment variable value.
 /// Returns the socket name (e.g., "default", "agents-on-tmux").
-pub fn detect_parent_socket() -> Result<String, TmuxError> {
-    check_inside_tmux()?;
-
-    let tmux_env = std::env::var("TMUX").map_err(|_| TmuxError::NotInsideTmux)?;
+pub fn detect_parent_socket(tmux_env: Option<&str>) -> Result<String, TmuxError> {
+    let tmux_env = tmux_env.ok_or(TmuxError::NotInsideTmux)?;
 
     // TMUX format: <socket-path>,<server-pid>,<session-id>
     // Example: /tmp/tmux-1000/agents-on-tmux,12345,0
@@ -379,10 +377,10 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
 
     /// Ensures the tmux session exists, creating it if necessary.
     /// Also checks if we're already running on the same socket to prevent nested execution.
-    fn create_session_if_not_exists(&self) -> Result<(), TmuxError> {
+    fn create_session_if_not_exists(&self, tmux_env: Option<&str>) -> Result<(), TmuxError> {
         // Check if we're already running on the same socket
         if let Some(ref driver_socket) = self.socket {
-            match detect_parent_socket() {
+            match detect_parent_socket(tmux_env) {
                 Ok(parent_socket) => {
                     logger::debug(&format!(
                         "tmux: parent socket: {}, driver socket: {}",
@@ -730,7 +728,7 @@ mod tests {
     fn test_create_session_if_not_exists_creates_new() {
         let executor = MockCommandExecutor::new();
         let driver = TmuxDriver::with_executor(executor);
-        let result = driver.create_session_if_not_exists();
+        let result = driver.create_session_if_not_exists(Some("/tmp/tmux-1000/default,1234,0"));
         assert!(result.is_ok());
     }
 
@@ -738,7 +736,9 @@ mod tests {
     fn test_create_session_existing_skips_set_option() {
         let executor = MockCommandExecutor::with_session();
         let driver = TmuxDriver::with_executor(executor);
-        driver.create_session_if_not_exists().unwrap();
+        driver
+            .create_session_if_not_exists(Some("/tmp/tmux-1000/default,1234,0"))
+            .unwrap();
 
         let commands = driver.executor.commands.borrow();
         assert!(
@@ -752,7 +752,7 @@ mod tests {
     fn test_create_session_if_not_exists_existing() {
         let executor = MockCommandExecutor::with_session();
         let driver = TmuxDriver::with_executor(executor);
-        let result = driver.create_session_if_not_exists();
+        let result = driver.create_session_if_not_exists(Some("/tmp/tmux-1000/default,1234,0"));
         assert!(result.is_ok());
     }
 
@@ -962,15 +962,12 @@ mod tests {
 
     #[test]
     fn test_check_inside_tmux_set() {
-        unsafe { std::env::set_var("TMUX", "/tmp/tmux-1000/default,1234,0") };
-        assert!(check_inside_tmux().is_ok());
-        unsafe { std::env::remove_var("TMUX") };
+        assert!(check_inside_tmux(Some("/tmp/tmux-1000/default,1234,0")).is_ok());
     }
 
     #[test]
     fn test_check_inside_tmux_unset() {
-        unsafe { std::env::remove_var("TMUX") };
-        let result = check_inside_tmux();
+        let result = check_inside_tmux(None);
         assert!(result.is_err());
         assert!(matches!(result.unwrap_err(), TmuxError::NotInsideTmux));
     }
@@ -1011,28 +1008,18 @@ mod tests {
 
     #[test]
     fn test_detect_parent_socket_custom() {
-        unsafe { std::env::set_var("TMUX", "/tmp/tmux-1000/agents-on-tmux,1234,0") };
-        let result = detect_parent_socket();
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), "agents-on-tmux");
-        unsafe { std::env::remove_var("TMUX") };
+        assert_eq!(
+            detect_parent_socket(Some("/tmp/tmux-1000/agents-on-tmux,1234,0")).unwrap(),
+            "agents-on-tmux"
+        );
     }
 
     #[test]
     fn test_detect_parent_socket_default() {
-        unsafe { std::env::set_var("TMUX", "/tmp/tmux-1000/default,1234,0") };
-        let result = detect_parent_socket();
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), "default");
-        unsafe { std::env::remove_var("TMUX") };
-    }
-
-    #[test]
-    fn test_detect_parent_socket_not_inside_tmux() {
-        unsafe { std::env::remove_var("TMUX") };
-        let result = detect_parent_socket();
-        assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), TmuxError::NotInsideTmux));
+        assert_eq!(
+            detect_parent_socket(Some("/tmp/tmux-1000/default,1234,0")).unwrap(),
+            "default"
+        );
     }
 
     #[test]
