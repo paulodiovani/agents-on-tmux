@@ -14,6 +14,10 @@
       property="og:description"
       content="Run AI agents in isolated TMUX sessions. A lightweight orchestrator that gives each agent its own window with a TUI control panel."
     />
+    <meta property="og:image" content="assets/demo.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1024" />
+    <meta property="og:image:height" content="768" />
     <meta property="og:type" content="website" />
 
     <!-- Tailwind CSS -->
@@ -66,6 +70,7 @@
         overflow: hidden;
         box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(0, 0, 0, 0.2);
         padding: 20px;
+        min-height: 600px;
       }
 
       .demo-screenshot img {
@@ -218,7 +223,18 @@
         <div class="flex justify-center">
           <div class="w-full max-w-[1024px]">
             <div class="demo-screenshot">
-              <script src="https://asciinema.org/a/1268923.js" id="asciicast-1268923" async="true"></script>
+              <img
+                id="demo-fallback"
+                src="assets/demo.png"
+                alt="Agents on TMUX - TUI control panel with agent windows"
+                style="width: 100%; height: auto; display: block;"
+              />
+              <script
+                src="https://asciinema.org/a/1268923.js"
+                id="asciicast-1268923"
+                async="true"
+                onload="document.getElementById('demo-fallback').style.display='none'"
+              ></script>
             </div>
           </div>
         </div>
