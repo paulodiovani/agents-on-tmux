@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AOT — Recommended TMUX Config</title>
+    <meta
+      name="description"
+      content="Recommended TMUX configuration for the best experience with Agents on TMUX."
+    />
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              bg: "#0d1117",
+              surface: "#161b22",
+              border: "#30363d",
+              text: "#e6edf3",
+              muted: "#8b949e",
+              accent: "#f74c00",
+            },
+            fontFamily: {
+              mono: [
+                "JetBrains Mono",
+                "Fira Code",
+                "Cascadia Code",
+                "Menlo",
+                "monospace",
+              ],
+            },
+          },
+        },
+      };
+    </script>
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- Marked.js for markdown rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+    <style>
+      body {
+        font-family: "Inter", system-ui, sans-serif;
+      }
+
+      code {
+        background: #161b22;
+        border: 1px solid #30363d;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 0.9em;
+        color: #e6edf3;
+      }
+
+      pre {
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        padding: 16px;
+        overflow-x: auto;
+        font-size: 13px;
+        line-height: 1.6;
+      }
+
+      pre code {
+        background: transparent;
+        border: none;
+        padding: 0;
+      }
+
+      /* Markdown content styles */
+      .markdown-content h2 {
+        color: #e6edf3;
+        font-size: 1.5rem;
+        font-weight: 600;
+        margin-top: 2rem;
+        margin-bottom: 1rem;
+      }
+
+      .markdown-content h3 {
+        color: #e6edf3;
+        font-size: 1.25rem;
+        font-weight: 600;
+        margin-top: 1.5rem;
+        margin-bottom: 0.75rem;
+      }
+
+      .markdown-content p {
+        margin-bottom: 1rem;
+        line-height: 1.6;
+      }
+
+      .markdown-content ul {
+        list-style-type: disc;
+        padding-left: 1.5rem;
+        margin-bottom: 1rem;
+      }
+
+      .markdown-content li {
+        margin-bottom: 0.5rem;
+      }
+
+      .markdown-content a {
+        color: #7aa2f7;
+        text-decoration: none;
+      }
+
+      .markdown-content a:hover {
+        text-decoration: underline;
+      }
+
+      .markdown-content strong {
+        color: #e6edf3;
+        font-weight: 600;
+      }
+
+      .markdown-content em {
+        font-style: italic;
+      }
+
+      section[id] {
+        scroll-margin-top: 80px;
+      }
+    </style>
+  </head>
+
+  <body class="bg-bg text-text">
+    <!-- Navigation -->
+    <nav
+      class="fixed top-0 left-0 right-0 z-50 bg-bg/80 backdrop-blur-md border-b border-border"
+    >
+      <div class="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+        <a href="../index.html" class="font-mono font-bold text-lg text-text hover:text-accent transition">
+          <span class="text-accent">aot</span>
+        </a>
+        <div class="hidden md:flex items-center gap-6 text-sm">
+          <a href="../index.html#features" class="text-muted hover:text-text transition">Features</a>
+          <a href="../index.html#architecture" class="text-muted hover:text-text transition">Architecture</a>
+          <a href="../index.html#install" class="text-muted hover:text-text transition">Install</a>
+          <a href="../index.html#alternatives" class="text-muted hover:text-text transition">Alternatives</a>
+          <a href="recommended-tmux-config.html" class="text-muted hover:text-text transition font-semibold text-text">TMUX Config</a>
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+            >
+              <path
+                d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"
+              />
+            </svg>
+            GitHub
+          </a>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Content -->
+    <main class="pt-24 pb-16 px-6">
+      <div class="max-w-3xl mx-auto">
+        <div class="mb-8">
+          <a
+            href="../index.html"
+            class="text-sm text-muted hover:text-text transition flex items-center gap-1.5"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <polyline points="15 18 9 12 15 6"></polyline>
+            </svg>
+            Back to home
+          </a>
+        </div>
+
+        <h1 class="text-3xl font-bold mb-6">AOT Recommended TMUX Config</h1>
+
+        <div id="markdown-content" class="space-y-8 text-muted leading-relaxed">
+          <p class="text-muted">Loading documentation...</p>
+        </div>
+      </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="py-10 px-6 border-t border-border">
+      <div class="max-w-6xl mx-auto text-center text-sm text-muted">
+        <div class="flex flex-col md:flex-row items-center justify-between gap-4">
+          <div class="flex items-center gap-4">
+            <a
+              href="https://github.com/paulodiovani/agents-on-tmux"
+              target="_blank"
+              rel="noopener"
+              class="hover:text-text transition flex items-center gap-1.5"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+              >
+                <path
+                  d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"
+                />
+              </svg>
+              GitHub
+            </a>
+            <span>•</span>
+            <span>MIT License</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span>Built with</span>
+            <a
+              href="https://www.rust-lang.org/"
+              target="_blank"
+              rel="noopener"
+              class="text-accent hover:underline font-medium"
+              >Rust</a
+            >
+          </div>
+        </div>
+      </div>
+    </footer>
+
+    <!-- Render markdown -->
+    <script>
+      document.addEventListener('DOMContentLoaded', async () => {
+        const container = document.getElementById('markdown-content');
+        try {
+          const response = await fetch('recommended-tmux-config.md');
+          if (!response.ok) throw new Error('Failed to load');
+          const markdown = await response.text();
+          container.innerHTML = marked.parse(markdown);
+        } catch (error) {
+          container.innerHTML = '<p class="text-red-400">Failed to load documentation. Please check that the markdown file exists.</p>';
+        }
+      });
+    </script>
+  </body>
+</html>

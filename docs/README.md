@@ -6,7 +6,9 @@ This directory contains the static landing page for Agents on TMUX, hosted on Gi
 
 - `index.html` — Main landing page with demo screenshot
 - `assets/demo.png` — Demo screenshot of AOT in action
-- `recommended-tmux-config.md` — TMUX configuration guide (existing)
+- `user-manual/` — Documentation pages
+  - `recommended-tmux-config.md` — Source markdown
+  - `recommended-tmux-config.html` — Rendered HTML page
 - `README.md` — This file
 
 ## Demo
