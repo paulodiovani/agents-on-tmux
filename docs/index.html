@@ -1,0 +1,712 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AOT — Agents on TMUX</title>
+    <meta
+      name="description"
+      content="Run AI agents in isolated TMUX sessions. A lightweight orchestrator that gives each agent its own window with a TUI control panel."
+    />
+
+    <meta property="og:title" content="AOT — Agents on TMUX" />
+    <meta
+      property="og:description"
+      content="Run AI agents in isolated TMUX sessions. A lightweight orchestrator that gives each agent its own window with a TUI control panel."
+    />
+    <meta property="og:image" content="assets/demo.png" />
+    <meta property="og:image:type" content="image/png" />
+    <meta property="og:image:width" content="1024" />
+    <meta property="og:image:height" content="768" />
+    <meta property="og:type" content="website" />
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            colors: {
+              bg: "#0d1117",
+              surface: "#161b22",
+              border: "#30363d",
+              text: "#e6edf3",
+              muted: "#8b949e",
+              accent: "#f74c00",
+              "term-bg": "#1a1b26",
+            },
+            fontFamily: {
+              mono: [
+                "JetBrains Mono",
+                "Fira Code",
+                "Cascadia Code",
+                "Menlo",
+                "monospace",
+              ],
+            },
+          },
+        },
+      };
+    </script>
+
+    <!-- Terminal demo screenshot -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+
+    <style>
+      body {
+        font-family: "Inter", system-ui, sans-serif;
+      }
+
+      /* Demo screenshot */
+      .demo-screenshot {
+        background: #1a1b26;
+        border: 1px solid #30363d;
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(0, 0, 0, 0.2);
+        padding: 20px;
+        min-height: 600px;
+      }
+
+      .demo-screenshot img {
+        width: 100%;
+        height: auto;
+        display: block;
+        transition: opacity 0.2s;
+      }
+
+      .demo-screenshot a {
+        display: block;
+        cursor: pointer;
+      }
+
+      .demo-screenshot a:hover img {
+        opacity: 0.9;
+      }
+
+      /* Asciinema player */
+      .demo-screenshot > * {
+        display: block;
+      }
+
+      /* Code blocks */
+      .arch-diagram {
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        padding: 20px;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 12px;
+        line-height: 1.5;
+        overflow-x: auto;
+        color: #a9b1d6;
+      }
+
+      /* Code blocks */
+      code {
+        background: #161b22;
+        border: 1px solid #30363d;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 0.9em;
+        color: #e6edf3;
+      }
+
+      pre code {
+        background: transparent;
+        border: none;
+        padding: 0;
+      }
+
+      pre {
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        padding: 16px;
+        overflow-x: auto;
+        font-size: 13px;
+        line-height: 1.6;
+      }
+
+      /* Feature cards */
+      .feature-card {
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 8px;
+        padding: 20px;
+        transition: border-color 0.15s;
+      }
+
+      .feature-card:hover {
+        border-color: #484f58;
+      }
+
+      /* Comparison cards */
+      .comparison-card {
+        background: #161b22;
+        border: 1px solid #30363d;
+        border-radius: 8px;
+        padding: 24px;
+      }
+
+      .comparison-card h3 a {
+        color: #7aa2f7;
+        text-decoration: none;
+      }
+
+      .comparison-card h3 a:hover {
+        text-decoration: underline;
+      }
+
+      /* Smooth scrolling offset for fixed nav */
+      section[id] {
+        scroll-margin-top: 80px;
+      }
+    </style>
+  </head>
+
+  <body class="bg-bg text-text">
+    <!-- Navigation -->
+    <nav
+      class="fixed top-0 left-0 right-0 z-50 bg-bg/80 backdrop-blur-md border-b border-border"
+    >
+      <div class="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+        <a href="#" class="font-mono font-bold text-lg text-text hover:text-accent transition">
+          <span class="text-accent">aot</span>
+        </a>
+        <div class="hidden md:flex items-center gap-6 text-sm">
+          <a href="#features" class="text-muted hover:text-text transition">Features</a>
+          <a href="#architecture" class="text-muted hover:text-text transition">Architecture</a>
+          <a href="#install" class="text-muted hover:text-text transition">Install</a>
+          <a href="#alternatives" class="text-muted hover:text-text transition">Alternatives</a>
+          <a href="user-manual/recommended-tmux-config.html" class="text-muted hover:text-text transition">TMUX Config</a>
+          <a
+            href="https://github.com/paulodiovani/agents-on-tmux"
+            target="_blank"
+            rel="noopener"
+            class="text-muted hover:text-text transition flex items-center gap-1.5"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+            >
+              <path
+                d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"
+              />
+            </svg>
+            GitHub
+          </a>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Hero -->
+    <section class="pt-32 pb-16 px-6">
+      <div class="max-w-6xl mx-auto text-center">
+        <h1 class="text-4xl md:text-5xl font-bold mb-4 tracking-tight">
+          Run AI agents in isolated TMUX sessions
+        </h1>
+        <p class="text-lg text-muted max-w-2xl mx-auto mb-12">
+          A lightweight orchestrator that gives each agent its own TMUX window.
+          Control them from a TUI panel using the keybindings you already know.
+        </p>
+
+        <!-- Demo screenshot -->
+        <div class="flex justify-center">
+          <div class="w-full max-w-[1024px]">
+            <div class="demo-screenshot">
+              <img
+                id="demo-fallback"
+                src="assets/demo.png"
+                alt="Agents on TMUX - TUI control panel with agent windows"
+                style="width: 100%; height: auto; display: block;"
+              />
+              <script
+                src="https://asciinema.org/a/1268923.js"
+                id="asciicast-1268923"
+                async="true"
+                onload="document.getElementById('demo-fallback').style.display='none'"
+              ></script>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- What is AOT? -->
+    <section class="py-16 px-6 border-t border-border">
+      <div class="max-w-3xl mx-auto">
+        <h2 class="text-2xl font-bold mb-6">What is AOT?</h2>
+        <div class="space-y-4 text-muted leading-relaxed">
+          <p>
+            <span class="text-text font-medium">Agents on TMUX</span> (AOT) is a
+            Rust binary that works as a thin wrapper over TMUX and a TUI control panel.
+            It creates an isolated TMUX server for your AI coding agents, giving each one
+            its own window — no conflicts with your existing sessions.
+          </p>
+          <p>
+            The TUI panel lets you see which agents are running, focus between them,
+            rename windows, and start new agents. It uses standard TMUX keybindings,
+            so there's nothing new to learn. If you already use TMUX, you already know
+            how to use AOT.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Features -->
+    <section id="features" class="py-16 px-6 border-t border-border">
+      <div class="max-w-6xl mx-auto">
+        <h2 class="text-2xl font-bold mb-10 text-center">Features</h2>
+        <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div class="feature-card">
+            <div class="text-accent mb-3">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect>
+                <line x1="8" y1="21" x2="16" y2="21"></line>
+                <line x1="12" y1="17" x2="12" y2="21"></line>
+              </svg>
+            </div>
+            <h3 class="font-semibold mb-2">Isolated Sessions</h3>
+            <p class="text-sm text-muted">
+              Each agent runs in its own TMUX window on a dedicated server
+              (<code>-L agents-on-tmux</code>), preventing conflicts with your
+              existing TMUX sessions.
+            </p>
+          </div>
+
+          <div class="feature-card">
+            <div class="text-accent mb-3">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                <line x1="3" y1="9" x2="21" y2="9"></line>
+                <line x1="9" y1="21" x2="9" y2="9"></line>
+              </svg>
+            </div>
+            <h3 class="font-semibold mb-2">TUI Control Panel</h3>
+            <p class="text-sm text-muted">
+              Manage agents with a terminal UI — focus, rename, stop, or start new agents.
+              Two tabs: <strong>Agents</strong> for AI coding agents,
+              <strong>Windows</strong> for regular TMUX windows.
+            </p>
+          </div>
+
+          <div class="feature-card">
+            <div class="text-accent mb-3">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <polyline points="4 17 10 11 4 5"></polyline>
+                <line x1="12" y1="19" x2="20" y2="19"></line>
+              </svg>
+            </div>
+            <h3 class="font-semibold mb-2">TMUX Muscle Memory</h3>
+            <p class="text-sm text-muted">
+              Uses standard TMUX keybindings — no new shortcuts to learn.
+              AOT leverages your existing TMUX knowledge so you can be productive
+              from the first second.
+            </p>
+          </div>
+
+          <div class="feature-card">
+            <div class="text-accent mb-3">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path>
+                <circle cx="9" cy="7" r="4"></circle>
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87"></path>
+                <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
+              </svg>
+            </div>
+            <h3 class="font-semibold mb-2">Multi-Agent Support</h3>
+            <p class="text-sm text-muted">
+              Detects and controls popular AI coding agents: Claude Code, Codex,
+              Aider, Copilot, Cursor, Devin, Hermes, OpenCode, Pi, and more.
+            </p>
+          </div>
+
+          <div class="feature-card">
+            <div class="text-accent mb-3">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <circle cx="12" cy="12" r="3"></circle>
+                <path
+                  d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"
+                ></path>
+              </svg>
+            </div>
+            <h3 class="font-semibold mb-2">Flexible Launch Modes</h3>
+            <p class="text-sm text-muted">
+              Split pane (default), standalone TUI (<code>--tui</code>), or
+              headless attach (<code>--no-tui</code>). Choose what fits your workflow.
+            </p>
+          </div>
+
+          <div class="feature-card">
+            <div class="text-accent mb-3">
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="24"
+                height="24"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <polygon
+                  points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"
+                ></polygon>
+              </svg>
+            </div>
+            <h3 class="font-semibold mb-2">Icon Support</h3>
+            <p class="text-sm text-muted">
+              Nerd Font and Font Awesome icons for visual agent identification.
+              See at a glance which agent is running in each window.
+            </p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Architecture -->
+    <section id="architecture" class="py-16 px-6 border-t border-border">
+      <div class="max-w-6xl mx-auto">
+        <h2 class="text-2xl font-bold mb-10 text-center">Architecture</h2>
+
+        <div class="grid lg:grid-cols-2 gap-8 items-start">
+          <div>
+            <div class="arch-diagram mb-6">
+              <pre class="!bg-transparent !border-0 !p-0 !text-xs leading-relaxed">
+┌──────────────────────────────────────────────────────────────┐
+│                          aot (main.rs)                       │
+├────────────────────────────┬─────────────────────────────────┤
+│       frontends/           │         backends/               │
+│                            │                                 │
+│     ┌────────────┐         │       ┌────────────┐            │
+│     │    tui     │         │       │    tmux    │            │
+│     └────────────┘         │       └────────────┘            │
+│                            │       ┌────────────┐            │
+│                            │       │   agents   │            │
+│                            │       └────────────┘            │
+└────────────────────────────┴─────────────────────────────────┘
+
+┌──────────────────────────────────────────────────────────────┐
+│                     Parent TMUX Server                       │
+│ ┌────────────┐   ┌────────────────────────────────────────┐  │
+│ │  TUI Pane  │   │  Isolated Server (-L agents-on-tmux)   │  │
+│ │            │   │  ┌──────────┐ ┌──────────┐ ┌────────┐  │  │
+│ │            │   │  │  Agent   │ │  Agent   │ │  Agent │  │  │
+│ │            │   │  │  Window  │ │  Window  │ │  Window│  │  │
+│ │            │   │  └──────────┘ └──────────┘ └────────┘  │  │
+│ └────────────┘   └────────────────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────┘</pre
+              >
+            </div>
+          </div>
+
+          <div class="space-y-6">
+            <div>
+              <h3 class="font-semibold text-accent mb-2 font-mono text-sm">frontends/tui</h3>
+              <p class="text-sm text-muted">
+                The terminal control panel built with ratatui. Provides a sidebar
+                with two tabs: <strong>Agents</strong> (running AI coding agents)
+                and <strong>Windows</strong> (regular TMUX windows). The TUI runs
+                in its own TMUX pane and retains its width when the terminal is
+                resized.
+              </p>
+            </div>
+            <div>
+              <h3 class="font-semibold text-accent mb-2 font-mono text-sm">backends/tmux</h3>
+              <p class="text-sm text-muted">
+                The TMUX communication interface. Manages the isolated TMUX server
+                using <code>-L agents-on-tmux</code>, creates sessions, handles
+                window CRUD, and provides the <code>Tmux</code> trait for
+                interacting with TMUX programmatically.
+              </p>
+            </div>
+            <div>
+              <h3 class="font-semibold text-accent mb-2 font-mono text-sm">backends/agents</h3>
+              <p class="text-sm text-muted">
+                Agent detection and identification. Recognizes popular AI coding
+                agents (Claude Code, Codex, Aider, Copilot, Cursor, Devin, Hermes,
+                OpenCode, Pi) by name and command, enabling the TUI to display
+                appropriate icons and metadata.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Installation -->
+    <section id="install" class="py-16 px-6 border-t border-border">
+      <div class="max-w-3xl mx-auto">
+        <h2 class="text-2xl font-bold mb-10 text-center">Installation</h2>
+
+        <div class="space-y-6">
+          <div>
+            <h3 class="font-semibold mb-3">Requirements</h3>
+            <ul class="text-sm text-muted space-y-1 ml-4">
+              <li>• <a href="https://tmux.app/" target="_blank" rel="noopener" class="text-[#7aa2f7] hover:underline">TMUX</a></li>
+              <li>• Optional: <a href="https://www.nerdfonts.com/" target="_blank" rel="noopener" class="text-[#7aa2f7] hover:underline">Nerd Font</a> 3+ for agent icons</li>
+              <li>• Optional: <a href="https://fontawesome.com/" target="_blank" rel="noopener" class="text-[#7aa2f7] hover:underline">Font Awesome</a> 7+ for agent icons</li>
+            </ul>
+          </div>
+
+          <div>
+            <h3 class="font-semibold mb-3">Build from source</h3>
+            <p class="text-sm text-muted mb-3">
+              Requires <a href="https://www.rust-lang.org/" target="_blank" rel="noopener" class="text-[#7aa2f7] hover:underline">Rust</a> 1.85+ (edition 2024).
+            </p>
+            <pre><code># Clone the repository
+git clone https://github.com/paulodiovani/agents-on-tmux.git
+cd agents-on-tmux
+
+# Build and install
+cargo install --path .</code></pre>
+          </div>
+
+          <div>
+            <h3 class="font-semibold mb-3">Configuration</h3>
+            <p class="text-sm text-muted mb-3">
+              AOT supports CLI arguments, environment variables, and a TOML config
+              file at <code>~/.config/aot/aot.conf</code>.
+            </p>
+            <p class="text-sm text-muted mb-3">
+              <strong>Priority chain:</strong> CLI arguments > environment variables
+              > config file > defaults
+            </p>
+            <pre><code># ~/.config/aot/aot.conf
+tui = false
+tui_width = 35
+nerd_font = true
+font_awesome = true
+debug = false</code></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Quick Start -->
+    <section class="py-16 px-6 border-t border-border">
+      <div class="max-w-3xl mx-auto">
+        <h2 class="text-2xl font-bold mb-10 text-center">Quick Start</h2>
+
+        <div class="space-y-6">
+          <div>
+            <h3 class="font-semibold mb-3">Launch modes</h3>
+            <pre><code># Start AOT in your TMUX session (default: split pane with TUI)
+aot
+
+# Launch standalone TUI only
+aot --tui
+
+# Run without TUI (headless attach to nested session)
+aot --no-tui
+
+# Adjust TUI panel width
+aot --tui-width=50</code></pre>
+          </div>
+
+          <div>
+            <h3 class="font-semibold mb-3">How it works</h3>
+            <ol class="text-sm text-muted space-y-2 ml-4 list-decimal list-inside">
+              <li>Start the application with <code>aot</code></li>
+              <li>AOT checks if a parent TMUX session is running (stops if not)</li>
+              <li>Creates an isolated TMUX server using <code>tmux -L agents-on-tmux</code></li>
+              <li>The TUI control panel opens in a left pane (configurable width)</li>
+              <li>Use the TUI or standard TMUX bindings to manage agents</li>
+            </ol>
+          </div>
+
+          <div>
+            <h3 class="font-semibold mb-3">Supported agents</h3>
+            <p class="text-sm text-muted mb-3">
+              AOT detects and controls these AI coding agents:
+            </p>
+            <div class="flex flex-wrap gap-2">
+              <span class="px-3 py-1 bg-surface border border-border rounded-full text-xs font-mono"
+                >Aider</span
+              >
+              <span class="px-3 py-1 bg-surface border border-border rounded-full text-xs font-mono"
+                >Claude Code</span
+              >
+              <span class="px-3 py-1 bg-surface border border-border rounded-full text-xs font-mono"
+                >Codex</span
+              >
+              <span class="px-3 py-1 bg-surface border border-border rounded-full text-xs font-mono"
+                >Copilot</span
+              >
+              <span class="px-3 py-1 bg-surface border border-border rounded-full text-xs font-mono"
+                >Cursor</span
+              >
+              <span class="px-3 py-1 bg-surface border border-border rounded-full text-xs font-mono"
+                >Devin</span
+              >
+              <span class="px-3 py-1 bg-surface border border-border rounded-full text-xs font-mono"
+                >Hermes</span
+              >
+              <span class="px-3 py-1 bg-surface border border-border rounded-full text-xs font-mono"
+                >OpenCode</span
+              >
+              <span class="px-3 py-1 bg-surface border border-border rounded-full text-xs font-mono"
+                >Pi</span
+              >
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Alternatives -->
+    <section id="alternatives" class="py-16 px-6 border-t border-border">
+      <div class="max-w-6xl mx-auto">
+        <h2 class="text-2xl font-bold mb-10 text-center">Alternatives</h2>
+
+        <div class="grid md:grid-cols-2 gap-6">
+          <div class="comparison-card">
+            <h3 class="font-semibold mb-3">
+              <a href="https://herdr.dev/" target="_blank" rel="noopener">herdr</a>
+            </h3>
+            <p class="text-sm text-muted mb-4">
+              A full agent runtime with persistent server, multi-machine support,
+              and cloud features. Much more ambitious than AOT.
+            </p>
+            <div class="text-sm">
+              <p class="font-medium text-text mb-2">Key differences:</p>
+              <ul class="text-muted space-y-1 ml-4">
+                <li>• herdr runs a background server; AOT relies on TMUX sessions</li>
+                <li>• herdr supports multiple machines via SSH; AOT is single-machine</li>
+                <li>• herdr has a plugin ecosystem and cloud features (coming soon)</li>
+                <li>• AOT is minimal and self-contained; no daemon required</li>
+                <li>• AOT leverages existing TMUX knowledge; herdr has its own interface</li>
+                <li>• Both support similar agents (Claude Code, Codex, OpenCode, etc.)</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="comparison-card">
+            <h3 class="font-semibold mb-3">
+              <a href="https://tmux.app/doc/claude-code-tmux/" target="_blank" rel="noopener"
+                >tmux + claude code</a
+              >
+            </h3>
+            <p class="text-sm text-muted mb-4">
+              Documentation/guide for manually setting up TMUX with Claude Code.
+              Not a tool, just setup instructions.
+            </p>
+            <div class="text-sm">
+              <p class="font-medium text-text mb-2">Key differences:</p>
+              <ul class="text-muted space-y-1 ml-4">
+                <li>• Not a tool, just a setup guide for manual TMUX configuration</li>
+                <li>• Requires users to configure TMUX themselves</li>
+                <li>• No TUI control panel or agent detection</li>
+                <li>• Organizes agents in panes within a single window</li>
+                <li>• AOT uses independent windows with <strong>Agents</strong> and <strong>Windows</strong> tabs</li>
+                <li>• AOT automates the setup and provides orchestration features</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="py-10 px-6 border-t border-border">
+      <div class="max-w-6xl mx-auto text-center text-sm text-muted">
+        <div class="flex flex-col md:flex-row items-center justify-between gap-4">
+          <div class="flex items-center gap-4">
+            <a
+              href="https://github.com/paulodiovani/agents-on-tmux"
+              target="_blank"
+              rel="noopener"
+              class="hover:text-text transition flex items-center gap-1.5"
+            >
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+              >
+                <path
+                  d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"
+                />
+              </svg>
+              GitHub
+            </a>
+            <span>•</span>
+            <span>MIT License</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <span>Built with</span>
+            <a
+              href="https://www.rust-lang.org/"
+              target="_blank"
+              rel="noopener"
+              class="text-accent hover:underline font-medium"
+              >Rust</a
+            >
+          </div>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>
