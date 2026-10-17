@@ -4,78 +4,62 @@ This directory contains the static landing page for Agents on TMUX, hosted on Gi
 
 ## Structure
 
-- `index.html` — Main landing page with embedded terminal demo
-- `assets/demo.js` — xterm.js player for asciinema recordings
-- `assets/demo.cast` — Asciinema recording (you need to create this)
+- `index.html` — Main landing page with demo screenshot
+- `assets/demo.png` — Demo screenshot of AOT in action
 - `recommended-tmux-config.md` — TMUX configuration guide (existing)
+- `README.md` — This file
 
-## Recording the Demo
+## Demo
 
-The terminal demo uses an asciinema `.cast` file. To create it:
+A live recording is available at [asciinema.org/a/1268923](https://asciinema.org/a/1268923).
 
-### 1. Install asciinema
+The landing page also displays a static screenshot at `assets/demo.png`.
 
-```bash
-# macOS
-brew install asciinema
+To update the screenshot:
+1. Run AOT in your terminal with a realistic setup (multiple agent windows, TUI panel visible, icons enabled)
+2. Take a screenshot and save it as `assets/demo.png`
 
-# Linux
-sudo apt install asciinema
-# or
-pip install asciinema
+**Recommended specifications:**
+- **Size**: 1024x768 or similar wide format
+- **Content**: Show AOT with multiple agent windows, the TUI control panel, and icons visible
+- **Format**: PNG for best quality
+
+## Customization
+
+### Screenshot
+
+Update the screenshot by replacing `assets/screenshot.png`. The image container is set to max-width: 1024px and will scale responsively.
+
+### Colors
+
+The page uses a dark GitHub-inspired palette defined in `index.html` with Tailwind config:
+
+```html
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          // Primary colors
+          bg: '#0d1117',
+          surface: '#161b22',
+          border: '#30363d',
+          text: '#c9d1d9',
+          muted: '#8b949e',
+          // Accent color (Rust orange)
+          accent: '#f74c00',
+        }
+      }
+    }
+  }
+</script>
 ```
 
-### 2. Record the demo
+### Content
 
-```bash
-# Record with fixed dimensions (matches the player)
-asciinema rec --cols 120 --rows 38 docs/assets/demo.cast
-```
+All sections are in `index.html`. Edit directly — it's plain HTML with Tailwind classes.
 
-### 3. Suggested demo workflow
-
-Record yourself:
-1. Starting with `aot` in a TMUX session
-2. Show the TUI panel appearing on the left
-3. Launch an agent (e.g., `claude` or `aider`)
-4. Show agent detection in the TUI
-5. Navigate between agents/windows
-6. Show key bindings in action
-7. Maybe rename a window or stop an agent
-
-Keep it concise — 30-60 seconds is ideal.
-
-### 4. Optimize the recording (optional)
-
-You can edit the `.cast` file to:
-- Remove long pauses
-- Speed up boring parts
-- Trim the beginning/end
-
-The file format is JSON-lines, human-readable and editable.
-
-## Testing Locally
-
-```bash
-# From the docs/ directory
-cd docs
-
-# Start a simple HTTP server
-python3 -m http.server 8000
-
-# Or with Node.js
-npx serve .
-
-# Or with Rust
-cargo install miniserve
-miniserve .
-```
-
-Then open http://localhost:8000 in your browser.
-
-**Note:** The `.cast` file must be served over HTTP (not `file://`) for the fetch to work.
-
-## Deploying to GitHub Pages
+## Deployment
 
 ### Option 1: Use `/docs` directory (already configured)
 
@@ -94,46 +78,17 @@ If you have a custom domain:
 2. Configure DNS records with your domain provider
 3. Enable HTTPS in GitHub Pages settings
 
-## Terminal Player Features
-
-The embedded terminal player supports:
-- **Play/Pause** — Control playback
-- **Restart** — Replay from the beginning
-- **Speed control** — 1x, 2x, 4x playback speed
-- **Progress bar** — Visual indication of playback position
-- **Graceful fallback** — Shows "Demo coming soon" if no `.cast` file exists
-
-## Customization
-
-### Colors
-
-The terminal theme is configured in `assets/demo.js`:
-
-```javascript
-const THEME = {
-  background: "#1a1b26",
-  foreground: "#a9b1d6",
-  // ... more colors
-};
-```
-
-The page uses a dark GitHub-inspired palette defined in `index.html` with Tailwind config.
-
-### Terminal size
-
-The terminal is fixed at 120 columns × 38 rows (1024×768 pixels). To change:
-
-1. Update `cols` and `rows` in `assets/demo.js`
-2. Update `--cols` and `--rows` when recording
-3. Adjust the CSS in `index.html` if needed
-
-### Content
-
-All sections are in `index.html`. Edit directly — it's plain HTML with Tailwind classes.
-
 ## Development
 
-### Local changes
+### Local testing
+
+```bash
+cd docs
+python3 -m http.server 8000
+# Open http://localhost:8000
+```
+
+### Live editing
 
 Edit `index.html` and refresh your browser. Changes are immediate (no build step).
 
@@ -141,33 +96,30 @@ Edit `index.html` and refresh your browser. Changes are immediate (no build step
 
 The page uses Tailwind CSS via CDN for rapid development. All styles are in the HTML with utility classes.
 
-### xterm.js
-
-The terminal emulator is loaded from CDN. The player logic is in `assets/demo.js`.
-
 ## Troubleshooting
 
-**Terminal not showing?**
-- Check that `demo.cast` exists in `assets/`
-- Ensure you're serving over HTTP (not `file://`)
+**Screenshot not showing?**
+- Check that `assets/screenshot.png` exists
+- Verify the file path is correct in `index.html`
 - Check browser console for errors
 
-**Recording looks wrong?**
-- Make sure to record with `--cols 120 --rows 38`
-- The player expects asciinema .cast v2 format
-
 **Styles not loading?**
-- Tailwind and xterm.js are loaded from CDN
+- Tailwind is loaded from CDN
 - Check your internet connection
-- Verify CDN URLs in `index.html`
+- Verify CDN URL in `index.html`
+
+**Image looks pixelated?**
+- Use a higher resolution screenshot
+- Ensure the PNG is not compressed too aggressively
+- Consider using a 2x resolution image for retina displays
 
 ## Future enhancements
 
 Potential improvements:
-- [ ] Multiple demo recordings (different workflows)
-- [ ] Interactive mode (let users type commands)
-- [ ] Keyboard shortcuts for player controls
-- [ ] Loop toggle
-- [ ] Fullscreen mode
+- [ ] Add a demo video or animated GIF
+- [ ] Interactive terminal demo (using xterm.js or asciinema)
+- [ ] Multi-language support
 - [ ] Dark/light theme toggle
 - [ ] Analytics integration
+- [ ] Blog or changelog section
+- [ ] Social sharing meta tags
