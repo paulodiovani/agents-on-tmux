@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Include omp (Oh My Pi) agent with custom pi icon (󰏿)
+
 ## [1.0.0] - 2026-09-21
 
 ### Changed

@@ -148,5 +148,6 @@ Falls back to `/tmp/aot/aot.log` if the cache directory cannot be determined.
 | Cursor      |   ✔️   |   -    |       -        |
 | Devin       |   ✔️   |   -    |       -        |
 | Hermes      |   ✔️   |   -    |       -        |
+| omp         |   ✔️   |   -    |       -        |
 | OpenCode    |   ✔️   |   -    |       -        |
 | Pi          |   ✔️   |   -    |       -        |

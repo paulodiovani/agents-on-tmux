@@ -33,6 +33,7 @@ static AGENTS: LazyLock<Vec<GenericAgent>> = LazyLock::new(|| {
         GenericAgent::new("Hermes", "hermes"),
         GenericAgent::new("OpenCode", "opencode"),
         GenericAgent::new("Pi", "pi"),
+        GenericAgent::new("omp", "omp"),
     ]
 });
 
@@ -71,6 +72,7 @@ mod tests {
         assert!(is_agent("hermes").is_some());
         assert!(is_agent("aider").is_some());
         assert!(is_agent("cursor").is_some());
+        assert!(is_agent("omp").is_some());
     }
 
     #[test]
