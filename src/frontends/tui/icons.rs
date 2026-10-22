@@ -32,6 +32,7 @@ static AGENT_ICONS: LazyLock<HashMap<&str, Icon>> = LazyLock::new(|| {
         ("cursor", Icon::new("\u{ee0d}", "\u{f544}", "[cu]")), //  
         ("devin", Icon::new("\u{ee0d}", "\u{f544}", "[dv]")), //  
         ("hermes", Icon::new("\u{2695}", "\u{2695}", "[hm]")), // ⚕ ⚕
+        ("omp", Icon::new("\u{ee0d}", "\u{f544}", "[om]")),   //
         ("opencode", Icon::new("\u{ee0d}", "\u{f544}", "[oc]")), //  
         ("pi", Icon::new("\u{e22c}", "\u{f544}", "[pi]")),    //  
     ])
