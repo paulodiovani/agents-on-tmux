@@ -1,0 +1,130 @@
+use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+use ratatui::layout::Rect;
+
+/// Checks whether a mouse event hits the given rectangle.
+/// Only left-button presses count as hits; other buttons, drags, scrolls,
+/// and releases never hit.
+pub fn hit_check(mouse: MouseEvent, area: Rect) -> bool {
+    is_left_click(mouse)
+        && mouse.column >= area.x
+        && mouse.column < area.x + area.width
+        && mouse.row >= area.y
+        && mouse.row < area.y + area.height
+}
+
+/// Returns true if this is a left-button press event.
+pub fn is_left_click(mouse: MouseEvent) -> bool {
+    matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+
+    fn mouse_event(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
+        MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: crossterm::event::KeyModifiers::NONE,
+        }
+    }
+
+    fn rect(x: u16, y: u16, width: u16, height: u16) -> Rect {
+        Rect {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    #[test]
+    fn left_click_inside_rect_hits() {
+        let r = rect(5, 3, 10, 4);
+        assert!(hit_check(
+            mouse_event(MouseEventKind::Down(MouseButton::Left), 7, 5),
+            r,
+        ));
+    }
+
+    #[test]
+    fn left_click_outside_rect_misses() {
+        let r = rect(5, 3, 10, 4);
+        assert!(!hit_check(
+            mouse_event(MouseEventKind::Down(MouseButton::Left), 20, 5),
+            r,
+        ));
+    }
+
+    #[test]
+    fn right_click_inside_rect_misses() {
+        let r = rect(5, 3, 10, 4);
+        assert!(!hit_check(
+            mouse_event(MouseEventKind::Down(MouseButton::Right), 7, 5),
+            r,
+        ));
+    }
+
+    #[test]
+    fn click_on_exact_boundary_hits() {
+        let r = rect(5, 3, 10, 4);
+        // Top-left corner
+        assert!(hit_check(
+            mouse_event(MouseEventKind::Down(MouseButton::Left), 5, 3),
+            r,
+        ));
+    }
+
+    #[test]
+    fn click_just_past_boundary_misses() {
+        let r = rect(5, 3, 10, 4);
+        // Just past right edge (x + width = 15)
+        assert!(!hit_check(
+            mouse_event(MouseEventKind::Down(MouseButton::Left), 15, 5),
+            r,
+        ));
+        // Just past bottom edge (y + height = 7)
+        assert!(!hit_check(
+            mouse_event(MouseEventKind::Down(MouseButton::Left), 7, 7),
+            r,
+        ));
+    }
+
+    #[test]
+    fn is_left_click_true_for_left_down() {
+        let event = mouse_event(MouseEventKind::Down(MouseButton::Left), 0, 0);
+        assert!(is_left_click(event));
+    }
+
+    #[test]
+    fn is_left_click_false_for_right_down() {
+        let event = mouse_event(MouseEventKind::Down(MouseButton::Right), 0, 0);
+        assert!(!is_left_click(event));
+    }
+
+    #[test]
+    fn is_left_click_false_for_drag() {
+        let event = mouse_event(MouseEventKind::Drag(MouseButton::Left), 5, 5);
+        assert!(!is_left_click(event));
+    }
+
+    #[test]
+    fn is_left_click_false_for_scroll() {
+        let event = mouse_event(MouseEventKind::ScrollDown, 5, 5);
+        assert!(!is_left_click(event));
+    }
+
+    #[test]
+    fn is_left_click_false_for_move() {
+        let event = mouse_event(MouseEventKind::Moved, 5, 5);
+        assert!(!is_left_click(event));
+    }
+
+    #[test]
+    fn is_left_click_false_for_up() {
+        let event = mouse_event(MouseEventKind::Up(MouseButton::Left), 5, 5);
+        assert!(!is_left_click(event));
+    }
+}

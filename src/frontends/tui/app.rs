@@ -267,6 +267,33 @@ impl App {
                         self.enforce_panel_width(width);
                         last_draw = Instant::now() - redraw_tick;
                     }
+                    event::Event::Mouse(mouse_event) => {
+                        if crate::frontends::tui::mouse::is_left_click(mouse_event) {
+                            let size = terminal.size()?;
+                            let regions = ui::clickable_regions(
+                                ratatui::layout::Rect::new(0, 0, size.width, size.height),
+                                self,
+                            );
+                            for region in regions {
+                                if crate::frontends::tui::mouse::hit_check(mouse_event, region.area)
+                                {
+                                    match region.action {
+                                        ui::RegionAction::SelectTab(tab) => {
+                                            if tab != self.active_tab() {
+                                                self.switch_tab(tab);
+                                            }
+                                        }
+                                        ui::RegionAction::SelectWindow(index) => {
+                                            self.set_current_selected(index);
+                                            self.focus_window();
+                                        }
+                                    }
+                                    break;
+                                }
+                            }
+                        }
+                        last_draw = Instant::now() - redraw_tick;
+                    }
                     _ => {}
                 }
             }
@@ -665,7 +692,7 @@ impl App {
         self.indices_for_tab(self.active_tab)
     }
 
-    fn indices_for_tab(&self, tab: Tab) -> Vec<usize> {
+    pub(crate) fn indices_for_tab(&self, tab: Tab) -> Vec<usize> {
         self.windows
             .iter()
             .enumerate()
