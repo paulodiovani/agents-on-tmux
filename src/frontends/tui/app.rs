@@ -267,19 +267,21 @@ impl App {
                         self.enforce_panel_width(width);
                         last_draw = Instant::now() - redraw_tick;
                     }
+                    // Scroll events
+                    event::Event::Mouse(mouse_event)
+                        if mouse::scroll_direction(mouse_event).is_some() =>
+                    {
+                        let direction = mouse::scroll_direction(mouse_event).unwrap();
+                        let size = terminal.size()?;
+                        // Calculate visible_count from terminal size
+                        // Layout: header (1) + tab bar (2) + footer (min 1) = 4 lines overhead
+                        let list_height = size.height.saturating_sub(4);
+                        let visible_count = (list_height / 3) as usize; // ROW_HEIGHT = 3
+                        self.scroll(direction, visible_count);
+                        last_draw = Instant::now() - redraw_tick;
+                    }
+                    // All other mouse events (hover, click, etc.)
                     event::Event::Mouse(mouse_event) => {
-                        // Handle scroll events
-                        if let Some(direction) = mouse::scroll_direction(mouse_event) {
-                            let size = terminal.size()?;
-                            // Calculate visible_count from terminal size
-                            // Layout: header (1) + tab bar (2) + footer (min 1) = 4 lines overhead
-                            let list_height = size.height.saturating_sub(4);
-                            let visible_count = (list_height / 3) as usize; // ROW_HEIGHT = 3
-                            self.scroll(direction, visible_count);
-                            last_draw = Instant::now() - redraw_tick;
-                            continue;
-                        }
-
                         let size = terminal.size()?;
                         let regions = ui::clickable_regions(
                             ratatui::layout::Rect::new(0, 0, size.width, size.height),
