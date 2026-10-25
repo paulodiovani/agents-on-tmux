@@ -12,7 +12,7 @@ use crate::backends::tmux::{self, EventProducer, TmuxEvent};
 use crate::backends::tmux::{Tmux, Window};
 use crate::frontends::tui::event::{Action, PendingAction, Tab, key_to_action};
 use crate::frontends::tui::theme::Theme;
-use crate::frontends::tui::ui;
+use crate::frontends::tui::{mouse, ui};
 
 /// The nested-session commands worth advertising, with their footer labels.
 const HINTED_COMMANDS: [(&str, &str); 5] = [
@@ -268,28 +268,25 @@ impl App {
                         last_draw = Instant::now() - redraw_tick;
                     }
                     event::Event::Mouse(mouse_event) => {
-                        if crate::frontends::tui::mouse::is_left_click(mouse_event) {
-                            let size = terminal.size()?;
-                            let regions = ui::clickable_regions(
-                                ratatui::layout::Rect::new(0, 0, size.width, size.height),
-                                self,
-                            );
-                            for region in regions {
-                                if crate::frontends::tui::mouse::hit_check(mouse_event, region.area)
-                                {
-                                    match region.action {
-                                        ui::RegionAction::SelectTab(tab) => {
-                                            if tab != self.active_tab() {
-                                                self.switch_tab(tab);
-                                            }
-                                        }
-                                        ui::RegionAction::SelectWindow(index) => {
-                                            self.set_current_selected(index);
-                                            self.focus_window();
+                        let size = terminal.size()?;
+                        let regions = ui::clickable_regions(
+                            ratatui::layout::Rect::new(0, 0, size.width, size.height),
+                            self,
+                        );
+                        for region in regions {
+                            if mouse::is_clicked(mouse_event, region.area) {
+                                match region.action {
+                                    ui::RegionAction::SelectTab(tab) => {
+                                        if tab != self.active_tab() {
+                                            self.switch_tab(tab);
                                         }
                                     }
-                                    break;
+                                    ui::RegionAction::SelectWindow(index) => {
+                                        self.set_current_selected(index);
+                                        self.focus_window();
+                                    }
                                 }
+                                break;
                             }
                         }
                         last_draw = Instant::now() - redraw_tick;

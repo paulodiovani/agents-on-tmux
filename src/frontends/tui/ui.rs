@@ -30,6 +30,20 @@ const HALF_BLOCK_UPPER: &str = "\u{2580}"; // ▀
 const TAB_RULE: &str = "\u{2594}"; // ▔
 const TAB_GAP: &str = "   ";
 
+/// Defines a clickable region in the TUI.
+#[derive(Debug)]
+pub struct ClickableRegion {
+    pub area: Rect,
+    pub action: RegionAction,
+}
+
+/// Action to perform when a clickable region is clicked.
+#[derive(Debug)]
+pub enum RegionAction {
+    SelectTab(Tab),
+    SelectWindow(usize),
+}
+
 /// Shrinks an area horizontally by the panel padding.
 fn padded(area: Rect) -> Rect {
     let padding = (PANEL_PADDING as u16).min(area.width / 2);
@@ -508,20 +522,6 @@ fn count_windows_for_tab(app: &App, tab: Tab) -> usize {
             Tab::Windows => is_agent(&w.running_command).is_none(),
         })
         .count()
-}
-
-/// Defines a clickable region in the TUI.
-#[derive(Debug)]
-pub struct ClickableRegion {
-    pub area: Rect,
-    pub action: RegionAction,
-}
-
-/// Action to perform when a clickable region is clicked.
-#[derive(Debug)]
-pub enum RegionAction {
-    SelectTab(Tab),
-    SelectWindow(usize),
 }
 
 /// Returns the clickable regions for the current layout.
@@ -1428,7 +1428,7 @@ mod tests {
     fn test_clickable_regions_returns_tab_and_list_regions() {
         // Default MockTmux::new: w1=bash (Windows), w2=claude (Agents, active)
         // After refresh: active_tab=Agents, 1 agent + 1 regular window
-        let mut app = app_with(vec![
+        let app = app_with(vec![
             Window {
                 id: 1,
                 name: "w1".to_string(),
