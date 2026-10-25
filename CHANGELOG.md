@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Include omp (Oh My Pi) agent with custom pi icon (󰏿)
+- Mouse support: click on tabs to switch between Agents/Windows, click on window rows to select and focus them.
 
 ## [1.0.0] - 2026-09-21
 
