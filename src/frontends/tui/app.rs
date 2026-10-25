@@ -268,6 +268,18 @@ impl App {
                         last_draw = Instant::now() - redraw_tick;
                     }
                     event::Event::Mouse(mouse_event) => {
+                        // Handle scroll events
+                        if let Some(direction) = mouse::scroll_direction(mouse_event) {
+                            let size = terminal.size()?;
+                            // Calculate visible_count from terminal size
+                            // Layout: header (1) + tab bar (2) + footer (min 1) = 4 lines overhead
+                            let list_height = size.height.saturating_sub(4);
+                            let visible_count = (list_height / 3) as usize; // ROW_HEIGHT = 3
+                            self.scroll(direction, visible_count);
+                            last_draw = Instant::now() - redraw_tick;
+                            continue;
+                        }
+
                         let size = terminal.size()?;
                         let regions = ui::clickable_regions(
                             ratatui::layout::Rect::new(0, 0, size.width, size.height),
@@ -690,6 +702,34 @@ impl App {
             selected
         } else if selected >= current_offset + visible_count {
             selected - visible_count + 1
+        } else {
+            current_offset
+        };
+
+        *self.list_state.offset_mut() = new_offset;
+    }
+
+    /// Scrolls the list by the given direction (-1 for up, 1 for down).
+    /// The visible_count is the number of items that fit in the viewport.
+    pub fn scroll(&mut self, direction: i8, visible_count: usize) {
+        if visible_count == 0 {
+            return;
+        }
+
+        let total_items = self.current_tab_len();
+        if total_items == 0 {
+            return;
+        }
+
+        let current_offset = self.list_state.offset();
+        let max_offset = total_items.saturating_sub(visible_count);
+
+        let new_offset = if direction > 0 {
+            // Scroll down
+            (current_offset + 1).min(max_offset)
+        } else if direction < 0 {
+            // Scroll up
+            current_offset.saturating_sub(1)
         } else {
             current_offset
         };

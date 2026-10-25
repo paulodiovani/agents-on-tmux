@@ -30,6 +30,16 @@ pub fn is_hovered(mouse: MouseEvent, area: Rect) -> bool {
     }
 }
 
+/// Returns the scroll direction if the mouse event is a scroll event.
+/// Returns Some(1) for scroll down, Some(-1) for scroll up, None otherwise.
+pub fn scroll_direction(mouse: MouseEvent) -> Option<i8> {
+    match mouse.kind {
+        MouseEventKind::ScrollDown => Some(1),
+        MouseEventKind::ScrollUp => Some(-1),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -172,5 +182,29 @@ mod tests {
             mouse_event(MouseEventKind::Down(MouseButton::Left), 5, 5),
             r,
         ));
+    }
+
+    #[test]
+    fn scroll_down_returns_positive_one() {
+        let event = mouse_event(MouseEventKind::ScrollDown, 5, 5);
+        assert_eq!(scroll_direction(event), Some(1));
+    }
+
+    #[test]
+    fn scroll_up_returns_negative_one() {
+        let event = mouse_event(MouseEventKind::ScrollUp, 5, 5);
+        assert_eq!(scroll_direction(event), Some(-1));
+    }
+
+    #[test]
+    fn click_returns_none() {
+        let event = mouse_event(MouseEventKind::Down(MouseButton::Left), 5, 5);
+        assert_eq!(scroll_direction(event), None);
+    }
+
+    #[test]
+    fn move_returns_none() {
+        let event = mouse_event(MouseEventKind::Moved, 5, 5);
+        assert_eq!(scroll_direction(event), None);
     }
 }
