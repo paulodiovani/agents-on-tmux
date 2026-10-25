@@ -157,12 +157,10 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, theme: &Theme) {
         })
         .collect();
 
-    let selected_row = selected
-        .checked_sub(offset)
-        .filter(|row| *row < items.len());
+    let items_len = items.len();
+    let selected_row = selected.checked_sub(offset).filter(|row| *row < items_len);
 
     frame.render_widget(List::new(items), list_area);
-
     if let Some(row) = selected_row {
         let first_line = list_area.y + row as u16 * ROW_HEIGHT;
         draw_selection_padding(frame, area, first_line, theme);
@@ -227,25 +225,25 @@ struct RowStyles {
 
 impl RowStyles {
     fn new(theme: &Theme, selected: bool) -> Self {
-        if !selected {
+        if selected {
+            let selection = theme.selection;
             return Self {
-                accent: theme.accent,
-                dim: theme.dim,
-                fill: Style::default(),
-                normal: theme.normal,
-                notification: theme.notification,
-                title: theme.title,
+                accent: theme.accent.patch(selection),
+                dim: theme.normal.patch(selection),
+                fill: selection,
+                normal: theme.normal.patch(selection),
+                notification: theme.notification.patch(selection),
+                title: theme.title.patch(selection),
             };
         }
 
-        let selection = theme.selection;
         Self {
-            accent: theme.accent.patch(selection),
-            dim: theme.normal.patch(selection),
-            fill: selection,
-            normal: theme.normal.patch(selection),
-            notification: theme.notification.patch(selection),
-            title: theme.title.patch(selection),
+            accent: theme.accent,
+            dim: theme.dim,
+            fill: Style::default(),
+            normal: theme.normal,
+            notification: theme.notification,
+            title: theme.title,
         }
     }
 }

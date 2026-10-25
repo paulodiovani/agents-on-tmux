@@ -16,6 +16,20 @@ pub fn is_clicked(mouse: MouseEvent, area: Rect) -> bool {
     }
 }
 
+/// Checks whether the mouse cursor is within the given rectangle.
+/// Returns true for mouse movement events (Moved or Drag) inside the area.
+pub fn is_hovered(mouse: MouseEvent, area: Rect) -> bool {
+    match mouse.kind {
+        MouseEventKind::Moved | MouseEventKind::Drag(_) => {
+            mouse.column >= area.x
+                && mouse.column < area.x + area.width
+                && mouse.row >= area.y
+                && mouse.row < area.y + area.height
+        }
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -120,6 +134,42 @@ mod tests {
         let r = rect(0, 0, 10, 10);
         assert!(!is_clicked(
             mouse_event(MouseEventKind::Up(MouseButton::Left), 5, 5),
+            r,
+        ));
+    }
+
+    #[test]
+    fn hover_inside_rect_returns_true() {
+        let r = rect(5, 3, 10, 4);
+        assert!(is_hovered(mouse_event(MouseEventKind::Moved, 7, 5), r,));
+    }
+
+    #[test]
+    fn hover_outside_rect_returns_false() {
+        let r = rect(5, 3, 10, 4);
+        assert!(!is_hovered(mouse_event(MouseEventKind::Moved, 20, 5), r,));
+    }
+
+    #[test]
+    fn hover_on_boundary_returns_true() {
+        let r = rect(5, 3, 10, 4);
+        assert!(is_hovered(mouse_event(MouseEventKind::Moved, 5, 3), r,));
+    }
+
+    #[test]
+    fn hover_drag_returns_true() {
+        let r = rect(0, 0, 10, 10);
+        assert!(is_hovered(
+            mouse_event(MouseEventKind::Drag(MouseButton::Left), 5, 5),
+            r,
+        ));
+    }
+
+    #[test]
+    fn hover_click_returns_false() {
+        let r = rect(0, 0, 10, 10);
+        assert!(!is_hovered(
+            mouse_event(MouseEventKind::Down(MouseButton::Left), 5, 5),
             r,
         ));
     }

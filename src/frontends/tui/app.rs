@@ -273,6 +273,18 @@ impl App {
                             ratatui::layout::Rect::new(0, 0, size.width, size.height),
                             self,
                         );
+
+                        // Update selection on hover
+                        for region in &regions {
+                            if let ui::RegionAction::SelectWindow(index) = region.action
+                                && mouse::is_hovered(mouse_event, region.area)
+                            {
+                                self.set_current_selected(index);
+                                break;
+                            }
+                        }
+
+                        // Handle clicks
                         for region in regions {
                             if mouse::is_clicked(mouse_event, region.area) {
                                 match region.action {
