@@ -599,24 +599,25 @@ impl App {
                 .find(|w| w.is_active)
                 .map(|w| (w.id, w.running_command.clone()));
 
-            if let Some((active_id, active_command)) = active_window_info
-                && self.last_focused_id != Some(active_id)
-            {
-                let target_tab = if is_agent(&active_command).is_some() {
-                    Tab::Agents
-                } else {
-                    Tab::Windows
-                };
+            if let Some((active_id, active_command)) = active_window_info {
+                let current_selected_id = self.current_tab_window().map(|w| w.id);
+                if current_selected_id != Some(active_id) {
+                    let target_tab = if is_agent(&active_command).is_some() {
+                        Tab::Agents
+                    } else {
+                        Tab::Windows
+                    };
 
-                let indices = self.indices_for_tab(target_tab);
-                if let Some(pos) = indices
-                    .iter()
-                    .position(|&i| self.windows[i].id == active_id)
-                {
-                    self.active_tab = target_tab;
-                    self.set_selected_for_tab(target_tab, pos);
-                    self.last_focused_id = Some(active_id);
-                    self.list_state.select(Some(self.current_selected()));
+                    let indices = self.indices_for_tab(target_tab);
+                    if let Some(pos) = indices
+                        .iter()
+                        .position(|&i| self.windows[i].id == active_id)
+                    {
+                        self.active_tab = target_tab;
+                        self.set_selected_for_tab(target_tab, pos);
+                        self.last_focused_id = Some(active_id);
+                        self.list_state.select(Some(self.current_selected()));
+                    }
                 }
             } else if is_first_refresh && !self.is_tab_empty(Tab::Agents) {
                 self.active_tab = Tab::Agents;
@@ -1841,6 +1842,42 @@ mod tests {
 
         assert_eq!(app.active_tab(), Tab::Windows);
         assert_eq!(app.current_selected(), 0);
+    }
+
+    #[test]
+    fn test_cursor_follows_active_window_after_mouse_hover_then_lose_focus() {
+        // Scenario: User focuses window with keyboard, then hovers with mouse
+        // (changing selection but not last_focused_id), then pane becomes inactive.
+        // Selection should sync back to the active window, not stay at hover position.
+        let (mut app, windows, _) = test_app();
+
+        // Initial state: Agents tab has 2 windows (id=2 at index 0, id=4 at index 1)
+        // Active window is id=2
+        assert_eq!(app.current_selected(), 0);
+        assert_eq!(app.windows()[1].id, 2);
+        assert!(app.windows()[1].is_active);
+
+        // User navigates down with keyboard to selection 1 (id=4)
+        app.navigate_down();
+        assert_eq!(app.current_selected(), 1);
+        assert_eq!(app.last_focused_id, Some(4));
+
+        // Simulate that the active window is now id=4 (the one we focused)
+        windows.borrow_mut()[1].is_active = false; // id=2 is no longer active
+        windows.borrow_mut()[3].is_active = true; // id=4 is now active
+
+        // User hovers back to selection 0 (id=2) with mouse
+        app.set_current_selected(0);
+        assert_eq!(app.current_selected(), 0);
+        assert_eq!(app.last_focused_id, Some(4)); // Still points to id=4
+
+        // Pane becomes inactive (mouse moved to main pane)
+        app.set_pane_active(false);
+
+        // refresh_windows should sync selection back to active window (id=4, index 1)
+        app.refresh_windows().unwrap();
+
+        assert_eq!(app.current_selected(), 1); // Should sync back to active window (id=4)
     }
 
     #[test]
