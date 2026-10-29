@@ -137,6 +137,7 @@ pub struct App {
     panel_width: Option<u16>,
     parent_driver: Box<dyn Tmux>,
     pending_action: Option<PendingAction>,
+    regions: Option<Vec<ui::ClickableRegion>>,
     running: bool,
     tmux_hints: Vec<(String, String)>,
     windows: Vec<Window>,
@@ -173,6 +174,7 @@ impl App {
             panel_width,
             parent_driver,
             pending_action: None,
+            regions: None,
             running: true,
             tmux_hints,
             windows: Vec::new(),
@@ -265,6 +267,7 @@ impl App {
                     }
                     event::Event::Resize(width, _) => {
                         self.enforce_panel_width(width);
+                        self.invalidate_clickable_regions();
                         last_draw = Instant::now() - redraw_tick;
                     }
                     // Scroll events
@@ -278,15 +281,13 @@ impl App {
                         let list_height = size.height.saturating_sub(4);
                         let visible_count = (list_height / 3) as usize; // ROW_HEIGHT = 3
                         self.scroll(direction, visible_count);
+                        self.invalidate_clickable_regions();
                         last_draw = Instant::now() - redraw_tick;
                     }
                     // All other mouse events (hover, click, etc.)
                     event::Event::Mouse(mouse_event) => {
                         let size = terminal.size()?;
-                        let regions = ui::clickable_regions(
-                            ratatui::layout::Rect::new(0, 0, size.width, size.height),
-                            self,
-                        );
+                        let regions = self.clickable_regions(ratatui::layout::Rect::new(0, 0, size.width, size.height));
 
                         // Update selection on hover
                         for region in &regions {
@@ -299,11 +300,12 @@ impl App {
                         }
 
                         // Handle clicks
-                        for region in regions {
+                        for region in &regions {
                             if mouse::is_clicked(mouse_event, region.area) {
                                 match region.action {
                                     ui::RegionAction::SelectTab(tab) => {
                                         if tab != self.active_tab() {
+                                            self.invalidate_clickable_regions();
                                             self.switch_tab(tab);
                                         }
                                     }
@@ -323,6 +325,7 @@ impl App {
 
             // Drain tmux events (non-blocking). A refresh forces an immediate redraw.
             if self.process_tmux_events() {
+                self.invalidate_clickable_regions();
                 last_draw = Instant::now() - redraw_tick;
             }
 
@@ -376,6 +379,7 @@ impl App {
         match action {
             Action::KillWindow if self.pending_action == Some(PendingAction::KillWindow) => {
                 self.kill_window();
+                self.invalidate_clickable_regions();
                 self.pending_action = None;
             }
             Action::KillWindow => self.pending_action = Some(PendingAction::KillWindow),
@@ -391,10 +395,19 @@ impl App {
                     Action::NavigateUp => self.navigate_up(),
                     Action::NavigateDown => self.navigate_down(),
                     Action::FocusWindow => self.focus_window(),
-                    Action::CreateWindow => self.create_window(),
+                    Action::CreateWindow => {
+                        self.create_window();
+                        self.invalidate_clickable_regions();
+                    }
                     Action::RenameWindow => self.rename_window(),
-                    Action::SwitchTabLeft => self.switch_tab(self.active_tab.left()),
-                    Action::SwitchTabRight => self.switch_tab(self.active_tab.right()),
+                    Action::SwitchTabLeft => {
+                        self.switch_tab(self.active_tab.left());
+                        self.invalidate_clickable_regions();
+                    }
+                    Action::SwitchTabRight => {
+                        self.switch_tab(self.active_tab.right());
+                        self.invalidate_clickable_regions();
+                    }
                     _ => {}
                 }
             }
@@ -636,6 +649,24 @@ impl App {
     /// tracking is inactive.
     pub fn pane_active(&self) -> bool {
         self.pane_active
+    }
+
+    /// Returns cached clickable regions for the given terminal size.
+    /// Recomputes only if cache is empty (invalidated).
+    pub fn clickable_regions(
+        &mut self,
+        size: ratatui::layout::Rect,
+    ) -> Vec<ui::ClickableRegion> {
+        if self.regions.is_none() {
+            self.regions = Some(ui::clickable_regions(size, self));
+        }
+        self.regions.as_ref().unwrap().clone()
+    }
+
+    /// Invalidates the cached clickable regions.
+    /// Call this when the layout changes (e.g., resize, scroll position, tab switch).
+    pub fn invalidate_clickable_regions(&mut self) {
+        self.regions = None;
     }
 
     /// Returns the tmux key sequences to advertise when the pane is not

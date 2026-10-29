@@ -31,14 +31,14 @@ const TAB_RULE: &str = "\u{2594}"; // ▔
 const TAB_GAP: &str = "   ";
 
 /// Defines a clickable region in the TUI.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ClickableRegion {
     pub area: Rect,
     pub action: RegionAction,
 }
 
 /// Action to perform when a clickable region is clicked.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum RegionAction {
     SelectTab(Tab),
     SelectWindow(usize),
