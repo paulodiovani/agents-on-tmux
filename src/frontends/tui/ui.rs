@@ -30,6 +30,20 @@ const HALF_BLOCK_UPPER: &str = "\u{2580}"; // ▀
 const TAB_RULE: &str = "\u{2594}"; // ▔
 const TAB_GAP: &str = "   ";
 
+/// Defines a clickable region in the TUI.
+#[derive(Debug, Clone)]
+pub struct ClickableRegion {
+    pub area: Rect,
+    pub action: RegionAction,
+}
+
+/// Action to perform when a clickable region is clicked.
+#[derive(Debug, Clone)]
+pub enum RegionAction {
+    SelectTab(Tab),
+    SelectWindow(usize),
+}
+
 /// Shrinks an area horizontally by the panel padding.
 fn padded(area: Rect) -> Rect {
     let padding = (PANEL_PADDING as u16).min(area.width / 2);
@@ -143,12 +157,10 @@ fn draw_list(frame: &mut Frame, app: &mut App, area: Rect, theme: &Theme) {
         })
         .collect();
 
-    let selected_row = selected
-        .checked_sub(offset)
-        .filter(|row| *row < items.len());
+    let items_len = items.len();
+    let selected_row = selected.checked_sub(offset).filter(|row| *row < items_len);
 
     frame.render_widget(List::new(items), list_area);
-
     if let Some(row) = selected_row {
         let first_line = list_area.y + row as u16 * ROW_HEIGHT;
         draw_selection_padding(frame, area, first_line, theme);
@@ -213,25 +225,25 @@ struct RowStyles {
 
 impl RowStyles {
     fn new(theme: &Theme, selected: bool) -> Self {
-        if !selected {
+        if selected {
+            let selection = theme.selection;
             return Self {
-                accent: theme.accent,
-                dim: theme.dim,
-                fill: Style::default(),
-                normal: theme.normal,
-                notification: theme.notification,
-                title: theme.title,
+                accent: theme.accent.patch(selection),
+                dim: theme.normal.patch(selection),
+                fill: selection,
+                normal: theme.normal.patch(selection),
+                notification: theme.notification.patch(selection),
+                title: theme.title.patch(selection),
             };
         }
 
-        let selection = theme.selection;
         Self {
-            accent: theme.accent.patch(selection),
-            dim: theme.normal.patch(selection),
-            fill: selection,
-            normal: theme.normal.patch(selection),
-            notification: theme.notification.patch(selection),
-            title: theme.title.patch(selection),
+            accent: theme.accent,
+            dim: theme.dim,
+            fill: Style::default(),
+            normal: theme.normal,
+            notification: theme.notification,
+            title: theme.title,
         }
     }
 }
@@ -508,6 +520,79 @@ fn count_windows_for_tab(app: &App, tab: Tab) -> usize {
             Tab::Windows => is_agent(&w.running_command).is_none(),
         })
         .count()
+}
+
+/// Returns the clickable regions for the current layout.
+/// Called by the app when a mouse event arrives.
+pub fn clickable_regions(frame_area: Rect, app: &App) -> Vec<ClickableRegion> {
+    let theme = Theme::default();
+    let footer_height = calculate_footer_height(padded(frame_area).width, app, &theme);
+    let chunks = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(2),
+        Constraint::Min(0),
+        Constraint::Length(footer_height),
+    ])
+    .split(frame_area);
+
+    let mut regions = Vec::new();
+
+    // Tab bar regions: mirror the label positions in draw_tab_bar.
+    let tab_bar_area = chunks[1];
+    let padded_tab_x = tab_bar_area.x + PANEL_PADDING as u16;
+
+    let mut cursor = 0u16;
+    for (index, tab) in [Tab::Agents, Tab::Windows].iter().enumerate() {
+        if index > 0 {
+            cursor += TAB_GAP.len() as u16;
+        }
+        let title = tab.title();
+        let count = format!("({})", count_windows_for_tab(app, *tab));
+        let label_width = title.len() + 1 + count.len();
+        let label_rect = Rect {
+            x: padded_tab_x + cursor,
+            y: tab_bar_area.y,
+            width: label_width as u16,
+            height: tab_bar_area.height,
+        };
+        regions.push(ClickableRegion {
+            area: label_rect,
+            action: RegionAction::SelectTab(*tab),
+        });
+        cursor += label_width as u16;
+    }
+
+    // List regions: one per visible window row.
+    let list_area = chunks[2];
+    let tab_windows = app.current_tab_windows();
+    if tab_windows.is_empty() {
+        return regions;
+    }
+
+    let visible_count = (list_area.height / ROW_HEIGHT) as usize;
+    let offset = app.list_state().offset();
+
+    for (visible_idx, _window) in tab_windows
+        .iter()
+        .skip(offset)
+        .take(visible_count)
+        .enumerate()
+    {
+        let row_y = list_area.y + visible_idx as u16 * ROW_HEIGHT;
+        let row_rect = Rect {
+            x: list_area.x,
+            y: row_y,
+            width: list_area.width,
+            height: ROW_HEIGHT,
+        };
+        let tab_index = offset + visible_idx;
+        regions.push(ClickableRegion {
+            area: row_rect,
+            action: RegionAction::SelectWindow(tab_index),
+        });
+    }
+
+    regions
 }
 
 #[cfg(test)]
@@ -1335,5 +1420,207 @@ mod tests {
         assert!(title_row.contains(ELLIPSIS), "{title_row:?}");
         assert_eq!(time_column(&title_row), Some(25));
         assert!(title_row.width() <= 30);
+    }
+
+    #[test]
+    fn test_clickable_regions_returns_tab_and_list_regions() {
+        // Default MockTmux::new: w1=bash (Windows), w2=claude (Agents, active)
+        // After refresh: active_tab=Agents, 1 agent + 1 regular window
+        let app = app_with(vec![
+            Window {
+                id: 1,
+                name: "w1".to_string(),
+                pane_pid: 10001,
+                running_command: "bash".to_string(),
+                current_dir: "/home/user".to_string(),
+                is_active: false,
+                notification_pending: false,
+                started_at: Some(Instant::now() - Duration::from_secs(60)),
+            },
+            Window {
+                id: 2,
+                name: "w2".to_string(),
+                pane_pid: 10002,
+                running_command: "claude".to_string(),
+                current_dir: "/home/user".to_string(),
+                is_active: true,
+                notification_pending: false,
+                started_at: Some(Instant::now() - Duration::from_secs(30)),
+            },
+        ]);
+        let frame_area = Rect {
+            x: 0,
+            y: 0,
+            width: 80,
+            height: 30,
+        };
+        let regions = clickable_regions(frame_area, &app);
+
+        // Should have 2 tab regions + 1 window region (Agents tab has 1 window)
+        assert_eq!(regions.len(), 3, "expected 3 regions, got {regions:?}");
+
+        // Tab regions
+        assert!(matches!(
+            regions[0].action,
+            RegionAction::SelectTab(Tab::Agents)
+        ));
+        assert!(matches!(
+            regions[1].action,
+            RegionAction::SelectTab(Tab::Windows)
+        ));
+
+        // Agents tab label: "Agents (1)" = 6 + 1 + 3 = 10 chars wide
+        // Starts at padded x = 0 + PANEL_PADDING = 1
+        assert_eq!(regions[0].area.x, 1);
+        assert_eq!(regions[0].area.y, 1); // tab bar starts at y=1
+        assert_eq!(regions[0].area.width, 10);
+        assert_eq!(regions[0].area.height, 2); // tab bar is 2 lines tall
+
+        // Windows tab label: "Windows (1)" = 7 + 1 + 3 = 11 chars wide
+        // Starts after agents (10) + gap (3) = x=14
+        assert_eq!(regions[1].area.x, 14);
+        assert_eq!(regions[1].area.y, 1);
+        assert_eq!(regions[1].area.width, 11);
+        assert_eq!(regions[1].area.height, 2);
+
+        // Window region: first visible row in list area
+        assert!(matches!(regions[2].action, RegionAction::SelectWindow(0)));
+        assert_eq!(regions[2].area.y, 3); // list starts at y=3 (after header+tabbar)
+        assert_eq!(regions[2].area.height, ROW_HEIGHT);
+    }
+
+    #[test]
+    fn test_clickable_regions_switching_tabs_changes_window_regions() {
+        // 1 agent + 1 regular window → both tabs have content
+        let mut app = app_with(vec![
+            Window {
+                id: 1,
+                name: "w1".to_string(),
+                pane_pid: 10001,
+                running_command: "bash".to_string(),
+                current_dir: "/home/user".to_string(),
+                is_active: false,
+                notification_pending: false,
+                started_at: Some(Instant::now() - Duration::from_secs(60)),
+            },
+            Window {
+                id: 2,
+                name: "w2".to_string(),
+                pane_pid: 10002,
+                running_command: "claude".to_string(),
+                current_dir: "/home/user".to_string(),
+                is_active: true,
+                notification_pending: false,
+                started_at: Some(Instant::now() - Duration::from_secs(30)),
+            },
+        ]);
+        let frame_area = Rect {
+            x: 0,
+            y: 0,
+            width: 80,
+            height: 30,
+        };
+
+        // Active tab is Agents (1 agent window)
+        assert_eq!(app.active_tab(), Tab::Agents);
+        let regions = clickable_regions(frame_area, &app);
+        let window_regions: Vec<_> = regions
+            .iter()
+            .filter(|r| matches!(r.action, RegionAction::SelectWindow(_)))
+            .collect();
+        assert_eq!(window_regions.len(), 1);
+        assert!(matches!(
+            window_regions[0].action,
+            RegionAction::SelectWindow(0)
+        ));
+
+        // Switch to Windows tab (1 regular window)
+        app.switch_tab(Tab::Windows);
+        assert_eq!(app.active_tab(), Tab::Windows);
+        let regions = clickable_regions(frame_area, &app);
+        let window_regions: Vec<_> = regions
+            .iter()
+            .filter(|r| matches!(r.action, RegionAction::SelectWindow(_)))
+            .collect();
+        assert_eq!(window_regions.len(), 1);
+        assert!(matches!(
+            window_regions[0].action,
+            RegionAction::SelectWindow(0)
+        ));
+
+        // Tab regions are always present regardless of active tab
+        let tab_regions: Vec<_> = regions
+            .iter()
+            .filter(|r| matches!(r.action, RegionAction::SelectTab(_)))
+            .collect();
+        assert_eq!(tab_regions.len(), 2);
+    }
+
+    #[test]
+    fn test_clickable_regions_list_offsets_match_visible_rows() {
+        // 3 agents, terminal fits 2 rows → only 2 window regions
+        let app = app_with(vec![
+            Window {
+                id: 1,
+                name: "w1".to_string(),
+                pane_pid: 10001,
+                running_command: "claude".to_string(),
+                current_dir: "/home/user".to_string(),
+                is_active: true,
+                notification_pending: false,
+                started_at: Some(Instant::now() - Duration::from_secs(60)),
+            },
+            Window {
+                id: 2,
+                name: "w2".to_string(),
+                pane_pid: 10002,
+                running_command: "opencode".to_string(),
+                current_dir: "/home/user".to_string(),
+                is_active: false,
+                notification_pending: false,
+                started_at: Some(Instant::now() - Duration::from_secs(30)),
+            },
+            Window {
+                id: 3,
+                name: "w3".to_string(),
+                pane_pid: 10003,
+                running_command: "bash".to_string(),
+                current_dir: "/home/user".to_string(),
+                is_active: false,
+                notification_pending: false,
+                started_at: Some(Instant::now() - Duration::from_secs(10)),
+            },
+        ]);
+        // 3 agents, 0 regular windows. Active tab = Agents.
+        // Use a short terminal: header(1) + tabbar(2) + list(6) + footer(1) = 10
+        // list height = 6 → visible_count = 6/3 = 2
+        let frame_area = Rect {
+            x: 0,
+            y: 0,
+            width: 80,
+            height: 10,
+        };
+        let regions = clickable_regions(frame_area, &app);
+
+        // 2 tab regions + 2 window regions (only 2 visible out of 3 agents)
+        let window_regions: Vec<_> = regions
+            .iter()
+            .filter(|r| matches!(r.action, RegionAction::SelectWindow(_)))
+            .collect();
+        assert_eq!(window_regions.len(), 2);
+
+        // First visible row at y=3, second at y=3+3=6
+        assert_eq!(window_regions[0].area.y, 3);
+        assert_eq!(window_regions[1].area.y, 6);
+
+        // Tab indices are 0 and 1 (within Agents tab)
+        assert!(matches!(
+            window_regions[0].action,
+            RegionAction::SelectWindow(0)
+        ));
+        assert!(matches!(
+            window_regions[1].action,
+            RegionAction::SelectWindow(1)
+        ));
     }
 }
