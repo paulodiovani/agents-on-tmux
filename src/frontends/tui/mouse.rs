@@ -1,38 +1,32 @@
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 
+/// Semantic interpretation of a mouse event (click, hover, or scroll).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MouseAction {
+    Click(u16, u16), // x, y
+    Hover(u16, u16), // x, y
+    Scroll(i8),
+    None,
+}
+
+impl From<MouseEvent> for MouseAction {
+    fn from(mouse: MouseEvent) -> Self {
+        match mouse.kind {
+            MouseEventKind::Down(MouseButton::Left) => MouseAction::Click(mouse.column, mouse.row),
+            MouseEventKind::Moved | MouseEventKind::Drag(_) => {
+                MouseAction::Hover(mouse.column, mouse.row)
+            }
+            MouseEventKind::ScrollUp => MouseAction::Scroll(-1),
+            MouseEventKind::ScrollDown => MouseAction::Scroll(1),
+            _ => MouseAction::None,
+        }
+    }
+}
+
 /// Checks whether a point (column, row) is within the given rectangle.
-fn contains(area: Rect, column: u16, row: u16) -> bool {
+pub fn contains(area: Rect, column: u16, row: u16) -> bool {
     column >= area.x && column < area.x + area.width && row >= area.y && row < area.y + area.height
-}
-
-/// Checks whether a mouse event is a left-click within the given rectangle.
-/// Returns true only for left-button presses inside the area; other buttons,
-/// drags, scrolls, and releases return false.
-pub fn is_clicked(mouse: MouseEvent, area: Rect) -> bool {
-    match mouse.kind {
-        MouseEventKind::Down(MouseButton::Left) => contains(area, mouse.column, mouse.row),
-        _ => false,
-    }
-}
-
-/// Checks whether the mouse cursor is within the given rectangle.
-/// Returns true for mouse movement events (Moved or Drag) inside the area.
-pub fn is_hovered(mouse: MouseEvent, area: Rect) -> bool {
-    match mouse.kind {
-        MouseEventKind::Moved | MouseEventKind::Drag(_) => contains(area, mouse.column, mouse.row),
-        _ => false,
-    }
-}
-
-/// Returns the scroll direction if the mouse event is a scroll event.
-/// Returns Some(1) for scroll down, Some(-1) for scroll up, None otherwise.
-pub fn scroll_direction(mouse: MouseEvent) -> Option<i8> {
-    match mouse.kind {
-        MouseEventKind::ScrollDown => Some(1),
-        MouseEventKind::ScrollUp => Some(-1),
-        _ => None,
-    }
 }
 
 #[cfg(test)]
@@ -58,148 +52,115 @@ mod tests {
         }
     }
 
+    // ── MouseAction::from ─────────────────────────────────────────────
+
     #[test]
-    fn left_click_inside_rect_returns_true() {
-        let r = rect(5, 3, 10, 4);
-        assert!(is_clicked(
-            mouse_event(MouseEventKind::Down(MouseButton::Left), 7, 5),
-            r,
-        ));
+    fn left_click_becomes_click() {
+        let event = mouse_event(MouseEventKind::Down(MouseButton::Left), 7, 5);
+        assert_eq!(MouseAction::from(event), MouseAction::Click(7, 5));
     }
 
     #[test]
-    fn left_click_outside_rect_returns_false() {
-        let r = rect(5, 3, 10, 4);
-        assert!(!is_clicked(
-            mouse_event(MouseEventKind::Down(MouseButton::Left), 20, 5),
-            r,
-        ));
+    fn right_click_becomes_none() {
+        let event = mouse_event(MouseEventKind::Down(MouseButton::Right), 7, 5);
+        assert_eq!(MouseAction::from(event), MouseAction::None);
     }
 
     #[test]
-    fn right_click_inside_rect_returns_false() {
-        let r = rect(5, 3, 10, 4);
-        assert!(!is_clicked(
-            mouse_event(MouseEventKind::Down(MouseButton::Right), 7, 5),
-            r,
-        ));
+    fn middle_click_becomes_none() {
+        let event = mouse_event(MouseEventKind::Down(MouseButton::Middle), 3, 3);
+        assert_eq!(MouseAction::from(event), MouseAction::None);
     }
 
     #[test]
-    fn click_on_exact_boundary_returns_true() {
-        let r = rect(5, 3, 10, 4);
-        // Top-left corner
-        assert!(is_clicked(
-            mouse_event(MouseEventKind::Down(MouseButton::Left), 5, 3),
-            r,
-        ));
+    fn moved_becomes_hover() {
+        let event = mouse_event(MouseEventKind::Moved, 4, 2);
+        assert_eq!(MouseAction::from(event), MouseAction::Hover(4, 2));
     }
 
     #[test]
-    fn click_just_past_boundary_returns_false() {
-        let r = rect(5, 3, 10, 4);
-        // Just past right edge (x + width = 15)
-        assert!(!is_clicked(
-            mouse_event(MouseEventKind::Down(MouseButton::Left), 15, 5),
-            r,
-        ));
-        // Just past bottom edge (y + height = 7)
-        assert!(!is_clicked(
-            mouse_event(MouseEventKind::Down(MouseButton::Left), 7, 7),
-            r,
-        ));
+    fn drag_becomes_hover() {
+        let event = mouse_event(MouseEventKind::Drag(MouseButton::Left), 9, 1);
+        assert_eq!(MouseAction::from(event), MouseAction::Hover(9, 1));
     }
 
     #[test]
-    fn drag_returns_false() {
-        let r = rect(0, 0, 10, 10);
-        assert!(!is_clicked(
-            mouse_event(MouseEventKind::Drag(MouseButton::Left), 5, 5),
-            r,
-        ));
+    fn scroll_up_becomes_scroll_negative() {
+        let event = mouse_event(MouseEventKind::ScrollUp, 0, 0);
+        assert_eq!(MouseAction::from(event), MouseAction::Scroll(-1));
     }
 
     #[test]
-    fn scroll_returns_false() {
-        let r = rect(0, 0, 10, 10);
-        assert!(!is_clicked(
-            mouse_event(MouseEventKind::ScrollDown, 5, 5),
-            r
-        ));
+    fn scroll_down_becomes_scroll_positive() {
+        let event = mouse_event(MouseEventKind::ScrollDown, 0, 0);
+        assert_eq!(MouseAction::from(event), MouseAction::Scroll(1));
     }
 
     #[test]
-    fn move_returns_false() {
-        let r = rect(0, 0, 10, 10);
-        assert!(!is_clicked(mouse_event(MouseEventKind::Moved, 5, 5), r));
+    fn button_up_becomes_none() {
+        let event = mouse_event(MouseEventKind::Up(MouseButton::Left), 5, 5);
+        assert_eq!(MouseAction::from(event), MouseAction::None);
+    }
+
+    // ── contains ──────────────────────────────────────────────────────
+
+    #[test]
+    fn contains_inside_returns_true() {
+        assert!(contains(rect(5, 3, 10, 4), 7, 5));
     }
 
     #[test]
-    fn button_up_returns_false() {
-        let r = rect(0, 0, 10, 10);
-        assert!(!is_clicked(
-            mouse_event(MouseEventKind::Up(MouseButton::Left), 5, 5),
-            r,
-        ));
+    fn contains_outside_returns_false() {
+        assert!(!contains(rect(5, 3, 10, 4), 20, 5));
     }
 
     #[test]
-    fn hover_inside_rect_returns_true() {
-        let r = rect(5, 3, 10, 4);
-        assert!(is_hovered(mouse_event(MouseEventKind::Moved, 7, 5), r,));
+    fn contains_top_left_corner_returns_true() {
+        assert!(contains(rect(5, 3, 10, 4), 5, 3));
     }
 
     #[test]
-    fn hover_outside_rect_returns_false() {
-        let r = rect(5, 3, 10, 4);
-        assert!(!is_hovered(mouse_event(MouseEventKind::Moved, 20, 5), r,));
+    fn contains_past_right_edge_returns_false() {
+        assert!(!contains(rect(5, 3, 10, 4), 15, 5));
     }
 
     #[test]
-    fn hover_on_boundary_returns_true() {
-        let r = rect(5, 3, 10, 4);
-        assert!(is_hovered(mouse_event(MouseEventKind::Moved, 5, 3), r,));
+    fn contains_past_bottom_edge_returns_false() {
+        assert!(!contains(rect(5, 3, 10, 4), 7, 7));
     }
 
     #[test]
-    fn hover_drag_returns_true() {
-        let r = rect(0, 0, 10, 10);
-        assert!(is_hovered(
-            mouse_event(MouseEventKind::Drag(MouseButton::Left), 5, 5),
-            r,
-        ));
+    fn contains_bottom_right_corner_returns_false() {
+        // x + width and y + height are exclusive bounds
+        assert!(!contains(rect(5, 3, 10, 4), 15, 7));
     }
 
     #[test]
-    fn hover_click_returns_false() {
-        let r = rect(0, 0, 10, 10);
-        assert!(!is_hovered(
-            mouse_event(MouseEventKind::Down(MouseButton::Left), 5, 5),
-            r,
-        ));
+    fn contains_bottom_right_inside_returns_true() {
+        assert!(contains(rect(5, 3, 10, 4), 14, 6));
+    }
+
+    // ── Click + contains (integration) ────────────────────────────────
+
+    #[test]
+    fn click_inside_rect_can_be_found() {
+        let r = rect(0, 0, 10, 3);
+        let event = mouse_event(MouseEventKind::Down(MouseButton::Left), 5, 1);
+        if let MouseAction::Click(x, y) = MouseAction::from(event) {
+            assert!(contains(r, x, y));
+        } else {
+            panic!("expected Click");
+        }
     }
 
     #[test]
-    fn scroll_down_returns_positive_one() {
-        let event = mouse_event(MouseEventKind::ScrollDown, 5, 5);
-        assert_eq!(scroll_direction(event), Some(1));
-    }
-
-    #[test]
-    fn scroll_up_returns_negative_one() {
-        let event = mouse_event(MouseEventKind::ScrollUp, 5, 5);
-        assert_eq!(scroll_direction(event), Some(-1));
-    }
-
-    #[test]
-    fn click_returns_none() {
-        let event = mouse_event(MouseEventKind::Down(MouseButton::Left), 5, 5);
-        assert_eq!(scroll_direction(event), None);
-    }
-
-    #[test]
-    fn move_returns_none() {
-        let event = mouse_event(MouseEventKind::Moved, 5, 5);
-        assert_eq!(scroll_direction(event), None);
+    fn click_outside_rect_is_not_found() {
+        let r = rect(0, 0, 10, 3);
+        let event = mouse_event(MouseEventKind::Down(MouseButton::Left), 15, 1);
+        if let MouseAction::Click(x, y) = MouseAction::from(event) {
+            assert!(!contains(r, x, y));
+        } else {
+            panic!("expected Click");
+        }
     }
 }

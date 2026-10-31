@@ -11,8 +11,10 @@ use crate::backends::logger;
 use crate::backends::tmux::{self, EventProducer, TmuxEvent};
 use crate::backends::tmux::{Tmux, Window};
 use crate::frontends::tui::event::{Action, PendingAction, Tab, key_to_action};
+use crate::frontends::tui::mouse::{MouseAction, contains};
 use crate::frontends::tui::theme::Theme;
-use crate::frontends::tui::{mouse, ui};
+use crate::frontends::tui::ui;
+use crate::frontends::tui::ui::{ClickableRegion, RegionAction};
 
 /// The nested-session commands worth advertising, with their footer labels.
 const HINTED_COMMANDS: [(&str, &str); 5] = [
@@ -265,24 +267,13 @@ impl App {
                         self.handle_action(key_to_action(key));
                         last_draw = Instant::now() - redraw_tick;
                     }
+
                     event::Event::Resize(width, _) => {
                         self.enforce_panel_width(width);
                         self.invalidate_clickable_regions();
                         last_draw = Instant::now() - redraw_tick;
                     }
-                    // Scroll events
-                    event::Event::Mouse(mouse_event)
-                        if let Some(direction) = mouse::scroll_direction(mouse_event) =>
-                    {
-                        let size = terminal.size()?;
-                        // Calculate visible_count from terminal size
-                        // Layout: header (1) + tab bar (2) + footer (min 1) = 4 lines overhead
-                        let list_height = size.height.saturating_sub(4);
-                        let visible_count = (list_height / ui::ROW_HEIGHT) as usize;
-                        self.scroll(direction, visible_count);
-                        self.invalidate_clickable_regions();
-                        last_draw = Instant::now() - redraw_tick;
-                    }
+
                     // All other mouse events (hover, click, etc.)
                     event::Event::Mouse(mouse_event) => {
                         let size = terminal.size()?;
@@ -293,44 +284,51 @@ impl App {
                             size.height,
                         ));
 
-                        // Handle hover and click in a single pass
-                        let mut changed = false;
-
-                        for region in &regions {
-                            match region.action {
-                                ui::RegionAction::SelectTab(tab)
-                                    if mouse::is_clicked(mouse_event, region.area)
-                                        && tab != self.active_tab() =>
-                                {
-                                    self.invalidate_clickable_regions();
-                                    self.switch_tab(tab);
-                                    changed = true;
-                                    break;
-                                }
-
-                                ui::RegionAction::SelectWindow(index)
-                                    if mouse::is_hovered(mouse_event, region.area)
-                                        && self.current_selected() != index =>
-                                {
-                                    self.set_current_selected(index);
-                                    changed = true;
-                                    break;
-                                }
-
-                                ui::RegionAction::SelectWindow(index)
-                                    if mouse::is_clicked(mouse_event, region.area) =>
-                                {
-                                    self.set_current_selected(index);
-                                    self.focus_window();
-                                    changed = true;
-                                    break;
-                                }
-
-                                _ => {}
+                        match mouse_event.into() {
+                            MouseAction::Click(x, y)
+                                if let Some(ClickableRegion {
+                                    area: _,
+                                    action: RegionAction::SelectTab(tab),
+                                }) =
+                                    regions.iter().find(|&region| contains(region.area, x, y)) =>
+                            {
+                                self.switch_tab(*tab);
                             }
-                        }
-                        if changed {
-                            last_draw = Instant::now() - redraw_tick;
+
+                            MouseAction::Click(x, y)
+                                if let Some(ClickableRegion {
+                                    area: _,
+                                    action: RegionAction::SelectWindow(index),
+                                }) =
+                                    regions.iter().find(|&region| contains(region.area, x, y)) =>
+                            {
+                                self.set_current_selected(*index);
+                                self.focus_window();
+                            }
+
+                            MouseAction::Hover(x, y)
+                                if let Some(ClickableRegion {
+                                    area: _,
+                                    action: RegionAction::SelectWindow(index),
+                                }) =
+                                    regions.iter().find(|&region| contains(region.area, x, y))
+                                    && *index != self.current_selected() =>
+                            {
+                                self.set_current_selected(*index);
+                            }
+
+                            MouseAction::Scroll(direction) => {
+                                let size = terminal.size()?;
+                                // Calculate visible_count from terminal size
+                                // Layout: header (1) + tab bar (2) + footer (min 1) = 4 lines overhead
+                                let list_height = size.height.saturating_sub(4);
+                                let visible_count = (list_height / ui::ROW_HEIGHT) as usize;
+                                self.scroll(direction, visible_count);
+                                self.invalidate_clickable_regions();
+                                last_draw = Instant::now() - redraw_tick;
+                            }
+
+                            _ => {}
                         }
                     }
                     _ => {}
