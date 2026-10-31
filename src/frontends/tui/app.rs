@@ -11,7 +11,7 @@ use crate::backends::logger;
 use crate::backends::tmux::{self, EventProducer, TmuxEvent};
 use crate::backends::tmux::{Tmux, Window};
 use crate::frontends::tui::event::{Action, PendingAction, Tab, key_to_action};
-use crate::frontends::tui::mouse::{MouseAction, contains};
+use crate::frontends::tui::mouse::MouseAction;
 use crate::frontends::tui::theme::Theme;
 use crate::frontends::tui::ui;
 use crate::frontends::tui::ui::{ClickableRegion, RegionAction};
@@ -289,8 +289,9 @@ impl App {
                                 if let Some(ClickableRegion {
                                     area: _,
                                     action: RegionAction::SelectTab(tab),
-                                }) =
-                                    regions.iter().find(|&region| contains(region.area, x, y)) =>
+                                }) = regions
+                                    .iter()
+                                    .find(|&region| ui::contains(region.area, x, y)) =>
                             {
                                 self.switch_tab(*tab);
                             }
@@ -299,8 +300,9 @@ impl App {
                                 if let Some(ClickableRegion {
                                     area: _,
                                     action: RegionAction::SelectWindow(index),
-                                }) =
-                                    regions.iter().find(|&region| contains(region.area, x, y)) =>
+                                }) = regions
+                                    .iter()
+                                    .find(|&region| ui::contains(region.area, x, y)) =>
                             {
                                 self.set_current_selected(*index);
                                 self.focus_window();
@@ -310,8 +312,9 @@ impl App {
                                 if let Some(ClickableRegion {
                                     area: _,
                                     action: RegionAction::SelectWindow(index),
-                                }) =
-                                    regions.iter().find(|&region| contains(region.area, x, y))
+                                }) = regions
+                                    .iter()
+                                    .find(|&region| ui::contains(region.area, x, y))
                                     && *index != self.current_selected() =>
                             {
                                 self.set_current_selected(*index);

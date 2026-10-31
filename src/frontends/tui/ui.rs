@@ -44,6 +44,11 @@ pub enum RegionAction {
     SelectWindow(usize),
 }
 
+/// Checks whether a point (column, row) is within the given rectangle.
+pub fn contains(area: Rect, column: u16, row: u16) -> bool {
+    column >= area.x && column < area.x + area.width && row >= area.y && row < area.y + area.height
+}
+
 /// Shrinks an area horizontally by the panel padding.
 fn padded(area: Rect) -> Rect {
     let padding = (PANEL_PADDING as u16).min(area.width / 2);
@@ -1622,5 +1627,50 @@ mod tests {
             window_regions[1].action,
             RegionAction::SelectWindow(1)
         ));
+    }
+
+    fn rect(x: u16, y: u16, width: u16, height: u16) -> Rect {
+        Rect {
+            x,
+            y,
+            width,
+            height,
+        }
+    }
+
+    #[test]
+    fn contains_inside_returns_true() {
+        assert!(contains(rect(5, 3, 10, 4), 7, 5));
+    }
+
+    #[test]
+    fn contains_outside_returns_false() {
+        assert!(!contains(rect(5, 3, 10, 4), 20, 5));
+    }
+
+    #[test]
+    fn contains_top_left_corner_returns_true() {
+        assert!(contains(rect(5, 3, 10, 4), 5, 3));
+    }
+
+    #[test]
+    fn contains_past_right_edge_returns_false() {
+        assert!(!contains(rect(5, 3, 10, 4), 15, 5));
+    }
+
+    #[test]
+    fn contains_past_bottom_edge_returns_false() {
+        assert!(!contains(rect(5, 3, 10, 4), 7, 7));
+    }
+
+    #[test]
+    fn contains_bottom_right_corner_returns_false() {
+        // x + width and y + height are exclusive bounds
+        assert!(!contains(rect(5, 3, 10, 4), 15, 7));
+    }
+
+    #[test]
+    fn contains_bottom_right_inside_returns_true() {
+        assert!(contains(rect(5, 3, 10, 4), 14, 6));
     }
 }
