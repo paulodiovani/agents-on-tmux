@@ -298,30 +298,35 @@ impl App {
 
                         for region in &regions {
                             match region.action {
-                                ui::RegionAction::SelectTab(tab) => {
+                                ui::RegionAction::SelectTab(tab)
                                     if mouse::is_clicked(mouse_event, region.area)
-                                        && tab != self.active_tab()
-                                    {
-                                        self.invalidate_clickable_regions();
-                                        self.switch_tab(tab);
-                                        changed = true;
-                                        break;
-                                    }
+                                        && tab != self.active_tab() =>
+                                {
+                                    self.invalidate_clickable_regions();
+                                    self.switch_tab(tab);
+                                    changed = true;
+                                    break;
                                 }
-                                ui::RegionAction::SelectWindow(index) => {
-                                    if mouse::is_hovered(mouse_event, region.area) && self.current_selected() != index {
-                                        self.set_current_selected(index);
-                                        changed = true;
-                                        break;
-                                    }
 
-                                    if mouse::is_clicked(mouse_event, region.area) {
-                                        self.set_current_selected(index);
-                                        self.focus_window();
-                                        changed = true;
-                                        break;
-                                    }
+                                ui::RegionAction::SelectWindow(index)
+                                    if mouse::is_hovered(mouse_event, region.area)
+                                        && self.current_selected() != index =>
+                                {
+                                    self.set_current_selected(index);
+                                    changed = true;
+                                    break;
                                 }
+
+                                ui::RegionAction::SelectWindow(index)
+                                    if mouse::is_clicked(mouse_event, region.area) =>
+                                {
+                                    self.set_current_selected(index);
+                                    self.focus_window();
+                                    changed = true;
+                                    break;
+                                }
+
+                                _ => {}
                             }
                         }
                         if changed {
