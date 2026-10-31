@@ -294,6 +294,8 @@ impl App {
                         ));
 
                         // Handle hover and click in a single pass
+                        let mut changed = false;
+
                         for region in &regions {
                             match region.action {
                                 ui::RegionAction::SelectTab(tab) => {
@@ -302,22 +304,29 @@ impl App {
                                     {
                                         self.invalidate_clickable_regions();
                                         self.switch_tab(tab);
+                                        changed = true;
                                         break;
                                     }
                                 }
                                 ui::RegionAction::SelectWindow(index) => {
-                                    if mouse::is_hovered(mouse_event, region.area) {
+                                    if mouse::is_hovered(mouse_event, region.area) && self.current_selected() != index {
                                         self.set_current_selected(index);
+                                        changed = true;
+                                        break;
                                     }
+
                                     if mouse::is_clicked(mouse_event, region.area) {
                                         self.set_current_selected(index);
                                         self.focus_window();
+                                        changed = true;
                                         break;
                                     }
                                 }
                             }
                         }
-                        last_draw = Instant::now() - redraw_tick;
+                        if changed {
+                            last_draw = Instant::now() - redraw_tick;
+                        }
                     }
                     _ => {}
                 }
