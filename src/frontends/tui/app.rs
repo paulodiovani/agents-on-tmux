@@ -278,7 +278,7 @@ impl App {
                         // Calculate visible_count from terminal size
                         // Layout: header (1) + tab bar (2) + footer (min 1) = 4 lines overhead
                         let list_height = size.height.saturating_sub(4);
-                        let visible_count = (list_height / 3) as usize; // ROW_HEIGHT = 3
+                        let visible_count = (list_height / ui::ROW_HEIGHT) as usize;
                         self.scroll(direction, visible_count);
                         self.invalidate_clickable_regions();
                         last_draw = Instant::now() - redraw_tick;

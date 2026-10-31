@@ -17,7 +17,7 @@ use crate::frontends::tui::path::shorten_path;
 use crate::frontends::tui::theme::Theme;
 
 /// Rows one list item occupies: two content lines plus a blank separator.
-const ROW_HEIGHT: u16 = 3;
+pub const ROW_HEIGHT: u16 = 3;
 /// Columns of breathing room kept on both sides, so text never touches the pane
 /// border. Full-width decorations (the tab rule, the selection) ignore it.
 const PANEL_PADDING: usize = 1;
