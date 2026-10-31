@@ -1,17 +1,17 @@
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 
+/// Checks whether a point (column, row) is within the given rectangle.
+fn contains(area: Rect, column: u16, row: u16) -> bool {
+    column >= area.x && column < area.x + area.width && row >= area.y && row < area.y + area.height
+}
+
 /// Checks whether a mouse event is a left-click within the given rectangle.
 /// Returns true only for left-button presses inside the area; other buttons,
 /// drags, scrolls, and releases return false.
 pub fn is_clicked(mouse: MouseEvent, area: Rect) -> bool {
     match mouse.kind {
-        MouseEventKind::Down(MouseButton::Left) => {
-            mouse.column >= area.x
-                && mouse.column < area.x + area.width
-                && mouse.row >= area.y
-                && mouse.row < area.y + area.height
-        }
+        MouseEventKind::Down(MouseButton::Left) => contains(area, mouse.column, mouse.row),
         _ => false,
     }
 }
@@ -20,12 +20,7 @@ pub fn is_clicked(mouse: MouseEvent, area: Rect) -> bool {
 /// Returns true for mouse movement events (Moved or Drag) inside the area.
 pub fn is_hovered(mouse: MouseEvent, area: Rect) -> bool {
     match mouse.kind {
-        MouseEventKind::Moved | MouseEventKind::Drag(_) => {
-            mouse.column >= area.x
-                && mouse.column < area.x + area.width
-                && mouse.row >= area.y
-                && mouse.row < area.y + area.height
-        }
+        MouseEventKind::Moved | MouseEventKind::Drag(_) => contains(area, mouse.column, mouse.row),
         _ => false,
     }
 }

@@ -272,9 +272,8 @@ impl App {
                     }
                     // Scroll events
                     event::Event::Mouse(mouse_event)
-                        if mouse::scroll_direction(mouse_event).is_some() =>
+                        if let Some(direction) = mouse::scroll_direction(mouse_event) =>
                     {
-                        let direction = mouse::scroll_direction(mouse_event).unwrap();
                         let size = terminal.size()?;
                         // Calculate visible_count from terminal size
                         // Layout: header (1) + tab bar (2) + footer (min 1) = 4 lines overhead
@@ -287,34 +286,35 @@ impl App {
                     // All other mouse events (hover, click, etc.)
                     event::Event::Mouse(mouse_event) => {
                         let size = terminal.size()?;
-                        let regions = self.clickable_regions(ratatui::layout::Rect::new(0, 0, size.width, size.height));
+                        let regions = self.clickable_regions(ratatui::layout::Rect::new(
+                            0,
+                            0,
+                            size.width,
+                            size.height,
+                        ));
 
-                        // Update selection on hover
+                        // Handle hover and click in a single pass
                         for region in &regions {
-                            if let ui::RegionAction::SelectWindow(index) = region.action
-                                && mouse::is_hovered(mouse_event, region.area)
-                            {
-                                self.set_current_selected(index);
-                                break;
-                            }
-                        }
-
-                        // Handle clicks
-                        for region in &regions {
-                            if mouse::is_clicked(mouse_event, region.area) {
-                                match region.action {
-                                    ui::RegionAction::SelectTab(tab) => {
-                                        if tab != self.active_tab() {
-                                            self.invalidate_clickable_regions();
-                                            self.switch_tab(tab);
-                                        }
-                                    }
-                                    ui::RegionAction::SelectWindow(index) => {
-                                        self.set_current_selected(index);
-                                        self.focus_window();
+                            match region.action {
+                                ui::RegionAction::SelectTab(tab) => {
+                                    if mouse::is_clicked(mouse_event, region.area)
+                                        && tab != self.active_tab()
+                                    {
+                                        self.invalidate_clickable_regions();
+                                        self.switch_tab(tab);
+                                        break;
                                     }
                                 }
-                                break;
+                                ui::RegionAction::SelectWindow(index) => {
+                                    if mouse::is_hovered(mouse_event, region.area) {
+                                        self.set_current_selected(index);
+                                    }
+                                    if mouse::is_clicked(mouse_event, region.area) {
+                                        self.set_current_selected(index);
+                                        self.focus_window();
+                                        break;
+                                    }
+                                }
                             }
                         }
                         last_draw = Instant::now() - redraw_tick;
@@ -653,10 +653,7 @@ impl App {
 
     /// Returns cached clickable regions for the given terminal size.
     /// Recomputes only if cache is empty (invalidated).
-    pub fn clickable_regions(
-        &mut self,
-        size: ratatui::layout::Rect,
-    ) -> Vec<ui::ClickableRegion> {
+    pub fn clickable_regions(&mut self, size: ratatui::layout::Rect) -> Vec<ui::ClickableRegion> {
         if self.regions.is_none() {
             self.regions = Some(ui::clickable_regions(size, self));
         }
