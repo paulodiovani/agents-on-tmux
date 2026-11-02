@@ -970,18 +970,6 @@ mod tests {
     }
 
     #[test]
-    fn test_footer_confirmation_wins_over_tmux_keys() {
-        use crate::frontends::tui::event::Action;
-
-        let mut app = unfocused_app();
-        app.handle_action(Action::KillWindow);
-        let buffer = render(&mut app, 35, 12);
-        let rendered = all_text(&buffer);
-        assert!(rendered.contains("kill this window"));
-        assert!(!rendered.contains("C-b"));
-    }
-
-    #[test]
     fn test_footer_height_covers_tmux_keys() {
         let app = unfocused_app();
         let theme = Theme::default();

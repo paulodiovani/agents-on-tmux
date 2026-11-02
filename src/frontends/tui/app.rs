@@ -264,7 +264,7 @@ impl App {
             if event::poll(Duration::from_millis(100))? {
                 match event::read()? {
                     event::Event::Key(key) if key.kind == event::KeyEventKind::Press => {
-                        self.handle_action(key_to_action(key));
+                        self.handle_keyboard_action(key_to_action(key));
                         last_draw = Instant::now() - redraw_tick;
                     }
 
@@ -277,61 +277,9 @@ impl App {
                     // All other mouse events (hover, click, etc.)
                     event::Event::Mouse(mouse_event) => {
                         let size = terminal.size()?;
-                        let regions = self.clickable_regions(ratatui::layout::Rect::new(
-                            0,
-                            0,
-                            size.width,
-                            size.height,
-                        ));
 
-                        match mouse_event.into() {
-                            MouseAction::Click(x, y)
-                                if let Some(ClickableRegion {
-                                    area: _,
-                                    action: RegionAction::SelectTab(tab),
-                                }) = regions
-                                    .iter()
-                                    .find(|&region| ui::contains(region.area, x, y)) =>
-                            {
-                                self.switch_tab(*tab);
-                            }
-
-                            MouseAction::Click(x, y)
-                                if let Some(ClickableRegion {
-                                    area: _,
-                                    action: RegionAction::SelectWindow(index),
-                                }) = regions
-                                    .iter()
-                                    .find(|&region| ui::contains(region.area, x, y)) =>
-                            {
-                                self.set_current_selected(*index);
-                                self.focus_window();
-                            }
-
-                            MouseAction::Hover(x, y)
-                                if let Some(ClickableRegion {
-                                    area: _,
-                                    action: RegionAction::SelectWindow(index),
-                                }) = regions
-                                    .iter()
-                                    .find(|&region| ui::contains(region.area, x, y))
-                                    && *index != self.current_selected() =>
-                            {
-                                self.set_current_selected(*index);
-                            }
-
-                            MouseAction::Scroll(direction) => {
-                                let size = terminal.size()?;
-                                // Calculate visible_count from terminal size
-                                // Layout: header (1) + tab bar (2) + footer (min 1) = 4 lines overhead
-                                let list_height = size.height.saturating_sub(4);
-                                let visible_count = (list_height / ui::ROW_HEIGHT) as usize;
-                                self.scroll(direction, visible_count);
-                                self.invalidate_clickable_regions();
-                                last_draw = Instant::now() - redraw_tick;
-                            }
-
-                            _ => {}
+                        if self.handle_mouse_action(mouse_event.into(), size) {
+                            last_draw = Instant::now() - redraw_tick;
                         }
                     }
                     _ => {}
@@ -389,8 +337,8 @@ impl App {
         needs_refresh
     }
 
-    /// Dispatches a user action to the appropriate handler.
-    pub fn handle_action(&mut self, action: Action) {
+    /// Dispatches a keyboard action to the appropriate handler.
+    fn handle_keyboard_action(&mut self, action: Action) {
         match action {
             Action::KillWindow if self.pending_action == Some(PendingAction::KillWindow) => {
                 self.kill_window();
@@ -426,6 +374,67 @@ impl App {
                     _ => {}
                 }
             }
+        }
+    }
+
+    /// Handles a mouse action. Returns `true` if the UI should be redrawn.
+    fn handle_mouse_action(
+        &mut self,
+        action: MouseAction,
+        terminal_size: ratatui::layout::Size,
+    ) -> bool {
+        let rect = ratatui::layout::Rect::new(0, 0, terminal_size.width, terminal_size.height);
+        let regions = self.clickable_regions(rect);
+
+        match action {
+            MouseAction::Click(x, y)
+                if let Some(ClickableRegion {
+                    area: _,
+                    action: RegionAction::SelectTab(tab),
+                }) = regions
+                    .iter()
+                    .find(|&region| ui::contains(region.area, x, y)) =>
+            {
+                self.switch_tab(*tab);
+                self.invalidate_clickable_regions();
+                false
+            }
+
+            MouseAction::Click(x, y)
+                if let Some(ClickableRegion {
+                    area: _,
+                    action: RegionAction::SelectWindow(index),
+                }) = regions
+                    .iter()
+                    .find(|&region| ui::contains(region.area, x, y)) =>
+            {
+                self.set_current_selected(*index);
+                self.focus_window();
+                false
+            }
+
+            MouseAction::Hover(x, y)
+                if let Some(ClickableRegion {
+                    area: _,
+                    action: RegionAction::SelectWindow(index),
+                }) = regions
+                    .iter()
+                    .find(|&region| ui::contains(region.area, x, y))
+                    && *index != self.current_selected() =>
+            {
+                self.set_current_selected(*index);
+                false
+            }
+
+            MouseAction::Scroll(direction) => {
+                let list_height = terminal_size.height.saturating_sub(4);
+                let visible_count = (list_height / ui::ROW_HEIGHT) as usize;
+                self.scroll(direction, visible_count);
+                self.invalidate_clickable_regions();
+                true
+            }
+
+            _ => false,
         }
     }
 
@@ -1168,7 +1177,7 @@ mod tests {
         let calls = nested.calls_rc();
         let mut app = App::new(Box::new(nested), Box::new(MockTmux::new()), None, None).unwrap();
 
-        app.handle_action(Action::RenameWindow);
+        app.handle_keyboard_action(Action::RenameWindow);
 
         assert!(
             calls
@@ -1181,18 +1190,18 @@ mod tests {
     #[test]
     fn test_handle_action_quit() {
         let (mut app, _, _) = test_app();
-        app.handle_action(Action::Quit);
+        app.handle_keyboard_action(Action::Quit);
         assert!(app.running);
-        app.handle_action(Action::Quit);
+        app.handle_keyboard_action(Action::Quit);
         assert!(!app.running);
     }
 
     #[test]
     fn test_handle_action_navigate() {
         let (mut app, _, _) = test_app();
-        app.handle_action(Action::NavigateDown);
+        app.handle_keyboard_action(Action::NavigateDown);
         assert_eq!(app.current_selected(), 1);
-        app.handle_action(Action::NavigateUp);
+        app.handle_keyboard_action(Action::NavigateUp);
         assert_eq!(app.current_selected(), 0);
     }
 
@@ -1201,10 +1210,10 @@ mod tests {
         let (mut app, _, _) = test_app();
         let initial_agents = app.current_tab_len();
         assert_eq!(app.pending_action(), None);
-        app.handle_action(Action::KillWindow);
+        app.handle_keyboard_action(Action::KillWindow);
         assert_eq!(app.pending_action(), Some(PendingAction::KillWindow));
         assert_eq!(app.current_tab_len(), initial_agents);
-        app.handle_action(Action::KillWindow);
+        app.handle_keyboard_action(Action::KillWindow);
         assert_eq!(app.pending_action(), None);
         assert_eq!(app.current_tab_len(), initial_agents - 1);
     }
@@ -1214,10 +1223,10 @@ mod tests {
         let (mut app, _, _) = test_app();
         assert!(app.running);
         assert_eq!(app.pending_action(), None);
-        app.handle_action(Action::Quit);
+        app.handle_keyboard_action(Action::Quit);
         assert_eq!(app.pending_action(), Some(PendingAction::Quit));
         assert!(app.running);
-        app.handle_action(Action::Quit);
+        app.handle_keyboard_action(Action::Quit);
         assert_eq!(app.pending_action(), None);
         assert!(!app.running);
     }
@@ -1225,18 +1234,18 @@ mod tests {
     #[test]
     fn test_other_action_cancels_pending_kill() {
         let (mut app, _, _) = test_app();
-        app.handle_action(Action::KillWindow);
+        app.handle_keyboard_action(Action::KillWindow);
         assert_eq!(app.pending_action(), Some(PendingAction::KillWindow));
-        app.handle_action(Action::NavigateDown);
+        app.handle_keyboard_action(Action::NavigateDown);
         assert_eq!(app.pending_action(), None);
     }
 
     #[test]
     fn test_other_action_cancels_pending_quit() {
         let (mut app, _, _) = test_app();
-        app.handle_action(Action::Quit);
+        app.handle_keyboard_action(Action::Quit);
         assert_eq!(app.pending_action(), Some(PendingAction::Quit));
-        app.handle_action(Action::NavigateDown);
+        app.handle_keyboard_action(Action::NavigateDown);
         assert_eq!(app.pending_action(), None);
         assert!(app.running);
     }
@@ -1244,14 +1253,14 @@ mod tests {
     #[test]
     fn test_none_action_clears_pending() {
         let (mut app, _, _) = test_app();
-        app.handle_action(Action::KillWindow);
+        app.handle_keyboard_action(Action::KillWindow);
         assert_eq!(app.pending_action(), Some(PendingAction::KillWindow));
-        app.handle_action(Action::None);
+        app.handle_keyboard_action(Action::None);
         assert_eq!(app.pending_action(), None);
 
-        app.handle_action(Action::Quit);
+        app.handle_keyboard_action(Action::Quit);
         assert_eq!(app.pending_action(), Some(PendingAction::Quit));
-        app.handle_action(Action::None);
+        app.handle_keyboard_action(Action::None);
         assert_eq!(app.pending_action(), None);
     }
 
