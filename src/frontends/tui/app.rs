@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 
 use crossterm::event;
 use ratatui::DefaultTerminal;
+use ratatui::layout::{Rect, Size};
 use ratatui::widgets::ListState;
 use sysinfo::{Pid, ProcessesToUpdate, System};
 
@@ -378,22 +379,14 @@ impl App {
     }
 
     /// Handles a mouse action. Returns `true` if the UI should be redrawn.
-    fn handle_mouse_action(
-        &mut self,
-        action: MouseAction,
-        terminal_size: ratatui::layout::Size,
-    ) -> bool {
-        let rect = ratatui::layout::Rect::new(0, 0, terminal_size.width, terminal_size.height);
+    fn handle_mouse_action(&mut self, action: MouseAction, terminal_size: Size) -> bool {
+        let rect = Rect::new(0, 0, terminal_size.width, terminal_size.height);
         let regions = self.clickable_regions(rect);
 
         match action {
             MouseAction::Click(x, y)
-                if let Some(ClickableRegion {
-                    area: _,
-                    action: RegionAction::SelectTab(tab),
-                }) = regions
-                    .iter()
-                    .find(|&region| ui::contains(region.area, x, y)) =>
+                if let Some(RegionAction::SelectTab(tab)) =
+                    self.find_region_action(&regions, x, y) =>
             {
                 self.switch_tab(*tab);
                 self.invalidate_clickable_regions();
@@ -401,12 +394,8 @@ impl App {
             }
 
             MouseAction::Click(x, y)
-                if let Some(ClickableRegion {
-                    area: _,
-                    action: RegionAction::SelectWindow(index),
-                }) = regions
-                    .iter()
-                    .find(|&region| ui::contains(region.area, x, y)) =>
+                if let Some(RegionAction::SelectWindow(index)) =
+                    self.find_region_action(&regions, x, y) =>
             {
                 self.set_current_selected(*index);
                 self.focus_window();
@@ -414,12 +403,8 @@ impl App {
             }
 
             MouseAction::Hover(x, y)
-                if let Some(ClickableRegion {
-                    area: _,
-                    action: RegionAction::SelectWindow(index),
-                }) = regions
-                    .iter()
-                    .find(|&region| ui::contains(region.area, x, y))
+                if let Some(RegionAction::SelectWindow(index)) =
+                    self.find_region_action(&regions, x, y)
                     && *index != self.current_selected() =>
             {
                 self.set_current_selected(*index);
@@ -677,7 +662,7 @@ impl App {
 
     /// Returns cached clickable regions for the given terminal size.
     /// Recomputes only if cache is empty (invalidated).
-    pub fn clickable_regions(&mut self, size: ratatui::layout::Rect) -> Vec<ui::ClickableRegion> {
+    pub fn clickable_regions(&mut self, size: Rect) -> Vec<ui::ClickableRegion> {
         if self.regions.is_none() {
             self.regions = Some(ui::clickable_regions(size, self));
         }
@@ -688,6 +673,23 @@ impl App {
     /// Call this when the layout changes (e.g., resize, scroll position, tab switch).
     pub fn invalidate_clickable_regions(&mut self) {
         self.regions = None;
+    }
+
+    /// Returns the action of the clickable region at the given terminal coordinates, if any.
+    fn find_region_action<'a>(
+        &mut self,
+        regions: &'a [ClickableRegion],
+        x: u16,
+        y: u16,
+    ) -> Option<&'a RegionAction> {
+        if let Some(ClickableRegion { area: _, action }) = regions
+            .iter()
+            .find(|region| ui::contains(region.area, x, y))
+        {
+            Some(action)
+        } else {
+            None
+        }
     }
 
     /// Returns the tmux key sequences to advertise when the pane is not
