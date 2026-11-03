@@ -676,7 +676,7 @@ impl App {
 
     /// Returns the action of the clickable region at the given terminal coordinates, if any.
     fn find_region_action<'a>(
-        &mut self,
+        &self,
         regions: &'a [ClickableRegion],
         x: u16,
         y: u16,
