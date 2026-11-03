@@ -275,7 +275,6 @@ impl App {
                         last_draw = Instant::now() - redraw_tick;
                     }
 
-                    // All other mouse events (hover, click, etc.)
                     event::Event::Mouse(mouse_event) => {
                         let size = terminal.size()?;
 
