@@ -3,6 +3,7 @@ use std::time::{Duration, Instant};
 
 use crossterm::event;
 use ratatui::DefaultTerminal;
+use ratatui::layout::{Rect, Size};
 use ratatui::widgets::ListState;
 use sysinfo::{Pid, ProcessesToUpdate, System};
 
@@ -11,8 +12,10 @@ use crate::backends::logger;
 use crate::backends::tmux::{self, EventProducer, TmuxEvent};
 use crate::backends::tmux::{Tmux, Window};
 use crate::frontends::tui::event::{Action, PendingAction, Tab, key_to_action};
+use crate::frontends::tui::mouse::MouseAction;
 use crate::frontends::tui::theme::Theme;
 use crate::frontends::tui::ui;
+use crate::frontends::tui::ui::{ClickableRegion, RegionAction};
 
 /// The nested-session commands worth advertising, with their footer labels.
 const HINTED_COMMANDS: [(&str, &str); 5] = [
@@ -137,6 +140,7 @@ pub struct App {
     panel_width: Option<u16>,
     parent_driver: Box<dyn Tmux>,
     pending_action: Option<PendingAction>,
+    regions: Option<Vec<ui::ClickableRegion>>,
     running: bool,
     tmux_hints: Vec<(String, String)>,
     windows: Vec<Window>,
@@ -173,6 +177,7 @@ impl App {
             panel_width,
             parent_driver,
             pending_action: None,
+            regions: None,
             running: true,
             tmux_hints,
             windows: Vec::new(),
@@ -260,12 +265,22 @@ impl App {
             if event::poll(Duration::from_millis(100))? {
                 match event::read()? {
                     event::Event::Key(key) if key.kind == event::KeyEventKind::Press => {
-                        self.handle_action(key_to_action(key));
+                        self.handle_keyboard_action(key_to_action(key));
                         last_draw = Instant::now() - redraw_tick;
                     }
+
                     event::Event::Resize(width, _) => {
                         self.enforce_panel_width(width);
+                        self.invalidate_clickable_regions();
                         last_draw = Instant::now() - redraw_tick;
+                    }
+
+                    event::Event::Mouse(mouse_event) => {
+                        let size = terminal.size()?;
+
+                        if self.handle_mouse_action(mouse_event.into(), size) {
+                            last_draw = Instant::now() - redraw_tick;
+                        }
                     }
                     _ => {}
                 }
@@ -273,6 +288,7 @@ impl App {
 
             // Drain tmux events (non-blocking). A refresh forces an immediate redraw.
             if self.process_tmux_events() {
+                self.invalidate_clickable_regions();
                 last_draw = Instant::now() - redraw_tick;
             }
 
@@ -321,11 +337,12 @@ impl App {
         needs_refresh
     }
 
-    /// Dispatches a user action to the appropriate handler.
-    pub fn handle_action(&mut self, action: Action) {
+    /// Dispatches a keyboard action to the appropriate handler.
+    fn handle_keyboard_action(&mut self, action: Action) {
         match action {
             Action::KillWindow if self.pending_action == Some(PendingAction::KillWindow) => {
                 self.kill_window();
+                self.invalidate_clickable_regions();
                 self.pending_action = None;
             }
             Action::KillWindow => self.pending_action = Some(PendingAction::KillWindow),
@@ -341,13 +358,67 @@ impl App {
                     Action::NavigateUp => self.navigate_up(),
                     Action::NavigateDown => self.navigate_down(),
                     Action::FocusWindow => self.focus_window(),
-                    Action::CreateWindow => self.create_window(),
+                    Action::CreateWindow => {
+                        self.create_window();
+                        self.invalidate_clickable_regions();
+                    }
                     Action::RenameWindow => self.rename_window(),
-                    Action::SwitchTabLeft => self.switch_tab(self.active_tab.left()),
-                    Action::SwitchTabRight => self.switch_tab(self.active_tab.right()),
+                    Action::SwitchTabLeft => {
+                        self.switch_tab(self.active_tab.left());
+                        self.invalidate_clickable_regions();
+                    }
+                    Action::SwitchTabRight => {
+                        self.switch_tab(self.active_tab.right());
+                        self.invalidate_clickable_regions();
+                    }
                     _ => {}
                 }
             }
+        }
+    }
+
+    /// Handles a mouse action. Returns `true` if the UI should be redrawn.
+    fn handle_mouse_action(&mut self, action: MouseAction, terminal_size: Size) -> bool {
+        let rect = Rect::new(0, 0, terminal_size.width, terminal_size.height);
+        let regions = self.clickable_regions(rect);
+
+        match action {
+            MouseAction::Click(x, y)
+                if let Some(RegionAction::SelectTab(tab)) =
+                    self.find_region_action(&regions, x, y) =>
+            {
+                self.switch_tab(*tab);
+                self.invalidate_clickable_regions();
+                false
+            }
+
+            MouseAction::Click(x, y)
+                if let Some(RegionAction::SelectWindow(index)) =
+                    self.find_region_action(&regions, x, y) =>
+            {
+                self.set_current_selected(*index);
+                self.focus_window();
+                false
+            }
+
+            MouseAction::Hover(x, y)
+                if let Some(RegionAction::SelectWindow(index)) =
+                    self.find_region_action(&regions, x, y)
+                    && *index != self.current_selected() =>
+            {
+                self.set_current_selected(*index);
+                false
+            }
+
+            MouseAction::Scroll(direction) => {
+                let list_height = terminal_size.height.saturating_sub(4);
+                let visible_count = (list_height / ui::ROW_HEIGHT) as usize;
+                self.scroll(direction, visible_count);
+                self.invalidate_clickable_regions();
+                true
+            }
+
+            _ => false,
         }
     }
 
@@ -549,24 +620,25 @@ impl App {
                 .find(|w| w.is_active)
                 .map(|w| (w.id, w.running_command.clone()));
 
-            if let Some((active_id, active_command)) = active_window_info
-                && self.last_focused_id != Some(active_id)
-            {
-                let target_tab = if is_agent(&active_command).is_some() {
-                    Tab::Agents
-                } else {
-                    Tab::Windows
-                };
+            if let Some((active_id, active_command)) = active_window_info {
+                let current_selected_id = self.current_tab_window().map(|w| w.id);
+                if current_selected_id != Some(active_id) {
+                    let target_tab = if is_agent(&active_command).is_some() {
+                        Tab::Agents
+                    } else {
+                        Tab::Windows
+                    };
 
-                let indices = self.indices_for_tab(target_tab);
-                if let Some(pos) = indices
-                    .iter()
-                    .position(|&i| self.windows[i].id == active_id)
-                {
-                    self.active_tab = target_tab;
-                    self.set_selected_for_tab(target_tab, pos);
-                    self.last_focused_id = Some(active_id);
-                    self.list_state.select(Some(self.current_selected()));
+                    let indices = self.indices_for_tab(target_tab);
+                    if let Some(pos) = indices
+                        .iter()
+                        .position(|&i| self.windows[i].id == active_id)
+                    {
+                        self.active_tab = target_tab;
+                        self.set_selected_for_tab(target_tab, pos);
+                        self.last_focused_id = Some(active_id);
+                        self.list_state.select(Some(self.current_selected()));
+                    }
                 }
             } else if is_first_refresh && !self.is_tab_empty(Tab::Agents) {
                 self.active_tab = Tab::Agents;
@@ -585,6 +657,38 @@ impl App {
     /// tracking is inactive.
     pub fn pane_active(&self) -> bool {
         self.pane_active
+    }
+
+    /// Returns cached clickable regions for the given terminal size.
+    /// Recomputes only if cache is empty (invalidated).
+    pub fn clickable_regions(&mut self, size: Rect) -> Vec<ui::ClickableRegion> {
+        if self.regions.is_none() {
+            self.regions = Some(ui::clickable_regions(size, self));
+        }
+        self.regions.as_ref().unwrap().clone()
+    }
+
+    /// Invalidates the cached clickable regions.
+    /// Call this when the layout changes (e.g., resize, scroll position, tab switch).
+    pub fn invalidate_clickable_regions(&mut self) {
+        self.regions = None;
+    }
+
+    /// Returns the action of the clickable region at the given terminal coordinates, if any.
+    fn find_region_action<'a>(
+        &mut self,
+        regions: &'a [ClickableRegion],
+        x: u16,
+        y: u16,
+    ) -> Option<&'a RegionAction> {
+        if let Some(ClickableRegion { area: _, action }) = regions
+            .iter()
+            .find(|region| ui::contains(region.area, x, y))
+        {
+            Some(action)
+        } else {
+            None
+        }
     }
 
     /// Returns the tmux key sequences to advertise when the pane is not
@@ -661,11 +765,39 @@ impl App {
         *self.list_state.offset_mut() = new_offset;
     }
 
+    /// Scrolls the list by the given direction (-1 for up, 1 for down).
+    /// The visible_count is the number of items that fit in the viewport.
+    pub fn scroll(&mut self, direction: i8, visible_count: usize) {
+        if visible_count == 0 {
+            return;
+        }
+
+        let total_items = self.current_tab_len();
+        if total_items == 0 {
+            return;
+        }
+
+        let current_offset = self.list_state.offset();
+        let max_offset = total_items.saturating_sub(visible_count);
+
+        let new_offset = if direction > 0 {
+            // Scroll down
+            (current_offset + 1).min(max_offset)
+        } else if direction < 0 {
+            // Scroll up
+            current_offset.saturating_sub(1)
+        } else {
+            current_offset
+        };
+
+        *self.list_state.offset_mut() = new_offset;
+    }
+
     fn current_tab_indices(&self) -> Vec<usize> {
         self.indices_for_tab(self.active_tab)
     }
 
-    fn indices_for_tab(&self, tab: Tab) -> Vec<usize> {
+    pub(crate) fn indices_for_tab(&self, tab: Tab) -> Vec<usize> {
         self.windows
             .iter()
             .enumerate()
@@ -1046,7 +1178,7 @@ mod tests {
         let calls = nested.calls_rc();
         let mut app = App::new(Box::new(nested), Box::new(MockTmux::new()), None, None).unwrap();
 
-        app.handle_action(Action::RenameWindow);
+        app.handle_keyboard_action(Action::RenameWindow);
 
         assert!(
             calls
@@ -1059,18 +1191,18 @@ mod tests {
     #[test]
     fn test_handle_action_quit() {
         let (mut app, _, _) = test_app();
-        app.handle_action(Action::Quit);
+        app.handle_keyboard_action(Action::Quit);
         assert!(app.running);
-        app.handle_action(Action::Quit);
+        app.handle_keyboard_action(Action::Quit);
         assert!(!app.running);
     }
 
     #[test]
     fn test_handle_action_navigate() {
         let (mut app, _, _) = test_app();
-        app.handle_action(Action::NavigateDown);
+        app.handle_keyboard_action(Action::NavigateDown);
         assert_eq!(app.current_selected(), 1);
-        app.handle_action(Action::NavigateUp);
+        app.handle_keyboard_action(Action::NavigateUp);
         assert_eq!(app.current_selected(), 0);
     }
 
@@ -1079,10 +1211,10 @@ mod tests {
         let (mut app, _, _) = test_app();
         let initial_agents = app.current_tab_len();
         assert_eq!(app.pending_action(), None);
-        app.handle_action(Action::KillWindow);
+        app.handle_keyboard_action(Action::KillWindow);
         assert_eq!(app.pending_action(), Some(PendingAction::KillWindow));
         assert_eq!(app.current_tab_len(), initial_agents);
-        app.handle_action(Action::KillWindow);
+        app.handle_keyboard_action(Action::KillWindow);
         assert_eq!(app.pending_action(), None);
         assert_eq!(app.current_tab_len(), initial_agents - 1);
     }
@@ -1092,10 +1224,10 @@ mod tests {
         let (mut app, _, _) = test_app();
         assert!(app.running);
         assert_eq!(app.pending_action(), None);
-        app.handle_action(Action::Quit);
+        app.handle_keyboard_action(Action::Quit);
         assert_eq!(app.pending_action(), Some(PendingAction::Quit));
         assert!(app.running);
-        app.handle_action(Action::Quit);
+        app.handle_keyboard_action(Action::Quit);
         assert_eq!(app.pending_action(), None);
         assert!(!app.running);
     }
@@ -1103,18 +1235,18 @@ mod tests {
     #[test]
     fn test_other_action_cancels_pending_kill() {
         let (mut app, _, _) = test_app();
-        app.handle_action(Action::KillWindow);
+        app.handle_keyboard_action(Action::KillWindow);
         assert_eq!(app.pending_action(), Some(PendingAction::KillWindow));
-        app.handle_action(Action::NavigateDown);
+        app.handle_keyboard_action(Action::NavigateDown);
         assert_eq!(app.pending_action(), None);
     }
 
     #[test]
     fn test_other_action_cancels_pending_quit() {
         let (mut app, _, _) = test_app();
-        app.handle_action(Action::Quit);
+        app.handle_keyboard_action(Action::Quit);
         assert_eq!(app.pending_action(), Some(PendingAction::Quit));
-        app.handle_action(Action::NavigateDown);
+        app.handle_keyboard_action(Action::NavigateDown);
         assert_eq!(app.pending_action(), None);
         assert!(app.running);
     }
@@ -1122,14 +1254,14 @@ mod tests {
     #[test]
     fn test_none_action_clears_pending() {
         let (mut app, _, _) = test_app();
-        app.handle_action(Action::KillWindow);
+        app.handle_keyboard_action(Action::KillWindow);
         assert_eq!(app.pending_action(), Some(PendingAction::KillWindow));
-        app.handle_action(Action::None);
+        app.handle_keyboard_action(Action::None);
         assert_eq!(app.pending_action(), None);
 
-        app.handle_action(Action::Quit);
+        app.handle_keyboard_action(Action::Quit);
         assert_eq!(app.pending_action(), Some(PendingAction::Quit));
-        app.handle_action(Action::None);
+        app.handle_keyboard_action(Action::None);
         assert_eq!(app.pending_action(), None);
     }
 
@@ -1763,6 +1895,42 @@ mod tests {
 
         assert_eq!(app.active_tab(), Tab::Windows);
         assert_eq!(app.current_selected(), 0);
+    }
+
+    #[test]
+    fn test_cursor_follows_active_window_after_mouse_hover_then_lose_focus() {
+        // Scenario: User focuses window with keyboard, then hovers with mouse
+        // (changing selection but not last_focused_id), then pane becomes inactive.
+        // Selection should sync back to the active window, not stay at hover position.
+        let (mut app, windows, _) = test_app();
+
+        // Initial state: Agents tab has 2 windows (id=2 at index 0, id=4 at index 1)
+        // Active window is id=2
+        assert_eq!(app.current_selected(), 0);
+        assert_eq!(app.windows()[1].id, 2);
+        assert!(app.windows()[1].is_active);
+
+        // User navigates down with keyboard to selection 1 (id=4)
+        app.navigate_down();
+        assert_eq!(app.current_selected(), 1);
+        assert_eq!(app.last_focused_id, Some(4));
+
+        // Simulate that the active window is now id=4 (the one we focused)
+        windows.borrow_mut()[1].is_active = false; // id=2 is no longer active
+        windows.borrow_mut()[3].is_active = true; // id=4 is now active
+
+        // User hovers back to selection 0 (id=2) with mouse
+        app.set_current_selected(0);
+        assert_eq!(app.current_selected(), 0);
+        assert_eq!(app.last_focused_id, Some(4)); // Still points to id=4
+
+        // Pane becomes inactive (mouse moved to main pane)
+        app.set_pane_active(false);
+
+        // refresh_windows should sync selection back to active window (id=4, index 1)
+        app.refresh_windows().unwrap();
+
+        assert_eq!(app.current_selected(), 1); // Should sync back to active window (id=4)
     }
 
     #[test]

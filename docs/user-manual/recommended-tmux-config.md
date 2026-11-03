@@ -51,3 +51,18 @@ set-option -g activity-action other
 ```
 
 Marks windows with pending output from an inactive agent (`!` indicator in the TUI).
+
+### Mouse support
+
+```tmux
+set -g mouse on
+set -g focus-follows-mouse on
+```
+
+Enables mouse interaction with the AOT TUI:
+
+- Click on tabs to switch between Agents and Windows
+- Click on window rows to select and focus them
+- `focus-follows-mouse` automatically focuses panes when you move the mouse over them, so clicks work seamlessly without needing to focus the pane first
+
+**Requirements:** `focus-follows-mouse` requires tmux 3.7 or later (released 2024). Check your version with `tmux -V`. If you have an older version, you can still use `set -g mouse on` alone, but you'll need to click once to focus the TUI pane before interacting with it.

@@ -152,6 +152,7 @@ fn main() -> anyhow::Result<()> {
                 logger::error(&format!("main: signal install failed: {error}"));
             }
             let terminal = ratatui::init();
+            let _ = crossterm::execute!(std::io::stdout(), crossterm::event::EnableMouseCapture);
             let mut app = frontends::tui::app::App::new(
                 Box::new(nested_driver),
                 Box::new(parent_driver),
@@ -159,6 +160,7 @@ fn main() -> anyhow::Result<()> {
                 width,
             )?;
             let result = app.run(terminal);
+            let _ = crossterm::execute!(std::io::stdout(), crossterm::event::DisableMouseCapture);
             if let Err(error) = ratatui::try_restore() {
                 logger::error(&format!("main: failed to restore terminal: {error}"));
             }
