@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use super::list_agents::ListAgents;
 use super::list_windows::ListWindows;
+use super::read_agent::ReadAgent;
 use super::read_window::ReadWindow;
 use super::tool::Tool;
 use crate::backends::tmux::Tmux;
@@ -11,7 +12,8 @@ pub fn all_tools(tmux: Arc<dyn Tmux + Send + Sync>) -> Vec<Box<dyn Tool>> {
     vec![
         Box::new(ListWindows::new(Arc::clone(&tmux))),
         Box::new(ListAgents::new(Arc::clone(&tmux))),
-        Box::new(ReadWindow::new(tmux)),
+        Box::new(ReadWindow::new(Arc::clone(&tmux))),
+        Box::new(ReadAgent::new(tmux)),
     ]
 }
 
@@ -24,6 +26,9 @@ mod tests {
     fn test_all_tools_names_in_order() {
         let tools = all_tools(Arc::new(MockTmux::new()));
         let names: Vec<&str> = tools.iter().map(|tool| tool.name()).collect();
-        assert_eq!(names, ["list_windows", "list_agents", "read_window"]);
+        assert_eq!(
+            names,
+            ["list_windows", "list_agents", "read_window", "read_agent"]
+        );
     }
 }

@@ -1,5 +1,6 @@
 mod list_agents;
 mod list_windows;
+mod read_agent;
 mod read_window;
 mod registry;
 mod tool;

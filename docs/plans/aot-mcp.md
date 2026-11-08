@@ -74,7 +74,7 @@ Open points to settle during implementation (ask before deciding): multi-line pr
 - [x] 2. `list_windows`
 - [x] 3. `list_agents`
 - [x] 4. `read_window` (+ `capture_pane`)
-- [ ] 5. `read_agent` (alias)
+- [x] 5. `read_agent` (alias)
 - [ ] 6. `new_window` (+ `create_window` cwd/command)
 - [ ] 7. `new_agent`
 - [ ] 8. `send_command` (+ `send_keys`)
