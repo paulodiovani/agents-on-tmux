@@ -1013,6 +1013,10 @@ mod tests {
                 .push(format!("rename_window {id} {name}"));
             Ok(())
         }
+
+        fn capture_pane(&self, _id: u32, _history: u32) -> Result<String, TmuxError> {
+            Ok(String::new())
+        }
     }
 
     fn command_failed(command: &str) -> TmuxError {

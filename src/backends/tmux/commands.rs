@@ -47,6 +47,9 @@ pub trait Tmux {
     fn show_options(&self, name: &str, global: bool) -> Result<String, TmuxError>;
     /// Prompts the user to rename the window via the tmux command prompt.
     fn rename_window(&self, id: u32, name: &str) -> Result<(), TmuxError>;
+    /// Returns the text of the window's active pane: the visible screen plus up
+    /// to `history` lines of scrollback above it.
+    fn capture_pane(&self, id: u32, history: u32) -> Result<String, TmuxError>;
 }
 
 pub const SESSION_NAME: &str = "agents-on-tmux";
@@ -538,6 +541,15 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
             .execute(&["command-prompt", "-I", name, &template])
             .map(|_| ())
     }
+
+    /// Returns the text of the window's active pane: the visible screen plus up
+    /// to `history` lines of scrollback above it.
+    fn capture_pane(&self, id: u32, history: u32) -> Result<String, TmuxError> {
+        let target = target(&self.session, Some(&id.to_string()), None);
+        let start = format!("-{history}");
+        self.executor
+            .execute(&["capture-pane", "-p", "-J", "-t", &target, "-S", &start])
+    }
 }
 
 #[cfg(test)]
@@ -651,6 +663,7 @@ mod tests {
                 Some(&"set-option") => Ok(String::new()),
                 Some(&"resize-pane") => Ok(String::new()),
                 Some(&"command-prompt") => Ok(String::new()),
+                Some(&"capture-pane") => Ok("$ ls\nsrc\n".to_string()),
                 Some(&"split-window") => Ok(self.pane_id.borrow().clone()),
                 Some(&"list-keys") => Ok(concat!(
                     "bind-key -r -T prefix Up select-pane -U\n",
@@ -1192,6 +1205,29 @@ mod tests {
                 "-I".to_string(),
                 "my-window".to_string(),
                 "rename-window -t \"agents-on-tmux:1\" \"%%\"".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_capture_pane_command_args() {
+        let executor = MockCommandExecutor::with_session();
+        let driver = TmuxDriver::with_executor(executor);
+
+        let output = driver.capture_pane(3, 120).unwrap();
+
+        assert_eq!(output, "$ ls\nsrc\n");
+        let commands = driver.executor.commands.borrow();
+        assert_eq!(
+            commands.last().unwrap().as_slice(),
+            [
+                "capture-pane",
+                "-p",
+                "-J",
+                "-t",
+                "agents-on-tmux:3",
+                "-S",
+                "-120"
             ]
         );
     }

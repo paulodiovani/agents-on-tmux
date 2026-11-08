@@ -36,7 +36,7 @@ Agents running inside AOT's nested tmux session can list, create, read, and send
 ### Tmux backend additions (`Tmux` trait + `TmuxDriver`)
 
 - `create_window` gains cwd and optional command (`new-window -d -P -F ... -c <dir> [command]`); existing TUI caller keeps current behavior.
-- `capture_pane(index, lines)` → `capture-pane -p -J -t <session>:<index> -S -<lines>`.
+- `capture_pane(index, history)` → `capture-pane -p -J -t <session>:<index> -S -<history>` (visible screen plus `history` scrollback lines); `read_window` drops trailing blank lines and keeps the last `lines`.
 - `send_keys(index, text, enter)` → `send-keys -t <session>:<index> -l <text>` then `Enter` (literal mode so text is never interpreted as key names).
 - `window_for_pane(pane_id)` → `display-message -p -t %N '#{window_index}'`.
 - `Window` already carries `running_command` and `current_dir`; agent vs. plain window decided with `agents::is_agent`.
@@ -73,7 +73,7 @@ Open points to settle during implementation (ask before deciding): multi-line pr
 - [x] 1. MCP core: `serde_json` dep, JSON-RPC/MCP handler with empty tool registry (`initialize`, `ping`, `tools/list`), tool trait + registry, unix socket server thread started from `main` (first-instance-owns-socket, tests for live/stale socket), `aot mcp` shim subcommand, handshake + pane capture
 - [x] 2. `list_windows`
 - [x] 3. `list_agents`
-- [ ] 4. `read_window` (+ `capture_pane`)
+- [x] 4. `read_window` (+ `capture_pane`)
 - [ ] 5. `read_agent` (alias)
 - [ ] 6. `new_window` (+ `create_window` cwd/command)
 - [ ] 7. `new_agent`
