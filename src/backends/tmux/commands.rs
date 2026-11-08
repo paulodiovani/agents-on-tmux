@@ -27,8 +27,8 @@ pub trait Tmux {
     fn attach_session(&self) -> Result<(), TmuxError>;
     /// Lists all windows in the session.
     fn list_windows(&self) -> Result<Vec<Window>, TmuxError>;
-    /// Creates a new window with the given name.
-    fn create_window(&self, name: &str) -> Result<Window, TmuxError>;
+    /// Creates a new window as described by `options` and returns it.
+    fn create_window(&self, options: &NewWindow) -> Result<Window, TmuxError>;
     /// Kills the window with the given id.
     fn kill_window(&self, id: u32) -> Result<(), TmuxError>;
     /// Selects (focuses) the window with the given id.
@@ -93,6 +93,19 @@ pub struct Window {
 pub struct KeyBinding {
     pub command: String,
     pub key: String,
+}
+
+/// Options for creating a window; unset fields keep tmux defaults.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct NewWindow {
+    /// Window name; tmux names it automatically when unset.
+    pub name: Option<String>,
+    /// Working directory of the new window.
+    pub dir: Option<String>,
+    /// Shell command to run instead of the default shell.
+    pub command: Option<String>,
+    /// Creates the window without making it the current one.
+    pub detached: bool,
 }
 
 fn check_inside_tmux(tmux_env: Option<&str>) -> Result<(), TmuxError> {
@@ -446,19 +459,30 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
     }
 
     /// Creates a new window with the given name.
-    fn create_window(&self, name: &str) -> Result<Window, TmuxError> {
-        self.executor.execute(&[
-            "new-window",
-            "-t",
-            &target(&self.session, None, None),
-            "-n",
-            name,
-        ])?;
+    fn create_window(&self, options: &NewWindow) -> Result<Window, TmuxError> {
+        let session = target(&self.session, None, None);
+        let mut args = vec!["new-window", "-t", &session, "-P", "-F", "#{window_index}"];
+        if options.detached {
+            args.push("-d");
+        }
+        if let Some(name) = &options.name {
+            args.extend(["-n", name]);
+        }
+        if let Some(dir) = &options.dir {
+            args.extend(["-c", dir]);
+        }
+        if let Some(command) = &options.command {
+            args.push(command);
+        }
+        let output = self.executor.execute(&args)?;
+        let id = output
+            .trim()
+            .parse::<u32>()
+            .map_err(|_| TmuxError::WindowNotFound)?;
 
-        let windows = self.list_windows()?;
-        windows
+        self.list_windows()?
             .into_iter()
-            .find(|w| w.name == name)
+            .find(|w| w.id == id)
             .ok_or(TmuxError::WindowNotFound)
     }
 
@@ -655,7 +679,7 @@ mod tests {
                         started_at: None,
                     };
                     windows.push(window.clone());
-                    Ok(String::new())
+                    Ok(format!("{id}\n"))
                 }
                 Some(&"select-window") => Ok(String::new()),
                 Some(&"last-pane") => Ok(String::new()),
@@ -851,10 +875,75 @@ mod tests {
     fn test_create_window() {
         let executor = MockCommandExecutor::with_session();
         let driver = TmuxDriver::with_executor(executor);
-        let window = driver.create_window("test-window").unwrap();
+        let options = NewWindow {
+            name: Some("test-window".to_string()),
+            ..NewWindow::default()
+        };
+        let window = driver.create_window(&options).unwrap();
         assert_eq!(window.name, "test-window");
         assert!(window.started_at.is_none());
         assert!(!window.notification_pending);
+
+        let commands = driver.executor.commands.borrow();
+        let new_window = commands.iter().find(|cmd| cmd[0] == "new-window").unwrap();
+        assert_eq!(
+            new_window.as_slice(),
+            [
+                "new-window",
+                "-t",
+                "agents-on-tmux:",
+                "-P",
+                "-F",
+                "#{window_index}",
+                "-n",
+                "test-window"
+            ]
+        );
+    }
+
+    #[test]
+    fn test_create_window_with_all_options() {
+        let executor = MockCommandExecutor::with_session();
+        let driver = TmuxDriver::with_executor(executor);
+        let options = NewWindow {
+            name: None,
+            dir: Some("/tmp/project".to_string()),
+            command: Some("claude --continue".to_string()),
+            detached: true,
+        };
+        let window = driver.create_window(&options).unwrap();
+        assert_eq!(window.id, 1);
+
+        let commands = driver.executor.commands.borrow();
+        let new_window = commands.iter().find(|cmd| cmd[0] == "new-window").unwrap();
+        assert_eq!(
+            new_window.as_slice(),
+            [
+                "new-window",
+                "-t",
+                "agents-on-tmux:",
+                "-P",
+                "-F",
+                "#{window_index}",
+                "-d",
+                "-c",
+                "/tmp/project",
+                "claude --continue",
+            ]
+        );
+    }
+
+    #[test]
+    fn test_create_window_finds_the_window_by_printed_index() {
+        let executor = MockCommandExecutor::with_session();
+        let driver = TmuxDriver::with_executor(executor);
+        let named = |name: &str| NewWindow {
+            name: Some(name.to_string()),
+            ..NewWindow::default()
+        };
+        driver.create_window(&named("same")).unwrap();
+        let second = driver.create_window(&named("same")).unwrap();
+        assert_eq!(second.id, 2);
     }
 
     #[test]

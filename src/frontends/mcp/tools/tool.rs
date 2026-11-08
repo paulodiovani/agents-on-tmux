@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use serde_json::Value;
 
 use crate::backends::tmux::{Tmux, Window};
@@ -80,6 +82,27 @@ pub fn index_argument(arguments: &Value) -> Result<u32, ToolOutput> {
                 "Invalid index {value}: pass the integer window index (e.g. 3) from list_windows or list_agents, not a title"
             ))
         })
+}
+
+/// Resolves the optional `dir` argument to an existing directory: relative paths
+/// are taken from `default_dir`, and a missing argument means `default_dir`.
+pub fn dir_argument(arguments: &Value, default_dir: &Path) -> Result<String, ToolOutput> {
+    let dir = match arguments.get("dir") {
+        None => default_dir.to_path_buf(),
+        Some(Value::String(dir)) => default_dir.join(dir),
+        Some(value) => {
+            return Err(ToolOutput::error(format!(
+                "Invalid dir {value}: pass a directory path"
+            )));
+        }
+    };
+    if !dir.is_dir() {
+        return Err(ToolOutput::error(format!(
+            "Directory not found: {}",
+            dir.display()
+        )));
+    }
+    Ok(dir.to_string_lossy().into_owned())
 }
 
 /// Finds the window with the given index in the AOT session.
@@ -198,5 +221,42 @@ pub(super) mod tests {
 
         let error = find_window(&tmux, 1).unwrap_err();
         assert_eq!(error.text, "Failed to list windows: Window not found");
+    }
+
+    #[test]
+    fn test_dir_argument_defaults_to_default_dir() {
+        let default_dir = std::env::temp_dir();
+        assert_eq!(
+            dir_argument(&json!({}), &default_dir),
+            Ok(default_dir.to_string_lossy().into_owned())
+        );
+    }
+
+    #[test]
+    fn test_dir_argument_resolves_relative_and_absolute_paths() {
+        let base = std::env::temp_dir();
+        let absolute = base.to_string_lossy().into_owned();
+        assert_eq!(
+            dir_argument(&json!({ "dir": absolute }), Path::new("/nonexistent")),
+            Ok(absolute.clone())
+        );
+        assert_eq!(
+            dir_argument(&json!({ "dir": "." }), &base),
+            Ok(base.join(".").to_string_lossy().into_owned())
+        );
+    }
+
+    #[test]
+    fn test_dir_argument_rejects_missing_directory() {
+        let error =
+            dir_argument(&json!({ "dir": "no-such-dir-aot" }), &std::env::temp_dir()).unwrap_err();
+        assert!(error.is_error);
+        assert!(error.text.starts_with("Directory not found:"));
+    }
+
+    #[test]
+    fn test_dir_argument_rejects_non_string() {
+        let error = dir_argument(&json!({ "dir": 1 }), Path::new("/")).unwrap_err();
+        assert!(error.text.starts_with("Invalid dir"));
     }
 }

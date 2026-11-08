@@ -35,7 +35,7 @@ Agents running inside AOT's nested tmux session can list, create, read, and send
 
 ### Tmux backend additions (`Tmux` trait + `TmuxDriver`)
 
-- `create_window` gains cwd and optional command (`new-window -d -P -F ... -c <dir> [command]`); existing TUI caller keeps current behavior.
+- `create_window(&NewWindow { name, dir, command, detached })` (`new-window -P -F '#{window_index}' [-d] [-n name] [-c dir] [command]`), returning the window found by the printed index; the TUI passes only the name, keeping its behavior.
 - `capture_pane(index, history)` → `capture-pane -p -J -t <session>:<index> -S -<history>` (visible screen plus `history` scrollback lines); `read_window` drops trailing blank lines and keeps the last `lines`.
 - `send_keys(index, text, enter)` → `send-keys -t <session>:<index> -l <text>` then `Enter` (literal mode so text is never interpreted as key names).
 - `window_for_pane(pane_id)` → `display-message -p -t %N '#{window_index}'`.
@@ -51,7 +51,7 @@ All take/return window indexes (field/arg `index`, integer). Names are the final
 | `list_agents` | – | `{agents: [...]}` of agent windows: `{index, title, agent, command, cwd, active}` |
 | `read_window` | `index`, `lines` (default 50, max 2000) | plain text |
 | `read_agent` | same | alias of `read_window` |
-| `new_window` | `dir?` (default AOT's PWD) | `{index, title, cwd}` |
+| `new_window` | `dir?` (default AOT's PWD; relative paths resolve from it; must exist) | `{index, title, cwd}`; created detached so the user's view does not switch |
 | `new_agent` | `command?`, `dir?` (defaults: caller's agent command if the caller is an agent, else error asking for it; AOT's PWD) | `{index, title, agent, cwd}` |
 | `send_command` | `index`, `command` | confirmation; types the command and Enter |
 | `send_prompt` | `index`, `prompt` | confirmation; prompt delivered + Enter |
@@ -75,7 +75,7 @@ Open points to settle during implementation (ask before deciding): multi-line pr
 - [x] 3. `list_agents`
 - [x] 4. `read_window` (+ `capture_pane`)
 - [x] 5. `read_agent` (alias)
-- [ ] 6. `new_window` (+ `create_window` cwd/command)
+- [x] 6. `new_window` (+ `create_window` cwd/command)
 - [ ] 7. `new_agent`
 - [ ] 8. `send_command` (+ `send_keys`)
 - [ ] 9. `send_prompt`

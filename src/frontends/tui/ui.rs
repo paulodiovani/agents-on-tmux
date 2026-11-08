@@ -603,7 +603,7 @@ pub fn clickable_regions(frame_area: Rect, app: &App) -> Vec<ClickableRegion> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backends::tmux::{KeyBinding, Tmux, TmuxError};
+    use crate::backends::tmux::{KeyBinding, NewWindow, Tmux, TmuxError};
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::buffer::Buffer;
@@ -688,11 +688,11 @@ mod tests {
         fn list_windows(&self) -> Result<Vec<Window>, TmuxError> {
             Ok(self.windows.borrow().clone())
         }
-        fn create_window(&self, name: &str) -> Result<Window, TmuxError> {
+        fn create_window(&self, options: &NewWindow) -> Result<Window, TmuxError> {
             let mut next_id = self.next_id.borrow_mut();
             let window = Window {
                 id: *next_id,
-                name: name.to_string(),
+                name: options.name.clone().unwrap_or_default(),
                 pane_pid: 12345,
                 running_command: String::new(),
                 current_dir: "/home/user".to_string(),

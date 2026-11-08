@@ -10,7 +10,7 @@ use sysinfo::{Pid, ProcessesToUpdate, System};
 use crate::backends::agents::is_agent;
 use crate::backends::logger;
 use crate::backends::tmux::{self, EventProducer, TmuxEvent};
-use crate::backends::tmux::{Tmux, Window};
+use crate::backends::tmux::{NewWindow, Tmux, Window};
 use crate::frontends::tui::event::{Action, PendingAction, Tab, key_to_action};
 use crate::frontends::tui::mouse::MouseAction;
 use crate::frontends::tui::theme::Theme;
@@ -477,7 +477,11 @@ impl App {
         self.active_tab = Tab::Windows;
         let name = format!("agent-{}", self.windows.len() + 1);
         logger::debug(&format!("app: create window {name}"));
-        match self.nested_driver.create_window(&name) {
+        let options = NewWindow {
+            name: Some(name),
+            ..NewWindow::default()
+        };
+        match self.nested_driver.create_window(&options) {
             Ok(new_window) => {
                 if let Err(error) = self.refresh_windows() {
                     logger::error(&format!("app: refresh windows failed: {error}"));
@@ -941,12 +945,12 @@ mod tests {
             Ok(self.windows.borrow().clone())
         }
 
-        fn create_window(&self, name: &str) -> Result<Window, TmuxError> {
+        fn create_window(&self, options: &NewWindow) -> Result<Window, TmuxError> {
             self.calls.borrow_mut().push("create_window".to_string());
             let mut next_id = self.next_id.borrow_mut();
             let window = Window {
                 id: *next_id,
-                name: name.to_string(),
+                name: options.name.clone().unwrap_or_default(),
                 pane_pid: 12345,
                 running_command: String::new(),
                 current_dir: "/home/user".to_string(),
