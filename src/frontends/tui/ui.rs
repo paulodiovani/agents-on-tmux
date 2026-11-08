@@ -739,6 +739,10 @@ mod tests {
         fn capture_pane(&self, _id: u32, _history: u32) -> Result<String, TmuxError> {
             Ok(String::new())
         }
+
+        fn window_for_pane(&self, _pane_id: &str) -> Result<u32, TmuxError> {
+            Err(TmuxError::WindowNotFound)
+        }
     }
 
     fn command_failed(command: &str) -> TmuxError {

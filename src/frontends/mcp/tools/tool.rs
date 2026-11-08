@@ -120,6 +120,19 @@ pub fn find_window(tmux: &dyn Tmux, index: u32) -> Result<Window, ToolOutput> {
         })
 }
 
+/// Finds the window of the agent issuing the call, from its tmux pane.
+pub fn caller_window(tmux: &dyn Tmux, context: &CallContext) -> Result<Window, ToolOutput> {
+    let pane = context.pane.as_deref().ok_or_else(|| {
+        ToolOutput::error("The calling window is unknown: the MCP client did not run inside an AOT window (TMUX_PANE unset)")
+    })?;
+    let index = tmux.window_for_pane(pane).map_err(|error| {
+        ToolOutput::error(format!(
+            "Failed to find the calling window (pane {pane}): {error}"
+        ))
+    })?;
+    find_window(tmux, index)
+}
+
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
@@ -258,5 +271,43 @@ pub(super) mod tests {
     fn test_dir_argument_rejects_non_string() {
         let error = dir_argument(&json!({ "dir": 1 }), Path::new("/")).unwrap_err();
         assert!(error.text.starts_with("Invalid dir"));
+    }
+
+    fn caller_context() -> CallContext {
+        CallContext {
+            pane: Some("%3".into()),
+        }
+    }
+
+    #[test]
+    fn test_caller_window_resolves_pane_to_window() {
+        let mut tmux = MockTmux::new();
+        tmux.expect_window_for_pane()
+            .with(mockall::predicate::eq("%3"))
+            .return_once(|_| Ok(2));
+        tmux.expect_list_windows()
+            .return_once(|| Ok(vec![window(2, "me", "claude", "/")]));
+
+        assert_eq!(caller_window(&tmux, &caller_context()).unwrap().id, 2);
+    }
+
+    #[test]
+    fn test_caller_window_without_pane() {
+        let error = caller_window(&MockTmux::new(), &CallContext::default()).unwrap_err();
+        assert!(error.is_error);
+        assert!(error.text.starts_with("The calling window is unknown"));
+    }
+
+    #[test]
+    fn test_caller_window_pane_lookup_failure() {
+        let mut tmux = MockTmux::new();
+        tmux.expect_window_for_pane()
+            .return_once(|_| Err(TmuxError::WindowNotFound));
+
+        let error = caller_window(&tmux, &caller_context()).unwrap_err();
+        assert_eq!(
+            error.text,
+            "Failed to find the calling window (pane %3): Window not found"
+        );
     }
 }

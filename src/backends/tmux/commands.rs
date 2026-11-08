@@ -50,6 +50,8 @@ pub trait Tmux {
     /// Returns the text of the window's active pane: the visible screen plus up
     /// to `history` lines of scrollback above it.
     fn capture_pane(&self, id: u32, history: u32) -> Result<String, TmuxError>;
+    /// Returns the id of the window holding the given pane (`%N`).
+    fn window_for_pane(&self, pane_id: &str) -> Result<u32, TmuxError>;
 }
 
 pub const SESSION_NAME: &str = "agents-on-tmux";
@@ -574,6 +576,17 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
         self.executor
             .execute(&["capture-pane", "-p", "-J", "-t", &target, "-S", &start])
     }
+
+    /// Returns the id of the window holding the given pane (`%N`).
+    fn window_for_pane(&self, pane_id: &str) -> Result<u32, TmuxError> {
+        let output =
+            self.executor
+                .execute(&["display-message", "-p", "-t", pane_id, "#{window_index}"])?;
+        output
+            .trim()
+            .parse::<u32>()
+            .map_err(|_| TmuxError::WindowNotFound)
+    }
 }
 
 #[cfg(test)]
@@ -688,6 +701,8 @@ mod tests {
                 Some(&"resize-pane") => Ok(String::new()),
                 Some(&"command-prompt") => Ok(String::new()),
                 Some(&"capture-pane") => Ok("$ ls\nsrc\n".to_string()),
+                Some(&"display-message") if args.contains(&"%7") => Ok("4\n".to_string()),
+                Some(&"display-message") => Ok(String::new()),
                 Some(&"split-window") => Ok(self.pane_id.borrow().clone()),
                 Some(&"list-keys") => Ok(concat!(
                     "bind-key -r -T prefix Up select-pane -U\n",
@@ -1319,6 +1334,30 @@ mod tests {
                 "-120"
             ]
         );
+    }
+
+    #[test]
+    fn test_window_for_pane_command_args() {
+        let executor = MockCommandExecutor::with_session();
+        let driver = TmuxDriver::with_executor(executor);
+
+        assert_eq!(driver.window_for_pane("%7").unwrap(), 4);
+        let commands = driver.executor.commands.borrow();
+        assert_eq!(
+            commands.last().unwrap().as_slice(),
+            ["display-message", "-p", "-t", "%7", "#{window_index}"]
+        );
+    }
+
+    #[test]
+    fn test_window_for_pane_unparsable_output() {
+        let executor = MockCommandExecutor::with_session();
+        let driver = TmuxDriver::with_executor(executor);
+
+        assert!(matches!(
+            driver.window_for_pane("%1"),
+            Err(TmuxError::WindowNotFound)
+        ));
     }
 
     #[test]

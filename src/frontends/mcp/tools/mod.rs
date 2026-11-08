@@ -1,5 +1,6 @@
 mod list_agents;
 mod list_windows;
+mod new_agent;
 mod new_window;
 mod read_agent;
 mod read_window;

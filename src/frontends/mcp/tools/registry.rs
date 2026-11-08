@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use super::list_agents::ListAgents;
 use super::list_windows::ListWindows;
+use super::new_agent::NewAgent;
 use super::new_window::NewWindow;
 use super::read_agent::ReadAgent;
 use super::read_window::ReadWindow;
@@ -17,7 +18,8 @@ pub fn all_tools(tmux: Arc<dyn Tmux + Send + Sync>, default_dir: PathBuf) -> Vec
         Box::new(ListAgents::new(Arc::clone(&tmux))),
         Box::new(ReadWindow::new(Arc::clone(&tmux))),
         Box::new(ReadAgent::new(Arc::clone(&tmux))),
-        Box::new(NewWindow::new(tmux, default_dir)),
+        Box::new(NewWindow::new(Arc::clone(&tmux), default_dir.clone())),
+        Box::new(NewAgent::new(tmux, default_dir)),
     ]
 }
 
@@ -38,6 +40,7 @@ mod tests {
                 "read_window",
                 "read_agent",
                 "new_window",
+                "new_agent",
             ]
         );
     }
