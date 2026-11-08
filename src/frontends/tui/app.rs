@@ -32,7 +32,7 @@ const HINTED_COMMANDS: [(&str, &str); 5] = [
 /// Gets the start time of a pane process using sysinfo.
 /// Returns None if the process cannot be found.
 fn get_pane_start_time(pid: u32) -> Option<Instant> {
-    let mut system = System::new();
+    let mut system = System::new().ok()?;
     system.refresh_processes(ProcessesToUpdate::All, true);
 
     if let Some(process) = system.process(Pid::from_u32(pid)) {
