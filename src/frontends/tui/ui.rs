@@ -603,10 +603,7 @@ pub fn clickable_regions(frame_area: Rect, app: &App) -> Vec<ClickableRegion> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backends::tmux::{
-        Tmux,
-        commands::{KeyBinding, TmuxError},
-    };
+    use crate::backends::tmux::{KeyBinding, Tmux, TmuxError};
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::buffer::Buffer;

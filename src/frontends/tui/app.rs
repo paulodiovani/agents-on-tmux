@@ -423,7 +423,7 @@ impl App {
     }
 
     /// Signals the application to stop running.
-    pub fn quit(&mut self) {
+    fn quit(&mut self) {
         logger::info("app: quit");
         self.running = false;
     }
@@ -437,7 +437,7 @@ impl App {
     }
 
     /// Moves the selection up by one window within the current tab.
-    pub fn navigate_up(&mut self) {
+    fn navigate_up(&mut self) {
         let selected = self.current_selected();
         if selected > 0 {
             self.set_current_selected(selected - 1);
@@ -460,7 +460,7 @@ impl App {
     }
 
     /// Focuses the currently selected tmux window.
-    pub fn focus_window(&self) {
+    fn focus_window(&self) {
         if let Some(window) = self.current_tab_window() {
             logger::debug(&format!("app: focus window @{}", window.id));
             if let Err(error) = self.nested_driver.select_window(window.id) {
@@ -473,7 +473,7 @@ impl App {
     }
 
     /// Creates a new tmux window and adds it to the list.
-    pub fn create_window(&mut self) {
+    fn create_window(&mut self) {
         self.active_tab = Tab::Windows;
         let name = format!("agent-{}", self.windows.len() + 1);
         logger::debug(&format!("app: create window {name}"));
@@ -515,7 +515,7 @@ impl App {
     /// client the TUI inherited, pre-filled with the window's current name,
     /// targeting the window in the nested session. The rename itself arrives
     /// later through the usual control-mode refresh.
-    pub fn rename_window(&self) {
+    fn rename_window(&self) {
         if let Some(window) = self.current_tab_window() {
             logger::debug(&format!("app: rename window @{}", window.id));
             if let Err(error) = self.parent_driver.last_pane() {
@@ -556,7 +556,7 @@ impl App {
     }
 
     /// Reloads the window list from the tmux driver and tracks start times.
-    pub fn refresh_windows(&mut self) -> anyhow::Result<()> {
+    fn refresh_windows(&mut self) -> anyhow::Result<()> {
         let windows = self.nested_driver.list_windows()?;
 
         let selected_window_id = self.current_tab_window().map(|w| w.id);
@@ -661,7 +661,7 @@ impl App {
 
     /// Returns cached clickable regions for the given terminal size.
     /// Recomputes only if cache is empty (invalidated).
-    pub fn clickable_regions(&mut self, size: Rect) -> Vec<ui::ClickableRegion> {
+    fn clickable_regions(&mut self, size: Rect) -> Vec<ui::ClickableRegion> {
         if self.regions.is_none() {
             self.regions = Some(ui::clickable_regions(size, self));
         }
@@ -670,7 +670,7 @@ impl App {
 
     /// Invalidates the cached clickable regions.
     /// Call this when the layout changes (e.g., resize, scroll position, tab switch).
-    pub fn invalidate_clickable_regions(&mut self) {
+    fn invalidate_clickable_regions(&mut self) {
         self.regions = None;
     }
 
@@ -707,7 +707,7 @@ impl App {
     }
 
     /// Returns the window at the current selection, or None if the tab is empty.
-    pub fn current_tab_window(&self) -> Option<&Window> {
+    fn current_tab_window(&self) -> Option<&Window> {
         let indices = self.current_tab_indices();
         let selected = self.current_selected();
         indices.get(selected).map(|&i| &self.windows[i])
@@ -767,7 +767,7 @@ impl App {
 
     /// Scrolls the list by the given direction (-1 for up, 1 for down).
     /// The visible_count is the number of items that fit in the viewport.
-    pub fn scroll(&mut self, direction: i8, visible_count: usize) {
+    fn scroll(&mut self, direction: i8, visible_count: usize) {
         if visible_count == 0 {
             return;
         }
@@ -844,10 +844,7 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backends::tmux::{
-        Tmux, Window,
-        commands::{KeyBinding, TmuxError},
-    };
+    use crate::backends::tmux::{KeyBinding, Tmux, TmuxError, Window};
     use std::rc::Rc;
     use std::time::{Duration, Instant};
 

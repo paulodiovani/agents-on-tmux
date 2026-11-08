@@ -1,5 +1,5 @@
 /// Default width in columns of the TUI side panel.
-pub const DEFAULT_TUI_WIDTH: u16 = 35;
+const DEFAULT_TUI_WIDTH: u16 = 35;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum LaunchMode {

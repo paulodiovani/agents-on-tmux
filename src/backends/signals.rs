@@ -52,7 +52,7 @@ pub fn received() -> Option<(i32, &'static str)> {
 }
 
 /// Returns the name of a signal, or `None` if unknown.
-pub fn name_of(signo: i32) -> Option<&'static str> {
+fn name_of(signo: i32) -> Option<&'static str> {
     match signo {
         SIGTERM => Some("SIGTERM"),
         SIGINT => Some("SIGINT"),
@@ -63,12 +63,12 @@ pub fn name_of(signo: i32) -> Option<&'static str> {
 }
 
 #[cfg(test)]
-pub fn set_for_test(signo: i32) {
+fn set_for_test(signo: i32) {
     RECEIVED.store(signo as usize, Ordering::SeqCst);
 }
 
 #[cfg(test)]
-pub fn clear_for_test() {
+fn clear_for_test() {
     RECEIVED.store(0, Ordering::SeqCst);
 }
 
