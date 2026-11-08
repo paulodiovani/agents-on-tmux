@@ -106,7 +106,9 @@ fn parse_bool(value: &str) -> Result<bool, String> {
 
 fn start_mcp_server() -> Option<McpServer> {
     let path = frontends::mcp::socket_path();
-    match McpServer::start(&path, Arc::new(McpHandler::new(Vec::new()))) {
+    let tmux = Arc::new(TmuxDriver::new_with_socket(SESSION_NAME, SOCKET_NAME));
+    let handler = McpHandler::new(frontends::mcp::all_tools(tmux));
+    match McpServer::start(&path, Arc::new(handler)) {
         Ok(Some(server)) => {
             logger::info(&format!("main: MCP server listening on {}", path.display()));
             Some(server)

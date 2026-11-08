@@ -12,8 +12,8 @@ Agents running inside AOT's nested tmux session can list, create, read, and send
 |---|---|
 | Transport | Unix socket server inside AOT + `aot mcp` stdio shim spawned by each agent |
 | Server process | Background thread of the main `aot` process, started before attach/TUI in every launch mode, removed on exit |
-| Window reference | tmux window id (`@N`, bare `N` also accepted). Titles are output only |
-| list format | JSON (`structuredContent` + same JSON as text content) |
+| Window reference | AOT's window id (`Window.id`, the tmux window index shown in the TUI), written `@N` (bare `N` also accepted). Titles are output only. Ids may change (e.g. window moved); agents deal with it (re-list, or the user tells them). The sender's id is resolved from its pane on every call, never cached |
+| list format | JSON object wrapping the array (e.g. `{"windows": [...]}`, since legacy clients require `structuredContent` to be an object), sent as `structuredContent` + same JSON as text content |
 | read format | Plain text (raw captured pane) |
 | Sender identity | The shim runs inside the agent's pane, so it inherits `$TMUX_PANE`; it sends it in a handshake, and the server maps pane → window id. No user config, no stored table |
 | MCP protocol era | Dual-era: legacy `initialize` handshake (negotiates 2024-11-05 … 2025-11-25) and modern 2026-07-28 (per-request `_meta` protocol version + client capabilities, `server/discover`). Stateless either way |
@@ -47,8 +47,8 @@ All take/return window ids. Names are the final proposal; descriptions are writt
 
 | Tool | Args | Result |
 |---|---|---|
-| `list_windows` | – | JSON array of non-agent windows: `{id, title, command, cwd, active}` |
-| `list_agents` | – | JSON array of agent windows: `{id, title, agent, command, cwd, active}` |
+| `list_windows` | – | `{windows: [...]}` of non-agent windows: `{id, title, command, cwd, active}` |
+| `list_agents` | – | `{agents: [...]}` of agent windows: `{id, title, agent, command, cwd, active}` |
 | `read_window` | `id`, `lines` (default 50, max 2000) | plain text |
 | `read_agent` | same | alias of `read_window` |
 | `new_window` | `dir?` (default AOT's PWD) | `{id, title, cwd}` |
@@ -71,7 +71,7 @@ Open points to settle during implementation (ask before deciding): multi-line pr
 
 - [x] 0. Plan reviewed
 - [x] 1. MCP core: `serde_json` dep, JSON-RPC/MCP handler with empty tool registry (`initialize`, `ping`, `tools/list`), tool trait + registry, unix socket server thread started from `main` (first-instance-owns-socket, tests for live/stale socket), `aot mcp` shim subcommand, handshake + pane capture
-- [ ] 2. `list_windows`
+- [x] 2. `list_windows`
 - [ ] 3. `list_agents`
 - [ ] 4. `read_window` (+ `capture_pane`)
 - [ ] 5. `read_agent` (alias)
