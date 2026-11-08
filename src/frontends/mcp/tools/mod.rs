@@ -1,3 +1,4 @@
+mod list_agents;
 mod list_windows;
 mod registry;
 mod tool;

@@ -72,7 +72,7 @@ Open points to settle during implementation (ask before deciding): multi-line pr
 - [x] 0. Plan reviewed
 - [x] 1. MCP core: `serde_json` dep, JSON-RPC/MCP handler with empty tool registry (`initialize`, `ping`, `tools/list`), tool trait + registry, unix socket server thread started from `main` (first-instance-owns-socket, tests for live/stale socket), `aot mcp` shim subcommand, handshake + pane capture
 - [x] 2. `list_windows`
-- [ ] 3. `list_agents`
+- [x] 3. `list_agents`
 - [ ] 4. `read_window` (+ `capture_pane`)
 - [ ] 5. `read_agent` (alias)
 - [ ] 6. `new_window` (+ `create_window` cwd/command)
