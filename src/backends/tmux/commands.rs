@@ -89,7 +89,7 @@ pub struct KeyBinding {
     pub key: String,
 }
 
-pub fn check_inside_tmux(tmux_env: Option<&str>) -> Result<(), TmuxError> {
+fn check_inside_tmux(tmux_env: Option<&str>) -> Result<(), TmuxError> {
     if tmux_env.is_none() {
         Err(TmuxError::NotInsideTmux)
     } else {
@@ -123,7 +123,7 @@ pub fn detect_parent_session(tmux_env: Option<&str>) -> Result<String, TmuxError
 
 /// Extracts the parent tmux server socket name by parsing the TMUX environment variable value.
 /// Returns the socket name (e.g., "default", "agents-on-tmux").
-pub fn detect_parent_socket(tmux_env: Option<&str>) -> Result<String, TmuxError> {
+fn detect_parent_socket(tmux_env: Option<&str>) -> Result<String, TmuxError> {
     let tmux_env = tmux_env.ok_or(TmuxError::NotInsideTmux)?;
 
     // TMUX format: <socket-path>,<server-pid>,<session-id>
@@ -143,12 +143,12 @@ pub struct ShellCommandExecutor {
 
 impl ShellCommandExecutor {
     /// Creates a new executor targeting the default tmux server.
-    pub fn new() -> Self {
+    fn new() -> Self {
         Self { socket: None }
     }
 
     /// Creates a new executor targeting a specific tmux server via `-L <socket>`.
-    pub fn new_with_socket(socket: &str) -> Self {
+    fn new_with_socket(socket: &str) -> Self {
         Self {
             socket: Some(socket.to_string()),
         }
@@ -246,7 +246,7 @@ impl Default for TmuxDriver<ShellCommandExecutor> {
 impl<E: CommandExecutor> TmuxDriver<E> {
     /// Creates a new TmuxDriver with a custom command executor.
     #[cfg(test)]
-    pub fn with_executor(executor: E) -> Self {
+    fn with_executor(executor: E) -> Self {
         Self {
             executor,
             session: SESSION_NAME.to_string(),

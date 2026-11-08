@@ -123,7 +123,7 @@ pub mod tests {
     }
 
     impl LogGuard {
-        pub fn text(&self) -> String {
+        fn text(&self) -> String {
             std::fs::read_to_string(&self.path).unwrap_or_default()
         }
     }
@@ -151,7 +151,7 @@ pub mod tests {
         }
     }
 
-    pub fn install_failing_sink() -> LogGuard {
+    fn install_failing_sink() -> LogGuard {
         let lock = CAPTURE_LOCK.lock().unwrap();
         let mut sink = lock_sink();
         *sink = Some(Box::new(FailingWriter));

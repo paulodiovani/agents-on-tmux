@@ -84,7 +84,7 @@ impl Drop for ControlModeReader {
 }
 
 /// Parses a single control-mode notification line into an event, if relevant.
-pub fn parse_event(line: &str) -> Option<TmuxEvent> {
+fn parse_event(line: &str) -> Option<TmuxEvent> {
     let mut parts = line.split(' ');
     let command = parts.next()?;
 
