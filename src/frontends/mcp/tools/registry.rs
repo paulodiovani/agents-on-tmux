@@ -12,7 +12,7 @@ pub fn all_tools(tmux: Arc<dyn Tmux + Send + Sync>) -> Vec<Box<dyn Tool>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::frontends::mcp::mock::MockTmux;
+    use crate::frontends::mcp::tools::tool::tests::MockTmux;
 
     #[test]
     fn test_all_tools_names_in_order() {

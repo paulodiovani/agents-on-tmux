@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use serde_json::{Value, json};
 
-use super::tool::{CallContext, Tool, ToolOutput, format_window_id};
+use super::tool::{CallContext, Tool, ToolOutput};
 use crate::backends::agents;
 use crate::backends::tmux::Tmux;
 
@@ -24,7 +24,7 @@ impl Tool for ListWindows {
     }
 
     fn description(&self) -> &'static str {
-        "List the plain (non-agent) windows of the AOT session, such as shells, servers, or editors. Returns {\"windows\": [{\"id\", \"title\", \"command\", \"cwd\", \"active\"}]}. Address windows in other tools by their id (e.g. \"@3\"), never by title. Ids can change when windows are moved or renumbered; list again if a window is not where you expect. Use list_agents for agent windows."
+        "List the plain (non-agent) windows of the AOT session, such as shells, servers, or editors. Returns {\"windows\": [{\"index\", \"title\", \"command\", \"cwd\", \"active\"}]}. Address windows in other tools by their integer index (e.g. 3), never by title. Indexes can change when windows are moved or renumbered; list again if a window is not where you expect. Use list_agents for agent windows."
     }
 
     fn input_schema(&self) -> Value {
@@ -41,7 +41,7 @@ impl Tool for ListWindows {
             .filter(|window| agents::is_agent(&window.running_command).is_none())
             .map(|window| {
                 json!({
-                    "id": format_window_id(window.id),
+                    "index": window.id,
                     "title": window.name,
                     "command": window.running_command,
                     "cwd": window.current_dir,
@@ -56,7 +56,7 @@ impl Tool for ListWindows {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::frontends::mcp::mock::{MockTmux, window};
+    use crate::frontends::mcp::tools::tool::tests::{MockTmux, window};
 
     fn call(tmux: MockTmux) -> ToolOutput {
         ListWindows::new(Arc::new(tmux)).call(&json!({}), &CallContext::default())
@@ -76,8 +76,8 @@ mod tests {
 
         assert!(!output.is_error);
         let expected = json!({ "windows": [
-            { "id": "@1", "title": "shell", "command": "zsh", "cwd": "/home/u", "active": true },
-            { "id": "@4", "title": "server", "command": "cargo", "cwd": "/home/u/project", "active": false },
+            { "index": 1, "title": "shell", "command": "zsh", "cwd": "/home/u", "active": true },
+            { "index": 4, "title": "server", "command": "cargo", "cwd": "/home/u/project", "active": false },
         ] });
         assert_eq!(output.structured, Some(expected.clone()));
         assert_eq!(output.text, expected.to_string());
@@ -100,7 +100,7 @@ mod tests {
     fn test_metadata() {
         let tool = ListWindows::new(Arc::new(MockTmux::with_windows(Vec::new())));
         assert_eq!(tool.name(), "list_windows");
-        assert!(tool.description().contains("id"));
+        assert!(tool.description().contains("index"));
         assert_eq!(
             tool.input_schema(),
             json!({ "type": "object", "additionalProperties": false })

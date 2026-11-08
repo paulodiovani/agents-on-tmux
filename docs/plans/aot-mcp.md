@@ -12,10 +12,10 @@ Agents running inside AOT's nested tmux session can list, create, read, and send
 |---|---|
 | Transport | Unix socket server inside AOT + `aot mcp` stdio shim spawned by each agent |
 | Server process | Background thread of the main `aot` process, started before attach/TUI in every launch mode, removed on exit |
-| Window reference | AOT's window id (`Window.id`, the tmux window index shown in the TUI), written `@N` (bare `N` also accepted). Titles are output only. Ids may change (e.g. window moved); agents deal with it (re-list, or the user tells them). The sender's id is resolved from its pane on every call, never cached |
+| Window reference | The tmux window **index** (`#{window_index}`, stored as `Window.id` in the backend, shown in the TUI and status bar), passed as a plain integer (e.g. `3`), never with `@` (in tmux `@N` is the stable window id, which AOT does not use). Titles are output only. Indexes may change (e.g. window moved); agents deal with it (re-list, or the user tells them). The sender's index is resolved from its pane on every call, never cached |
 | list format | JSON object wrapping the array (e.g. `{"windows": [...]}`, since legacy clients require `structuredContent` to be an object), sent as `structuredContent` + same JSON as text content |
 | read format | Plain text (raw captured pane) |
-| Sender identity | The shim runs inside the agent's pane, so it inherits `$TMUX_PANE`; it sends it in a handshake, and the server maps pane → window id. No user config, no stored table |
+| Sender identity | The shim runs inside the agent's pane, so it inherits `$TMUX_PANE`; it sends it in a handshake, and the server maps pane → window index. No user config, no stored table |
 | MCP protocol era | Dual-era: legacy `initialize` handshake (negotiates 2024-11-05 … 2025-11-25) and modern 2026-07-28 (per-request `_meta` protocol version + client capabilities, `server/discover`). Stateless either way |
 | Dependencies | Add `serde_json` only (serde already present). JSON-RPC/MCP is hand-rolled on std; no `rmcp`/HTTP/async runtime, to keep the binary small |
 | Architecture rules | The MCP server is a new frontend: `frontends/mcp/` (server, shim, tools), a sibling of `frontends/tui/`, since it is another interface to AOT features. `mod.rs` re-exports only; traits first; public structs implement a trait; tmux access goes only through the backend `Tmux` trait (mockable). Presentation/protocol concerns (JSON shapes, tool descriptions) stay in the frontend; the backend gains only generic tmux operations. `main.rs` wires the frontend like it does the TUI |
@@ -36,28 +36,28 @@ Agents running inside AOT's nested tmux session can list, create, read, and send
 ### Tmux backend additions (`Tmux` trait + `TmuxDriver`)
 
 - `create_window` gains cwd and optional command (`new-window -d -P -F ... -c <dir> [command]`); existing TUI caller keeps current behavior.
-- `capture_pane(id, lines)` → `capture-pane -p -J -t @N -S -<lines>`.
-- `send_keys(id, text, enter)` → `send-keys -t @N -l <text>` then `Enter` (literal mode so text is never interpreted as key names).
-- `window_for_pane(pane_id)` → `display-message -p -t %N '#{window_id}'`.
+- `capture_pane(index, lines)` → `capture-pane -p -J -t <session>:<index> -S -<lines>`.
+- `send_keys(index, text, enter)` → `send-keys -t <session>:<index> -l <text>` then `Enter` (literal mode so text is never interpreted as key names).
+- `window_for_pane(pane_id)` → `display-message -p -t %N '#{window_index}'`.
 - `Window` already carries `running_command` and `current_dir`; agent vs. plain window decided with `agents::is_agent`.
 
 ### Tools
 
-All take/return window ids. Names are the final proposal; descriptions are written for the controlling LLM and say "use ids, not titles; resolve titles via list tools".
+All take/return window indexes (field/arg `index`, integer). Names are the final proposal; descriptions are written for the controlling LLM and say "use indexes, not titles; resolve titles via list tools".
 
 | Tool | Args | Result |
 |---|---|---|
-| `list_windows` | – | `{windows: [...]}` of non-agent windows: `{id, title, command, cwd, active}` |
-| `list_agents` | – | `{agents: [...]}` of agent windows: `{id, title, agent, command, cwd, active}` |
-| `read_window` | `id`, `lines` (default 50, max 2000) | plain text |
+| `list_windows` | – | `{windows: [...]}` of non-agent windows: `{index, title, command, cwd, active}` |
+| `list_agents` | – | `{agents: [...]}` of agent windows: `{index, title, agent, command, cwd, active}` |
+| `read_window` | `index`, `lines` (default 50, max 2000) | plain text |
 | `read_agent` | same | alias of `read_window` |
-| `new_window` | `dir?` (default AOT's PWD) | `{id, title, cwd}` |
-| `new_agent` | `command?`, `dir?` (defaults: caller's agent command if the caller is an agent, else error asking for it; AOT's PWD) | `{id, title, agent, cwd}` |
-| `send_command` | `id`, `command` | confirmation; types the command and Enter |
-| `send_prompt` | `id`, `prompt` | confirmation; prompt delivered + Enter |
-| `respond_prompt` | `id`, `prompt` | like `send_prompt`, prefixed with sender (`[from window @N] ...`) and a hint on how to reply; sender resolved from the connection's pane |
+| `new_window` | `dir?` (default AOT's PWD) | `{index, title, cwd}` |
+| `new_agent` | `command?`, `dir?` (defaults: caller's agent command if the caller is an agent, else error asking for it; AOT's PWD) | `{index, title, agent, cwd}` |
+| `send_command` | `index`, `command` | confirmation; types the command and Enter |
+| `send_prompt` | `index`, `prompt` | confirmation; prompt delivered + Enter |
+| `respond_prompt` | `index`, `prompt` | like `send_prompt`, prefixed with sender (`[from window N] ...`) and a hint on how to reply; sender resolved from the connection's pane |
 
-Guardrails: unknown/non-nested ids → tool error; `send_*` refuse to target the caller's own window; `lines` clamped.
+Guardrails: unknown/non-nested indexes → tool error; `send_*` refuse to target the caller's own window; `lines` clamped.
 
 Open points to settle during implementation (ask before deciding): multi-line prompts (plain `send-keys -l` vs. bracketed paste via `load-buffer`/`paste-buffer -p`), whether `send_prompt` also gets the sender prefix, and per-agent submit delay.
 

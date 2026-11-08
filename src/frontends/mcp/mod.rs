@@ -1,5 +1,3 @@
-#[cfg(test)]
-mod mock;
 mod protocol;
 mod server;
 mod shim;
