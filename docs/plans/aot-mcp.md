@@ -16,6 +16,7 @@ Agents running inside AOT's nested tmux session can list, create, read, and send
 | list format | JSON (`structuredContent` + same JSON as text content) |
 | read format | Plain text (raw captured pane) |
 | Sender identity | The shim runs inside the agent's pane, so it inherits `$TMUX_PANE`; it sends it in a handshake, and the server maps pane → window id. No user config, no stored table |
+| MCP protocol era | Dual-era: legacy `initialize` handshake (negotiates 2024-11-05 … 2025-11-25) and modern 2026-07-28 (per-request `_meta` protocol version + client capabilities, `server/discover`). Stateless either way |
 | Dependencies | Add `serde_json` only (serde already present). JSON-RPC/MCP is hand-rolled on std; no `rmcp`/HTTP/async runtime, to keep the binary small |
 | Architecture rules | The MCP server is a new frontend: `frontends/mcp/` (server, shim, tools), a sibling of `frontends/tui/`, since it is another interface to AOT features. `mod.rs` re-exports only; traits first; public structs implement a trait; tmux access goes only through the backend `Tmux` trait (mockable). Presentation/protocol concerns (JSON shapes, tool descriptions) stay in the frontend; the backend gains only generic tmux operations. `main.rs` wires the frontend like it does the TUI |
 
@@ -23,7 +24,7 @@ Agents running inside AOT's nested tmux session can list, create, read, and send
 
 - Agent config: `{"command": "aot", "args": ["mcp"]}` (stdio, newline-delimited JSON-RPC per MCP spec).
 - `aot mcp` (shim): connects to the socket, sends one handshake line `{"pane":"<$TMUX_PANE>"}`, then copies stdin↔socket byte for byte. It contains no MCP logic. If AOT is not running it exits with a clear stderr message.
-- Server: per-connection thread; handles `initialize`, `notifications/initialized`, `ping`, `tools/list`, `tools/call`. Tool errors return `isError: true` with a message, not JSON-RPC errors.
+- Server: per-connection thread; handles `initialize`, `server/discover`, `ping`, `tools/list`, `tools/call`; notifications get no reply. Modern requests with an unsupported version get -32022, missing required `_meta` fields get -32602. Tool errors return `isError: true` with a message, not JSON-RPC errors.
 - Socket path: `$XDG_RUNTIME_DIR/aot/mcp.sock`, fallback `<cache_dir>/aot/mcp.sock`; mode 0600; unlinked on shutdown by its owner.
 - Single owner: all AOT instances share the same nested tmux server, so one MCP server is enough (it is stateless; tmux holds the state). On start, AOT tries to connect to the socket first:
   - connection succeeds → another instance owns it; skip starting a server and log it (a live socket is never replaced);
@@ -69,7 +70,7 @@ Open points to settle during implementation (ask before deciding): multi-line pr
 ## Tasks tracker
 
 - [x] 0. Plan reviewed
-- [ ] 1. MCP core: `serde_json` dep, JSON-RPC/MCP handler with empty tool registry (`initialize`, `ping`, `tools/list`), tool trait + registry, unix socket server thread started from `main` (first-instance-owns-socket, tests for live/stale socket), `aot mcp` shim subcommand, handshake + pane capture
+- [x] 1. MCP core: `serde_json` dep, JSON-RPC/MCP handler with empty tool registry (`initialize`, `ping`, `tools/list`), tool trait + registry, unix socket server thread started from `main` (first-instance-owns-socket, tests for live/stale socket), `aot mcp` shim subcommand, handshake + pane capture
 - [ ] 2. `list_windows`
 - [ ] 3. `list_agents`
 - [ ] 4. `read_window` (+ `capture_pane`)
