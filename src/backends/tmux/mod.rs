@@ -5,4 +5,4 @@ pub use commands::{SESSION_NAME, SOCKET_NAME, Tmux, TmuxDriver, Window, detect_p
 pub use control_mode::{EventProducer, TmuxEvent, control_mode_thread};
 
 #[cfg(test)]
-pub use commands::{KeyBinding, TmuxError};
+pub use commands::{KeyBinding, MockTmux, TmuxError};

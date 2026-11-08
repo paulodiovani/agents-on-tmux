@@ -56,7 +56,16 @@ impl Tool for ListWindows {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::frontends::mcp::tools::tool::tests::{MockTmux, window};
+    use crate::backends::tmux::{MockTmux, TmuxError, Window};
+    use crate::frontends::mcp::tools::tool::tests::window;
+
+    fn tmux_listing(windows: Vec<Window>) -> MockTmux {
+        let mut tmux = MockTmux::new();
+        tmux.expect_list_windows()
+            .times(1)
+            .return_once(move || Ok(windows));
+        tmux
+    }
 
     fn call(tmux: MockTmux) -> ToolOutput {
         ListWindows::new(Arc::new(tmux)).call(&json!({}), &CallContext::default())
@@ -66,7 +75,7 @@ mod tests {
     fn test_lists_only_non_agent_windows() {
         let mut shell = window(1, "shell", "zsh", "/home/u");
         shell.is_active = true;
-        let tmux = MockTmux::with_windows(vec![
+        let tmux = tmux_listing(vec![
             shell,
             window(2, "claude", "claude", "/home/u/project"),
             window(4, "server", "cargo", "/home/u/project"),
@@ -85,20 +94,26 @@ mod tests {
 
     #[test]
     fn test_empty_session_returns_empty_list() {
-        let output = call(MockTmux::with_windows(Vec::new()));
+        let output = call(tmux_listing(Vec::new()));
         assert_eq!(output.structured, Some(json!({ "windows": [] })));
     }
 
     #[test]
     fn test_tmux_failure_is_tool_error() {
-        let output = call(MockTmux::failing());
+        let mut tmux = MockTmux::new();
+        tmux.expect_list_windows()
+            .times(1)
+            .return_once(|| Err(TmuxError::WindowNotFound));
+
+        let output = call(tmux);
+
         assert!(output.is_error);
-        assert!(output.text.starts_with("Failed to list windows:"));
+        assert_eq!(output.text, "Failed to list windows: Window not found");
     }
 
     #[test]
     fn test_metadata() {
-        let tool = ListWindows::new(Arc::new(MockTmux::with_windows(Vec::new())));
+        let tool = ListWindows::new(Arc::new(MockTmux::new()));
         assert_eq!(tool.name(), "list_windows");
         assert!(tool.description().contains("index"));
         assert_eq!(

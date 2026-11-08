@@ -13,13 +13,16 @@ pub trait CommandExecutor {
 }
 
 /// Contract for interacting with tmux sessions and windows.
+#[cfg_attr(test, mockall::automock)]
 pub trait Tmux {
     /// Returns the session name this driver targets.
     fn session_name(&self) -> &str;
     /// Returns the socket name this driver targets, if any.
-    fn socket_name(&self) -> Option<&str>;
+    #[allow(clippy::needless_lifetimes)]
+    fn socket_name<'a>(&'a self) -> Option<&'a str>;
     /// Ensures the tmux session exists, creating it if necessary.
-    fn create_session_if_not_exists(&self, tmux_env: Option<&str>) -> Result<(), TmuxError>;
+    #[allow(clippy::needless_lifetimes)]
+    fn create_session_if_not_exists<'a>(&self, tmux_env: Option<&'a str>) -> Result<(), TmuxError>;
     /// Attaches to the tmux session, inheriting stdio. Blocks until detached.
     fn attach_session(&self) -> Result<(), TmuxError>;
     /// Lists all windows in the session.

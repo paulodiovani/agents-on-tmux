@@ -12,11 +12,11 @@ pub fn all_tools(tmux: Arc<dyn Tmux + Send + Sync>) -> Vec<Box<dyn Tool>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::frontends::mcp::tools::tool::tests::MockTmux;
+    use crate::backends::tmux::MockTmux;
 
     #[test]
     fn test_all_tools_names_in_order() {
-        let tools = all_tools(Arc::new(MockTmux::with_windows(Vec::new())));
+        let tools = all_tools(Arc::new(MockTmux::new()));
         let names: Vec<&str> = tools.iter().map(|tool| tool.name()).collect();
         assert_eq!(names, ["list_windows"]);
     }

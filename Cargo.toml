@@ -20,3 +20,6 @@ dirs = "7"
 unicode-width = "0.2"
 signal-hook = "0.4"
 sysinfo = "0.40"
+
+[dev-dependencies]
+mockall = "0.15"
