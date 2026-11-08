@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "aot": {
+      "command": "aot",
+      "args": ["mcp"]
+    }
+  }
+}
