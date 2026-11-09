@@ -1,11 +1,18 @@
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use serde_json::{Value, json};
 
 use super::tool::{CallContext, Tool, ToolOutput, caller_window, dir_argument};
 use crate::backends::agents::{self, Agent, GenericAgent};
 use crate::backends::tmux::{NewWindow, Tmux};
+
+static DESCRIPTION: LazyLock<String> = LazyLock::new(|| {
+    format!(
+        "Start a new coding agent in its own window of the AOT session, in the background (the user's view does not switch). Optional command: the agent command line, e.g. \"claude\" or \"codex --model o3\"; it must start with one of the {}, and defaults to the caller's own agent. Optional dir: absolute, or relative to AOT's working directory (the default). Returns {{\"index\", \"title\", \"agent\", \"cwd\"}}; use the index with read_agent and the other tools.",
+        known_commands()
+    )
+});
 
 /// Starts a new agent in its own window of the AOT session.
 pub struct NewAgent {
@@ -50,7 +57,7 @@ impl Tool for NewAgent {
     }
 
     fn description(&self) -> &'static str {
-        "Start a new coding agent in its own window of the AOT session, in the background (the user's view does not switch). Optional command: the agent command line, e.g. \"claude\" or \"codex --model o3\"; it must start with a known agent command, and defaults to the caller's own agent. Optional dir: absolute, or relative to AOT's working directory (the default). Returns {\"index\", \"title\", \"agent\", \"cwd\"}; use the index with read_agent and the other tools."
+        &DESCRIPTION
     }
 
     fn input_schema(&self) -> Value {
@@ -59,7 +66,10 @@ impl Tool for NewAgent {
             "properties": {
                 "command": {
                     "type": "string",
-                    "description": "Agent command line, e.g. \"claude\"; defaults to the caller's agent",
+                    "description": format!(
+                        "Agent command line, e.g. \"claude\"; defaults to the caller's agent. Must start with one of the {}",
+                        known_commands()
+                    ),
                 },
                 "dir": {
                     "type": "string",
@@ -263,9 +273,16 @@ mod tests {
         let tool = tool(MockTmux::new());
         assert_eq!(tool.name(), "new_agent");
         assert!(tool.description().contains("index"));
-        assert_eq!(
-            tool.input_schema()["properties"]["command"]["type"],
-            "string"
-        );
+        let command = &tool.input_schema()["properties"]["command"];
+        assert_eq!(command["type"], "string");
+        for agent in agents::agents() {
+            assert!(tool.description().contains(agent.command()));
+            assert!(
+                command["description"]
+                    .as_str()
+                    .unwrap()
+                    .contains(agent.command())
+            );
+        }
     }
 }
