@@ -732,7 +732,7 @@ mod tests {
                 _ => Err(command_failed("show-options")),
             }
         }
-        fn rename_window(&self, _id: u32, _name: &str) -> Result<(), TmuxError> {
+        fn prompt_rename_window(&self, _id: u32, _name: &str) -> Result<(), TmuxError> {
             Ok(())
         }
 
@@ -749,6 +749,10 @@ mod tests {
         }
 
         fn paste_text(&self, _id: u32, _text: &str) -> Result<(), TmuxError> {
+            Ok(())
+        }
+
+        fn set_window_name(&self, _id: u32, _name: &str) -> Result<(), TmuxError> {
             Ok(())
         }
     }

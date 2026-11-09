@@ -525,7 +525,10 @@ impl App {
             if let Err(error) = self.parent_driver.last_pane() {
                 logger::error(&format!("app: last pane failed: {error}"));
             }
-            if let Err(error) = self.nested_driver.rename_window(window.id, &window.name) {
+            if let Err(error) = self
+                .nested_driver
+                .prompt_rename_window(window.id, &window.name)
+            {
                 logger::error(&format!("app: rename window failed: {error}"));
             }
             if let Err(error) = self.parent_driver.last_pane() {
@@ -1011,10 +1014,10 @@ mod tests {
             }
         }
 
-        fn rename_window(&self, id: u32, name: &str) -> Result<(), TmuxError> {
+        fn prompt_rename_window(&self, id: u32, name: &str) -> Result<(), TmuxError> {
             self.calls
                 .borrow_mut()
-                .push(format!("rename_window {id} {name}"));
+                .push(format!("prompt_rename_window {id} {name}"));
             Ok(())
         }
 
@@ -1031,6 +1034,10 @@ mod tests {
         }
 
         fn paste_text(&self, _id: u32, _text: &str) -> Result<(), TmuxError> {
+            Ok(())
+        }
+
+        fn set_window_name(&self, _id: u32, _name: &str) -> Result<(), TmuxError> {
             Ok(())
         }
     }
@@ -1181,7 +1188,7 @@ mod tests {
 
         assert_eq!(
             nested_calls.borrow().last().unwrap(),
-            "rename_window 2 agent-2"
+            "prompt_rename_window 2 agent-2"
         );
         let parent_recorded = parent_calls.borrow();
         assert_eq!(parent_recorded.len(), 2);
@@ -1201,7 +1208,7 @@ mod tests {
             calls
                 .borrow()
                 .iter()
-                .any(|call| call.starts_with("rename_window"))
+                .any(|call| call.starts_with("prompt_rename_window"))
         );
     }
 

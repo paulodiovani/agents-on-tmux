@@ -47,7 +47,7 @@ pub trait Tmux {
     /// default, or the global scope when `global` is set.
     fn show_options(&self, name: &str, global: bool) -> Result<String, TmuxError>;
     /// Prompts the user to rename the window via the tmux command prompt.
-    fn rename_window(&self, id: u32, name: &str) -> Result<(), TmuxError>;
+    fn prompt_rename_window(&self, id: u32, name: &str) -> Result<(), TmuxError>;
     /// Returns the text of the window's active pane: the visible screen plus up
     /// to `history` lines of scrollback above it.
     fn capture_pane(&self, id: u32, history: u32) -> Result<String, TmuxError>;
@@ -59,6 +59,8 @@ pub trait Tmux {
     /// Pastes `text` into the window's active pane as a bracketed paste, so
     /// newlines stay part of the text instead of acting as Enter.
     fn paste_text(&self, id: u32, text: &str) -> Result<(), TmuxError>;
+    /// Sets the window's name directly, without prompting the user.
+    fn set_window_name(&self, id: u32, name: &str) -> Result<(), TmuxError>;
 }
 
 const PASTE_BUFFER_PREFIX: &str = "aot-paste";
@@ -570,7 +572,7 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
     }
 
     /// Prompts the user to rename the window via the tmux command prompt.
-    fn rename_window(&self, id: u32, name: &str) -> Result<(), TmuxError> {
+    fn prompt_rename_window(&self, id: u32, name: &str) -> Result<(), TmuxError> {
         let target = format!("{}:{}", self.session, id);
         let template = format!("rename-window -t \"{target}\" \"%%\"");
         self.executor
@@ -627,6 +629,14 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
         self.executor
             .execute(&["paste-buffer", "-b", &buffer, "-p", "-d", "-t", &target])?;
         Ok(())
+    }
+
+    /// Sets the window's name directly, without prompting the user.
+    fn set_window_name(&self, id: u32, name: &str) -> Result<(), TmuxError> {
+        let target = target(&self.session, Some(&id.to_string()), None);
+        self.executor
+            .execute(&["rename-window", "-t", &target, "--", name])
+            .map(|_| ())
     }
 }
 
@@ -740,6 +750,7 @@ mod tests {
                 Some(&"send-keys") => Ok(String::new()),
                 Some(&"set-buffer") => Ok(String::new()),
                 Some(&"paste-buffer") => Ok(String::new()),
+                Some(&"rename-window") => Ok(String::new()),
                 Some(&"set-option") => Ok(String::new()),
                 Some(&"resize-pane") => Ok(String::new()),
                 Some(&"command-prompt") => Ok(String::new()),
@@ -1341,10 +1352,10 @@ mod tests {
     }
 
     #[test]
-    fn test_rename_window_command_args() {
+    fn test_prompt_rename_window_command_args() {
         let executor = MockCommandExecutor::with_session();
         let driver = TmuxDriver::with_executor(executor);
-        driver.rename_window(1, "my-window").unwrap();
+        driver.prompt_rename_window(1, "my-window").unwrap();
 
         let commands = driver.executor.commands.borrow();
         let prompt_cmd = commands
@@ -1478,6 +1489,20 @@ mod tests {
             ]
         );
         assert_ne!(commands[2][2], buffer);
+    }
+
+    #[test]
+    fn test_set_window_name_command_args() {
+        let executor = MockCommandExecutor::with_session();
+        let driver = TmuxDriver::with_executor(executor);
+
+        driver.set_window_name(3, "-review").unwrap();
+
+        let commands = driver.executor.commands.borrow();
+        assert_eq!(
+            commands.last().unwrap().as_slice(),
+            ["rename-window", "-t", "agents-on-tmux:3", "--", "-review"]
+        );
     }
 
     #[test]

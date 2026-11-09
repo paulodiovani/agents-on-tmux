@@ -5,6 +5,7 @@ mod new_window;
 mod read_agent;
 mod read_window;
 mod registry;
+mod rename_window;
 mod respond_prompt;
 mod send_command;
 mod send_prompt;

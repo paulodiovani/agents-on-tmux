@@ -38,6 +38,7 @@ Agents running inside AOT's nested tmux session can list, create, read, and send
 - `create_window(&NewWindow { name, dir, command: Vec<String>, detached })` (`new-window -P -F '#{window_index}' [-d] [-n name] [-c dir] [program args...]`; with several entries tmux runs the program directly, no shell parsing), returning the window found by the printed index; the TUI passes only the name, keeping its behavior.
 - `capture_pane(index, history)` → `capture-pane -p -J -t <session>:<index> -S -<history>` (visible screen plus `history` scrollback lines); `read_window` drops trailing blank lines and keeps the last `lines`.
 - `send_keys(index, text, enter)` → `send-keys -t <session>:<index> -l -- <text>` then `send-keys ... Enter` (literal mode and `--` so text is never interpreted as key names or flags; empty text sends only Enter).
+- `set_window_name(index, name)` → `rename-window -t <session>:<index> -- <name>` (direct, unlike the TUI's interactive `prompt_rename_window`, renamed from `rename_window`).
 - `paste_text(index, text)` → `set-buffer -b aot-paste-<pid>-<n> -- <text>` then `paste-buffer -b <name> -p -d -t <session>:<index>` (bracketed paste, unique buffer deleted after use).
 - `window_for_pane(pane_id)` → `display-message -p -t %N '#{window_index}'`.
 - `Window` already carries `running_command` and `current_dir`; agent vs. plain window decided with `agents::is_agent`.
@@ -54,6 +55,8 @@ All take/return window indexes (field/arg `index`, integer). Names are the final
 | `read_agent` | same | alias of `read_window` |
 | `new_window` | `dir?` (default AOT's PWD; relative paths resolve from it; must exist) | `{index, title, cwd}`; created detached so the user's view does not switch |
 | `new_agent` | `command?` (enum of known agent commands; default: caller's agent if the caller is an agent, else error asking for it), `args?` (string array passed to the agent as-is), `dir?` (default AOT's PWD) | `{index, title, agent, cwd}`; created detached; after ~500 ms the window (same index and pane pid) must still exist, else a tool error (agent not installed or failed on startup) |
+| `rename_window` | `index`, `title` (single line) | `{index, title}`; renames any window, including the caller's own |
+| `rename_agent` | same | alias of `rename_window` |
 | `send_command` | `index`, `command` (array: program then arguments; each element shell-quoted only when needed and joined, so no shell syntax is interpreted) | confirmation; types the command and Enter |
 | `send_prompt` | `index`, `prompt` | gives another agent a prompt, delivered as `[from agent N] <prompt>` then Enter; no response is implied; sender (N = caller's window index) resolved from the connection's pane on each call and must be an agent window |
 | `respond_prompt` | `index` (N of the `[from agent N]` tag being responded to), `prompt` | responds, when needed, to a prompt previously received from agent N; same signed delivery as `send_prompt`, different purpose |
@@ -81,4 +84,6 @@ Settled (before task 8): prompts are delivered with bracketed paste (`set-buffer
 - [x] 8. `send_command` (+ `send_keys`)
 - [x] 9. `send_prompt` (+ `paste_text`)
 - [x] 10. `respond_prompt` (sender resolution via `window_for_pane`)
-- [ ] 11. Docs: user manual page with per-agent MCP config snippets, README mention, `AGENTS.md` architecture section (add `frontends/mcp/`)
+- [x] 11. `rename_window` (+ `set_window_name`)
+- [ ] 12. `rename_agent` (alias)
+- [ ] 13. Docs: user manual page with per-agent MCP config snippets, README mention, `AGENTS.md` architecture section (add `frontends/mcp/`)
