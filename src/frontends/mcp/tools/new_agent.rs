@@ -1,18 +1,11 @@
 use std::path::PathBuf;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use serde_json::{Value, json};
 
 use super::tool::{CallContext, Tool, ToolOutput, caller_window, dir_argument};
 use crate::backends::agents::{self, Agent, GenericAgent};
 use crate::backends::tmux::{NewWindow, Tmux};
-
-static DESCRIPTION: LazyLock<String> = LazyLock::new(|| {
-    format!(
-        "Start a new coding agent in its own window of the AOT session, in the background (the user's view does not switch). Optional command: the agent command line, e.g. \"claude\" or \"codex --model o3\"; it must start with one of the {}, and defaults to the caller's own agent. Optional dir: absolute, or relative to AOT's working directory (the default). Returns {{\"index\", \"title\", \"agent\", \"cwd\"}}; use the index with read_agent and the other tools.",
-        known_commands()
-    )
-});
 
 /// Starts a new agent in its own window of the AOT session.
 pub struct NewAgent {
@@ -27,24 +20,25 @@ impl NewAgent {
         Self { tmux, default_dir }
     }
 
-    fn command(&self, arguments: &Value, context: &CallContext) -> Result<String, ToolOutput> {
+    fn agent(&self, arguments: &Value, context: &CallContext) -> Result<GenericAgent, ToolOutput> {
         match arguments.get("command") {
             None => {
                 let caller = caller_window(self.tmux.as_ref(), context)?;
-                agents::is_agent(&caller.running_command)
-                    .map(|agent| agent.command().to_string())
-                    .ok_or_else(|| {
-                        ToolOutput::error(format!(
-                            "No command given and the calling window is not an agent; pass command ({})",
-                            known_commands()
-                        ))
-                    })
+                agents::is_agent(&caller.running_command).ok_or_else(|| {
+                    ToolOutput::error(format!(
+                        "No command given and the calling window is not an agent; pass command, one of the {}",
+                        known_commands()
+                    ))
+                })
             }
-            Some(Value::String(command)) if !command.trim().is_empty() => {
-                Ok(command.trim().to_string())
-            }
+            Some(Value::String(command)) => agents::is_agent(command).ok_or_else(|| {
+                ToolOutput::error(format!(
+                    "'{command}' is not a known agent command; pass one of the {}",
+                    known_commands()
+                ))
+            }),
             Some(value) => Err(ToolOutput::error(format!(
-                "Invalid command {value}: pass an agent command line, e.g. \"claude\" ({})",
+                "Invalid command {value}: pass one of the {}",
                 known_commands()
             ))),
         }
@@ -57,19 +51,26 @@ impl Tool for NewAgent {
     }
 
     fn description(&self) -> &'static str {
-        &DESCRIPTION
+        "Start a new coding agent in its own window of the AOT session, in the background (the user's view does not switch). Optional command: the agent to start; defaults to the caller's own agent. Optional args: arguments passed to the agent as-is, e.g. [\"--model\", \"o3\"]. Optional dir: absolute, or relative to AOT's working directory (the default). Returns {\"index\", \"title\", \"agent\", \"cwd\"}; use the index with read_agent and the other tools."
     }
 
     fn input_schema(&self) -> Value {
+        let commands: Vec<&str> = agents::agents()
+            .iter()
+            .map(|agent| agent.command())
+            .collect();
         json!({
             "type": "object",
             "properties": {
                 "command": {
                     "type": "string",
-                    "description": format!(
-                        "Agent command line, e.g. \"claude\"; defaults to the caller's agent. Must start with one of the {}",
-                        known_commands()
-                    ),
+                    "enum": commands,
+                    "description": "Agent to start; defaults to the caller's agent",
+                },
+                "args": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Arguments passed to the agent as-is, e.g. [\"--model\", \"o3\"]",
                 },
                 "dir": {
                     "type": "string",
@@ -81,21 +82,23 @@ impl Tool for NewAgent {
     }
 
     fn call(&self, arguments: &Value, context: &CallContext) -> ToolOutput {
-        let command = match self.command(arguments, context) {
-            Ok(command) => command,
+        let agent = match self.agent(arguments, context) {
+            Ok(agent) => agent,
             Err(error) => return error,
         };
-        let agent = match agent_for(&command) {
-            Ok(agent) => agent,
+        let args = match args_argument(arguments) {
+            Ok(args) => args,
             Err(error) => return error,
         };
         let dir = match dir_argument(arguments, &self.default_dir) {
             Ok(dir) => dir,
             Err(error) => return error,
         };
+        let mut command = vec![agent.command().to_string()];
+        command.extend(args);
         let options = NewWindow {
             dir: Some(dir),
-            command: Some(command),
+            command,
             detached: true,
             ..NewWindow::default()
         };
@@ -111,14 +114,17 @@ impl Tool for NewAgent {
     }
 }
 
-fn agent_for(command: &str) -> Result<GenericAgent, ToolOutput> {
-    let program = command.split_whitespace().next().unwrap_or_default();
-    agents::is_agent(program).ok_or_else(|| {
-        ToolOutput::error(format!(
-            "'{program}' is not a known agent command ({})",
-            known_commands()
-        ))
-    })
+fn args_argument(arguments: &Value) -> Result<Vec<String>, ToolOutput> {
+    let Some(value) = arguments.get("args") else {
+        return Ok(Vec::new());
+    };
+    let invalid = || ToolOutput::error(format!("Invalid args {value}: pass an array of strings"));
+    value
+        .as_array()
+        .ok_or_else(invalid)?
+        .iter()
+        .map(|arg| arg.as_str().map(str::to_string).ok_or_else(invalid))
+        .collect()
 }
 
 fn known_commands() -> String {
@@ -150,12 +156,12 @@ mod tests {
         }
     }
 
-    fn expect_create(tmux: &mut MockTmux, command: &'static str) {
+    fn expect_create(tmux: &mut MockTmux, command: &[&str]) {
         let dir = temp_dir();
         let expected = NewWindow {
             name: None,
             dir: Some(dir.clone()),
-            command: Some(command.into()),
+            command: command.iter().map(|part| part.to_string()).collect(),
             detached: true,
         };
         tmux.expect_create_window()
@@ -167,10 +173,10 @@ mod tests {
     #[test]
     fn test_starts_given_agent_command() {
         let mut tmux = MockTmux::new();
-        expect_create(&mut tmux, "claude --continue");
+        expect_create(&mut tmux, &["claude", "--continue", "a b"]);
 
         let output = tool(tmux).call(
-            &json!({ "command": " claude --continue " }),
+            &json!({ "command": "claude", "args": ["--continue", "a b"] }),
             &CallContext::default(),
         );
 
@@ -188,9 +194,9 @@ mod tests {
             .return_once(|_| Ok(1));
         tmux.expect_list_windows()
             .return_once(|| Ok(vec![window(1, "me", "claude", "/")]));
-        expect_create(&mut tmux, "claude");
+        expect_create(&mut tmux, &["claude", "--resume"]);
 
-        let output = tool(tmux).call(&json!({}), &caller("%2"));
+        let output = tool(tmux).call(&json!({ "args": ["--resume"] }), &caller("%2"));
 
         assert!(!output.is_error, "{}", output.text);
     }
@@ -223,18 +229,33 @@ mod tests {
     #[test]
     fn test_rejects_unknown_agent_command() {
         let output =
-            tool(MockTmux::new()).call(&json!({ "command": "vim file" }), &CallContext::default());
+            tool(MockTmux::new()).call(&json!({ "command": "vim" }), &CallContext::default());
         assert!(output.is_error);
         assert!(
             output
                 .text
                 .starts_with("'vim' is not a known agent command")
         );
+        assert!(output.text.contains("claude"));
     }
 
     #[test]
-    fn test_rejects_blank_or_non_string_command() {
-        for command in [json!("  "), json!(1), json!(null)] {
+    fn test_rejects_command_line_in_command() {
+        let output = tool(MockTmux::new()).call(
+            &json!({ "command": "claude --continue" }),
+            &CallContext::default(),
+        );
+        assert!(output.is_error);
+        assert!(
+            output
+                .text
+                .starts_with("'claude --continue' is not a known agent command")
+        );
+    }
+
+    #[test]
+    fn test_rejects_non_string_command() {
+        for command in [json!(1), json!(null), json!(["claude"])] {
             let output =
                 tool(MockTmux::new()).call(&json!({ "command": command }), &CallContext::default());
             assert!(output.is_error);
@@ -243,6 +264,18 @@ mod tests {
                 "{}",
                 output.text
             );
+        }
+    }
+
+    #[test]
+    fn test_rejects_invalid_args() {
+        for args in [json!("--continue"), json!([1]), json!(["ok", null])] {
+            let output = tool(MockTmux::new()).call(
+                &json!({ "command": "claude", "args": args }),
+                &CallContext::default(),
+            );
+            assert!(output.is_error);
+            assert!(output.text.starts_with("Invalid args"), "{}", output.text);
         }
     }
 
@@ -273,16 +306,9 @@ mod tests {
         let tool = tool(MockTmux::new());
         assert_eq!(tool.name(), "new_agent");
         assert!(tool.description().contains("index"));
-        let command = &tool.input_schema()["properties"]["command"];
-        assert_eq!(command["type"], "string");
-        for agent in agents::agents() {
-            assert!(tool.description().contains(agent.command()));
-            assert!(
-                command["description"]
-                    .as_str()
-                    .unwrap()
-                    .contains(agent.command())
-            );
-        }
+        let schema = tool.input_schema();
+        let commands: Vec<&str> = agents::agents().iter().map(|a| a.command()).collect();
+        assert_eq!(schema["properties"]["command"]["enum"], json!(commands));
+        assert_eq!(schema["properties"]["args"]["items"]["type"], "string");
     }
 }

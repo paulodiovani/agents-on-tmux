@@ -104,8 +104,9 @@ pub struct NewWindow {
     pub name: Option<String>,
     /// Working directory of the new window.
     pub dir: Option<String>,
-    /// Shell command to run instead of the default shell.
-    pub command: Option<String>,
+    /// Program and arguments to run instead of the default shell; tmux runs a
+    /// single entry through the shell and several entries directly.
+    pub command: Vec<String>,
     /// Creates the window without making it the current one.
     pub detached: bool,
 }
@@ -473,9 +474,7 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
         if let Some(dir) = &options.dir {
             args.extend(["-c", dir]);
         }
-        if let Some(command) = &options.command {
-            args.push(command);
-        }
+        args.extend(options.command.iter().map(String::as_str));
         let output = self.executor.execute(&args)?;
         let id = output
             .trim()
@@ -923,7 +922,11 @@ mod tests {
         let options = NewWindow {
             name: None,
             dir: Some("/tmp/project".to_string()),
-            command: Some("claude --continue".to_string()),
+            command: vec![
+                "claude".to_string(),
+                "--model".to_string(),
+                "o3".to_string(),
+            ],
             detached: true,
         };
         let window = driver.create_window(&options).unwrap();
@@ -943,7 +946,9 @@ mod tests {
                 "-d",
                 "-c",
                 "/tmp/project",
-                "claude --continue",
+                "claude",
+                "--model",
+                "o3",
             ]
         );
     }

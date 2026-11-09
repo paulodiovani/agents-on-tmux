@@ -35,7 +35,7 @@ Agents running inside AOT's nested tmux session can list, create, read, and send
 
 ### Tmux backend additions (`Tmux` trait + `TmuxDriver`)
 
-- `create_window(&NewWindow { name, dir, command, detached })` (`new-window -P -F '#{window_index}' [-d] [-n name] [-c dir] [command]`), returning the window found by the printed index; the TUI passes only the name, keeping its behavior.
+- `create_window(&NewWindow { name, dir, command: Vec<String>, detached })` (`new-window -P -F '#{window_index}' [-d] [-n name] [-c dir] [program args...]`; with several entries tmux runs the program directly, no shell parsing), returning the window found by the printed index; the TUI passes only the name, keeping its behavior.
 - `capture_pane(index, history)` → `capture-pane -p -J -t <session>:<index> -S -<history>` (visible screen plus `history` scrollback lines); `read_window` drops trailing blank lines and keeps the last `lines`.
 - `send_keys(index, text, enter)` → `send-keys -t <session>:<index> -l <text>` then `Enter` (literal mode so text is never interpreted as key names).
 - `window_for_pane(pane_id)` → `display-message -p -t %N '#{window_index}'`.
@@ -52,7 +52,7 @@ All take/return window indexes (field/arg `index`, integer). Names are the final
 | `read_window` | `index`, `lines` (default 50, max 2000) | plain text |
 | `read_agent` | same | alias of `read_window` |
 | `new_window` | `dir?` (default AOT's PWD; relative paths resolve from it; must exist) | `{index, title, cwd}`; created detached so the user's view does not switch |
-| `new_agent` | `command?`, `dir?` (defaults: caller's agent command if the caller is an agent, else error asking for it; AOT's PWD). The command must start with a known agent command | `{index, title, agent, cwd}`; created detached |
+| `new_agent` | `command?` (enum of known agent commands; default: caller's agent if the caller is an agent, else error asking for it), `args?` (string array passed to the agent as-is), `dir?` (default AOT's PWD) | `{index, title, agent, cwd}`; created detached |
 | `send_command` | `index`, `command` | confirmation; types the command and Enter |
 | `send_prompt` | `index`, `prompt` | confirmation; prompt delivered + Enter |
 | `respond_prompt` | `index`, `prompt` | like `send_prompt`, prefixed with sender (`[from window N] ...`) and a hint on how to reply; sender resolved from the connection's pane |

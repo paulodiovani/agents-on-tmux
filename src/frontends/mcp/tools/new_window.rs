@@ -83,7 +83,7 @@ mod tests {
         let expected = WindowOptions {
             name: None,
             dir: Some(dir.clone()),
-            command: None,
+            command: Vec::new(),
             detached: true,
         };
         let mut tmux = MockTmux::new();
