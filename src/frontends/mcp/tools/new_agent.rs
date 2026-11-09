@@ -1,23 +1,50 @@
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::thread;
+use std::time::Duration;
 
 use serde_json::{Value, json};
 
 use super::tool::{CallContext, Tool, ToolOutput, caller_window, dir_argument};
 use crate::backends::agents::{self, Agent, GenericAgent};
-use crate::backends::tmux::{NewWindow, Tmux};
+use crate::backends::tmux::{NewWindow, Tmux, Window};
+
+const STARTUP_WAIT: Duration = Duration::from_millis(500);
 
 /// Starts a new agent in its own window of the AOT session.
 pub struct NewAgent {
     tmux: Arc<dyn Tmux + Send + Sync>,
     default_dir: PathBuf,
+    startup_wait: Duration,
 }
 
 impl NewAgent {
     /// Creates the tool over the nested AOT tmux session; agents start in
     /// `default_dir` unless the caller passes a directory.
     pub fn new(tmux: Arc<dyn Tmux + Send + Sync>, default_dir: PathBuf) -> Self {
-        Self { tmux, default_dir }
+        Self {
+            tmux,
+            default_dir,
+            startup_wait: STARTUP_WAIT,
+        }
+    }
+
+    fn check_still_running(&self, window: &Window, agent: &GenericAgent) -> Result<(), ToolOutput> {
+        thread::sleep(self.startup_wait);
+        let windows = self.tmux.list_windows().map_err(|error| {
+            ToolOutput::error(format!("Failed to check the agent window: {error}"))
+        })?;
+        let alive = windows
+            .iter()
+            .any(|w| w.id == window.id && w.pane_pid == window.pane_pid);
+        if alive {
+            Ok(())
+        } else {
+            Err(ToolOutput::error(format!(
+                "'{}' exited right after starting: it may not be installed, or it failed on startup (check its args)",
+                agent.command()
+            )))
+        }
     }
 
     fn agent(&self, arguments: &Value, context: &CallContext) -> Result<GenericAgent, ToolOutput> {
@@ -102,15 +129,19 @@ impl Tool for NewAgent {
             detached: true,
             ..NewWindow::default()
         };
-        match self.tmux.create_window(&options) {
-            Ok(window) => ToolOutput::json(json!({
-                "index": window.id,
-                "title": window.name,
-                "agent": agent.name(),
-                "cwd": window.current_dir,
-            })),
-            Err(error) => ToolOutput::error(format!("Failed to start agent: {error}")),
+        let window = match self.tmux.create_window(&options) {
+            Ok(window) => window,
+            Err(error) => return ToolOutput::error(format!("Failed to start agent: {error}")),
+        };
+        if let Err(error) = self.check_still_running(&window, &agent) {
+            return error;
         }
+        ToolOutput::json(json!({
+            "index": window.id,
+            "title": window.name,
+            "agent": agent.name(),
+            "cwd": window.current_dir,
+        }))
     }
 }
 
@@ -147,7 +178,16 @@ mod tests {
     }
 
     fn tool(tmux: MockTmux) -> NewAgent {
-        NewAgent::new(Arc::new(tmux), std::env::temp_dir())
+        NewAgent {
+            tmux: Arc::new(tmux),
+            default_dir: std::env::temp_dir(),
+            startup_wait: Duration::ZERO,
+        }
+    }
+
+    fn expect_windows(tmux: &mut MockTmux, windows: Vec<Window>) {
+        tmux.expect_list_windows()
+            .returning(move || Ok(windows.clone()));
     }
 
     fn caller(pane: &str) -> CallContext {
@@ -170,10 +210,15 @@ mod tests {
             .return_once(move |_| Ok(window(6, "claude", "claude", &dir)));
     }
 
+    fn started() -> Window {
+        window(6, "claude", "claude", &temp_dir())
+    }
+
     #[test]
     fn test_starts_given_agent_command() {
         let mut tmux = MockTmux::new();
         expect_create(&mut tmux, &["claude", "--continue", "a b"]);
+        expect_windows(&mut tmux, vec![started()]);
 
         let output = tool(tmux).call(
             &json!({ "command": "claude", "args": ["--continue", "a b"] }),
@@ -192,8 +237,7 @@ mod tests {
         tmux.expect_window_for_pane()
             .with(eq("%2"))
             .return_once(|_| Ok(1));
-        tmux.expect_list_windows()
-            .return_once(|| Ok(vec![window(1, "me", "claude", "/")]));
+        expect_windows(&mut tmux, vec![window(1, "me", "claude", "/"), started()]);
         expect_create(&mut tmux, &["claude", "--resume"]);
 
         let output = tool(tmux).call(&json!({ "args": ["--resume"] }), &caller("%2"));
@@ -287,6 +331,56 @@ mod tests {
         );
         assert!(output.is_error);
         assert!(output.text.starts_with("Directory not found:"));
+    }
+
+    #[test]
+    fn test_agent_exiting_right_away_is_tool_error() {
+        let mut tmux = MockTmux::new();
+        expect_create(&mut tmux, &["claude"]);
+        expect_windows(&mut tmux, Vec::new());
+
+        let output = tool(tmux).call(&json!({ "command": "claude" }), &CallContext::default());
+
+        assert!(output.is_error);
+        assert!(
+            output
+                .text
+                .starts_with("'claude' exited right after starting")
+        );
+    }
+
+    #[test]
+    fn test_reused_index_with_another_pane_counts_as_exited() {
+        let mut tmux = MockTmux::new();
+        expect_create(&mut tmux, &["claude"]);
+        let mut other = started();
+        other.pane_pid += 1;
+        expect_windows(&mut tmux, vec![other]);
+
+        let output = tool(tmux).call(&json!({ "command": "claude" }), &CallContext::default());
+
+        assert!(output.is_error);
+    }
+
+    #[test]
+    fn test_liveness_check_failure_is_tool_error() {
+        let mut tmux = MockTmux::new();
+        expect_create(&mut tmux, &["claude"]);
+        tmux.expect_list_windows()
+            .return_once(|| Err(TmuxError::WindowNotFound));
+
+        let output = tool(tmux).call(&json!({ "command": "claude" }), &CallContext::default());
+
+        assert_eq!(
+            output.text,
+            "Failed to check the agent window: Window not found"
+        );
+    }
+
+    #[test]
+    fn test_new_uses_default_startup_wait() {
+        let tool = NewAgent::new(Arc::new(MockTmux::new()), PathBuf::from("/"));
+        assert_eq!(tool.startup_wait, STARTUP_WAIT);
     }
 
     #[test]

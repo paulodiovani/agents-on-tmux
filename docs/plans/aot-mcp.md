@@ -52,7 +52,7 @@ All take/return window indexes (field/arg `index`, integer). Names are the final
 | `read_window` | `index`, `lines` (default 50, max 2000) | plain text |
 | `read_agent` | same | alias of `read_window` |
 | `new_window` | `dir?` (default AOT's PWD; relative paths resolve from it; must exist) | `{index, title, cwd}`; created detached so the user's view does not switch |
-| `new_agent` | `command?` (enum of known agent commands; default: caller's agent if the caller is an agent, else error asking for it), `args?` (string array passed to the agent as-is), `dir?` (default AOT's PWD) | `{index, title, agent, cwd}`; created detached |
+| `new_agent` | `command?` (enum of known agent commands; default: caller's agent if the caller is an agent, else error asking for it), `args?` (string array passed to the agent as-is), `dir?` (default AOT's PWD) | `{index, title, agent, cwd}`; created detached; after ~500 ms the window (same index and pane pid) must still exist, else a tool error (agent not installed or failed on startup) |
 | `send_command` | `index`, `command` | confirmation; types the command and Enter |
 | `send_prompt` | `index`, `prompt` | confirmation; prompt delivered + Enter |
 | `respond_prompt` | `index`, `prompt` | like `send_prompt`, prefixed with sender (`[from window N] ...`) and a hint on how to reply; sender resolved from the connection's pane |
