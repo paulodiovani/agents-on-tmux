@@ -56,6 +56,23 @@ Project scope, in `opencode.jsonc` at the project root (see [OpenCode MCP server
 
 Use `opencode mcp add --global` to make it available in every project.
 
+#### Pi
+
+User scope, in `~/.pi/agent/mcp.json` (project scope: `.pi/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "aot": {
+      "command": "aot",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Or add it with `pi mcp add aot -- aot mcp`. Run `/reload` in a running session to pick up the change.
+
 #### Other agents
 
 Configure a local (stdio) MCP server named `aot` that runs `aot` with the single argument `mcp`, following the agent's MCP documentation.
@@ -94,6 +111,8 @@ Prompts sent with `send_prompt` and `respond_prompt` are signed with the sender'
 ```
 
 The receiving agent knows who sent the prompt and, when a response is needed, answers with `respond_prompt` using that index. Not every prompt needs a response.
+
+Sending and responding to prompts requires AOT to identify the sending agent, which works when the agent starts `aot mcp` itself, from its own window. OpenCode starts MCP servers from a shared background service instead, so OpenCode agents can receive prompts but cannot send or respond to them.
 
 ### Multiple AOT instances
 

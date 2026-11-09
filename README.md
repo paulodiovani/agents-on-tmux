@@ -144,17 +144,17 @@ While AOT runs, agents inside it can orchestrate other windows and agents throug
 
 ## Supported Agents
 
-| AI Agent    | Detect | Start | Send messages | Read output |
-| :---------- | :----: | :---: | :-----------: | :---------: |
-| Aider       |   -    |   -   |       -       |      -      |
-| Claude Code |   ✔️   |  ✔️   |      ✔️       |     ✔️      |
-| Codex       |   -    |   -   |       -       |      -      |
-| Copilot     |   -    |   -   |       -       |      -      |
-| Cursor      |   -    |   -   |       -       |      -      |
-| Devin       |   ✔️   |   -   |       -       |      -      |
-| Hermes      |   -    |   -   |       -       |      -      |
-| omp         |   ✔️   |  ✔️   |      ✔️       |     ✔️      |
-| OpenCode    |   ✔️   |  ✔️   |      ✔️       |     ✔️      |
-| Pi          |   ✔️   |   -   |       -       |      -      |
+| AI Agent    | Detect | Start | Send messages | Respond messages | Read output |
+| :---------- | :----: | :---: | :-----------: | :--------------: | :---------: |
+| Aider       |   -    |   -   |       -       |        -         |      -      |
+| Claude Code |   ✔️   |   ✔️  |       ✔️      |        ✔️        |      ✔️     |
+| Codex       |   -    |   -   |       -       |        -         |      -      |
+| Copilot     |   -    |   -   |       -       |        -         |      -      |
+| Cursor      |   -    |   -   |       -       |        -         |      -      |
+| Devin       |   ✔️   |   -   |       -       |        -         |      -      |
+| Hermes      |   -    |   -   |       -       |        -         |      -      |
+| omp         |   ✔️   |   ✔️  |       ✔️      |        ✔️        |      ✔️     |
+| OpenCode    |   ✔️   |   ✔️  |       ✔️      |        ❌         |      ✔️     |
+| Pi          |   ✔️   |   ✔️  |       ✔️      |        ✔️        |      ✔️     |
 
 ✔️ supported, `-` untested, ❌ unsupported.

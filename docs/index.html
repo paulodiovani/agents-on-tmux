@@ -367,8 +367,9 @@
             </div>
             <h3 class="font-semibold mb-2">Multi-Agent Support</h3>
             <p class="text-sm text-muted">
-              Detects and controls popular AI coding agents: Claude Code, Codex,
-              Aider, Copilot, Cursor, Devin, Hermes, omp, OpenCode, Pi, and more.
+              Detects and controls popular AI coding agents such as Claude Code,
+              omp, OpenCode, and Pi, which can also message each other through the
+              AOT MCP server.
 
             </p>
           </div>
@@ -590,36 +591,103 @@ aot --tui-width=50</code></pre>
           <div>
             <h3 class="font-semibold mb-3">Supported agents</h3>
             <p class="text-sm text-muted mb-3">
-              AOT detects and controls these AI coding agents:
+              Feature support per agent: ✔️ supported, <code>-</code> untested, ❌ unsupported.
             </p>
-            <div class="flex flex-wrap gap-2">
-              <span class="px-3 py-1 bg-surface border border-border rounded-full text-xs font-mono"
-                >Aider</span
-              >
-              <span class="px-3 py-1 bg-surface border border-border rounded-full text-xs font-mono"
-                >Claude Code</span
-              >
-              <span class="px-3 py-1 bg-surface border border-border rounded-full text-xs font-mono"
-                >Codex</span
-              >
-              <span class="px-3 py-1 bg-surface border border-border rounded-full text-xs font-mono"
-                >Copilot</span
-              >
-              <span class="px-3 py-1 bg-surface border border-border rounded-full text-xs font-mono"
-                >Cursor</span
-              >
-              <span class="px-3 py-1 bg-surface border border-border rounded-full text-xs font-mono"
-                >Devin</span
-              >
-              <span class="px-3 py-1 bg-surface border border-border rounded-full text-xs font-mono"
-                >Hermes</span
-              >
-              <span class="px-3 py-1 bg-surface border border-border rounded-full text-xs font-mono"
-                >OpenCode</span
-              >
-              <span class="px-3 py-1 bg-surface border border-border rounded-full text-xs font-mono"
-                >Pi</span
-              >
+            <div class="overflow-x-auto">
+              <table class="w-full text-sm border border-border">
+                <thead class="bg-surface">
+                  <tr>
+                    <th class="px-3 py-2 text-left border border-border">AI Agent</th>
+                    <th class="px-3 py-2 text-center border border-border">Detect</th>
+                    <th class="px-3 py-2 text-center border border-border">Start</th>
+                    <th class="px-3 py-2 text-center border border-border">Send messages</th>
+                    <th class="px-3 py-2 text-center border border-border">Respond messages</th>
+                    <th class="px-3 py-2 text-center border border-border">Read output</th>
+                  </tr>
+                </thead>
+                <tbody class="text-muted">
+                  <tr>
+                    <td class="px-3 py-2 border border-border font-mono text-text">Aider</td>
+                    <td class="px-3 py-2 text-center border border-border">-</td>
+                    <td class="px-3 py-2 text-center border border-border">-</td>
+                    <td class="px-3 py-2 text-center border border-border">-</td>
+                    <td class="px-3 py-2 text-center border border-border">-</td>
+                    <td class="px-3 py-2 text-center border border-border">-</td>
+                  </tr>
+                  <tr>
+                    <td class="px-3 py-2 border border-border font-mono text-text">Claude Code</td>
+                    <td class="px-3 py-2 text-center border border-border">✔️</td>
+                    <td class="px-3 py-2 text-center border border-border">✔️</td>
+                    <td class="px-3 py-2 text-center border border-border">✔️</td>
+                    <td class="px-3 py-2 text-center border border-border">✔️</td>
+                    <td class="px-3 py-2 text-center border border-border">✔️</td>
+                  </tr>
+                  <tr>
+                    <td class="px-3 py-2 border border-border font-mono text-text">Codex</td>
+                    <td class="px-3 py-2 text-center border border-border">-</td>
+                    <td class="px-3 py-2 text-center border border-border">-</td>
+                    <td class="px-3 py-2 text-center border border-border">-</td>
+                    <td class="px-3 py-2 text-center border border-border">-</td>
+                    <td class="px-3 py-2 text-center border border-border">-</td>
+                  </tr>
+                  <tr>
+                    <td class="px-3 py-2 border border-border font-mono text-text">Copilot</td>
+                    <td class="px-3 py-2 text-center border border-border">-</td>
+                    <td class="px-3 py-2 text-center border border-border">-</td>
+                    <td class="px-3 py-2 text-center border border-border">-</td>
+                    <td class="px-3 py-2 text-center border border-border">-</td>
+                    <td class="px-3 py-2 text-center border border-border">-</td>
+                  </tr>
+                  <tr>
+                    <td class="px-3 py-2 border border-border font-mono text-text">Cursor</td>
+                    <td class="px-3 py-2 text-center border border-border">-</td>
+                    <td class="px-3 py-2 text-center border border-border">-</td>
+                    <td class="px-3 py-2 text-center border border-border">-</td>
+                    <td class="px-3 py-2 text-center border border-border">-</td>
+                    <td class="px-3 py-2 text-center border border-border">-</td>
+                  </tr>
+                  <tr>
+                    <td class="px-3 py-2 border border-border font-mono text-text">Devin</td>
+                    <td class="px-3 py-2 text-center border border-border">✔️</td>
+                    <td class="px-3 py-2 text-center border border-border">-</td>
+                    <td class="px-3 py-2 text-center border border-border">-</td>
+                    <td class="px-3 py-2 text-center border border-border">-</td>
+                    <td class="px-3 py-2 text-center border border-border">-</td>
+                  </tr>
+                  <tr>
+                    <td class="px-3 py-2 border border-border font-mono text-text">Hermes</td>
+                    <td class="px-3 py-2 text-center border border-border">-</td>
+                    <td class="px-3 py-2 text-center border border-border">-</td>
+                    <td class="px-3 py-2 text-center border border-border">-</td>
+                    <td class="px-3 py-2 text-center border border-border">-</td>
+                    <td class="px-3 py-2 text-center border border-border">-</td>
+                  </tr>
+                  <tr>
+                    <td class="px-3 py-2 border border-border font-mono text-text">omp</td>
+                    <td class="px-3 py-2 text-center border border-border">✔️</td>
+                    <td class="px-3 py-2 text-center border border-border">✔️</td>
+                    <td class="px-3 py-2 text-center border border-border">✔️</td>
+                    <td class="px-3 py-2 text-center border border-border">✔️</td>
+                    <td class="px-3 py-2 text-center border border-border">✔️</td>
+                  </tr>
+                  <tr>
+                    <td class="px-3 py-2 border border-border font-mono text-text">OpenCode</td>
+                    <td class="px-3 py-2 text-center border border-border">✔️</td>
+                    <td class="px-3 py-2 text-center border border-border">✔️</td>
+                    <td class="px-3 py-2 text-center border border-border">✔️</td>
+                    <td class="px-3 py-2 text-center border border-border">❌</td>
+                    <td class="px-3 py-2 text-center border border-border">✔️</td>
+                  </tr>
+                  <tr>
+                    <td class="px-3 py-2 border border-border font-mono text-text">Pi</td>
+                    <td class="px-3 py-2 text-center border border-border">✔️</td>
+                    <td class="px-3 py-2 text-center border border-border">✔️</td>
+                    <td class="px-3 py-2 text-center border border-border">✔️</td>
+                    <td class="px-3 py-2 text-center border border-border">✔️</td>
+                    <td class="px-3 py-2 text-center border border-border">✔️</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
