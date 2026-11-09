@@ -47,9 +47,7 @@ impl Agent for GenericAgent {
     }
 }
 
-/// Returns every known agent. Gated while nothing in the running app needs the
-/// whole list.
-#[cfg(test)]
+/// Returns every known agent.
 pub fn agents() -> &'static [GenericAgent] {
     &AGENTS
 }

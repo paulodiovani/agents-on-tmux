@@ -14,6 +14,7 @@
 ## Testing
 
 - Always write tests for new code; no untested logic should land.
+- Mock the `Tmux` trait with the mockall-generated `MockTmux` (`#[cfg_attr(test, mockall::automock)]`, exported from `backends::tmux` in test builds); set expectations per test.
 - Aim for 100% code coverage.
 - Never run the code (`cargo run`, the `aot` binary, or real tmux commands) during
   implementation — it would interact with existing tmux sessions. Only run tests with
@@ -31,7 +32,8 @@ Binary crate (`aot`, package name `agents-on-tmux`).
 Two top-level modules under `src/`:
 
 - `backends/` — tmux communication interface
-  - `Tmux` trait defines the contract (session management, window CRUD, split_window, resize_pane, list_keys, show_options, command_prompt)
+  - `Tmux` trait defines the contract (session management, window CRUD, split_window, resize_pane, list_keys, show_options, prompt_rename_window, capture_pane, window_for_pane, send_keys, paste_buffer, rename_window)
+  - Methods that run a single tmux command are named after it
   - `TmuxDriver<E: CommandExecutor>` implements `Tmux` with dependency injection
   - `CommandExecutor` trait abstracts tmux command execution (real `ShellCommandExecutor` + mock for tests)
   - `Window` struct represents tmux window state (id, name, running_command, started_at, notification_pending, is_active, current_dir)
@@ -40,11 +42,20 @@ Two top-level modules under `src/`:
   - `agents.rs` identifies agents by name and command
   - `logger.rs` is a std-only global file logger (`init`/`debug`/`error`), it never writes to stdout/stderr
 
-- `frontends/` — terminal UI (`tui/` with app, event, icons, path, theme, ui)
-  - `App` manages TUI state and user actions
-  - `key_to_action` maps keyboard input to `Action` enum
-  - `Theme` defines visual styles
-  - `ui::draw` renders the interface
+- `frontends/` — interfaces to AOT features
+  - `tui/` terminal UI (app, event, icons, path, theme, ui)
+    - `App` manages TUI state and user actions
+    - `key_to_action` maps keyboard input to `Action` enum
+    - `Theme` defines visual styles
+    - `ui::draw` renders the interface
+  - `mcp/` MCP server for agents running inside AOT
+    - `server.rs` unix socket server (`$XDG_RUNTIME_DIR/aot/mcp.sock`, first instance owns it) running in a background thread of the main process
+    - `shim.rs` the `aot mcp` stdio bridge agents spawn; sends the agent's `TMUX_PANE` in a handshake, then copies bytes both ways
+    - `protocol.rs` hand-rolled JSON-RPC/MCP handler (`McpHandler`, `Protocol` trait), dual-era: legacy `initialize` and modern per-request `_meta`
+    - `tools/` one file per tool implementing the `Tool` trait, registered in `registry.rs`; shared argument and target helpers in `tool.rs`
+    - Agent-visible text (descriptions, instructions, errors) never mentions tmux or other implementation details; descriptions are short, state only what things are and do, and don't point to other tools
+    - Tool arguments and results use tmux names (`name`, `current_dir`, `active`)
+    - Windows are addressed by their tmux window index (`Window.id`), as a plain integer
 
 Presentation belongs to the frontend: backends never carry icons, colors, or any other display data
 Colors are named ANSI slots (0-15) or `Color::Reset` only — never `Color::Rgb` or `Color::Indexed`, so the UI follows the user's terminal theme
@@ -63,7 +74,7 @@ The nested `agents-on-tmux` session runs on its own isolated tmux server using t
 
 This architecture is similar to how `overmind` works and prevents issues #20 (server freeze) and #31 (session detection failure).
 
-Entry point: `main.rs` parses CLI args with clap, detects the parent tmux session, creates a parent `TmuxDriver` (default server) and a nested `TmuxDriver` with socket (isolated server), ensures the nested session exists. Without `--tui`, it splits a pane in the parent session to launch the TUI and attaches to the nested session. With `--tui`, it runs the TUI directly.
+Entry point: `main.rs` parses CLI args with clap (`aot mcp` runs only the MCP bridge and returns), detects the parent tmux session, creates a parent `TmuxDriver` (default server) and a nested `TmuxDriver` with socket (isolated server), ensures the nested session exists, and starts the MCP server. Without `--tui`, it splits a pane in the parent session to launch the TUI and attaches to the nested session. With `--tui`, it runs the TUI directly.
 
 ## Rust conventions (non-default — follow strictly)
 

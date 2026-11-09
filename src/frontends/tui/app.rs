@@ -477,7 +477,10 @@ impl App {
         self.active_tab = Tab::Windows;
         let name = format!("agent-{}", self.windows.len() + 1);
         logger::debug(&format!("app: create window {name}"));
-        match self.nested_driver.create_window(&name) {
+        match self
+            .nested_driver
+            .create_window(Some(&name), None, None, false)
+        {
             Ok(new_window) => {
                 if let Err(error) = self.refresh_windows() {
                     logger::error(&format!("app: refresh windows failed: {error}"));
@@ -521,7 +524,10 @@ impl App {
             if let Err(error) = self.parent_driver.last_pane() {
                 logger::error(&format!("app: last pane failed: {error}"));
             }
-            if let Err(error) = self.nested_driver.rename_window(window.id, &window.name) {
+            if let Err(error) = self
+                .nested_driver
+                .prompt_rename_window(window.id, &window.name)
+            {
                 logger::error(&format!("app: rename window failed: {error}"));
             }
             if let Err(error) = self.parent_driver.last_pane() {
@@ -941,12 +947,18 @@ mod tests {
             Ok(self.windows.borrow().clone())
         }
 
-        fn create_window(&self, name: &str) -> Result<Window, TmuxError> {
+        fn create_window(
+            &self,
+            name: Option<&str>,
+            _dir: Option<&str>,
+            _command: Option<&[String]>,
+            _detached: bool,
+        ) -> Result<Window, TmuxError> {
             self.calls.borrow_mut().push("create_window".to_string());
             let mut next_id = self.next_id.borrow_mut();
             let window = Window {
                 id: *next_id,
-                name: name.to_string(),
+                name: name.unwrap_or_default().to_string(),
                 pane_pid: 12345,
                 running_command: String::new(),
                 current_dir: "/home/user".to_string(),
@@ -1007,10 +1019,30 @@ mod tests {
             }
         }
 
-        fn rename_window(&self, id: u32, name: &str) -> Result<(), TmuxError> {
+        fn prompt_rename_window(&self, id: u32, name: &str) -> Result<(), TmuxError> {
             self.calls
                 .borrow_mut()
-                .push(format!("rename_window {id} {name}"));
+                .push(format!("prompt_rename_window {id} {name}"));
+            Ok(())
+        }
+
+        fn capture_pane(&self, _id: u32, _history: u32) -> Result<String, TmuxError> {
+            Ok(String::new())
+        }
+
+        fn window_for_pane(&self, _pane_id: &str) -> Result<u32, TmuxError> {
+            Err(TmuxError::WindowNotFound)
+        }
+
+        fn send_keys(&self, _id: u32, _text: &str, _enter: bool) -> Result<(), TmuxError> {
+            Ok(())
+        }
+
+        fn paste_buffer(&self, _id: u32, _text: &str) -> Result<(), TmuxError> {
+            Ok(())
+        }
+
+        fn rename_window(&self, _id: u32, _name: &str) -> Result<(), TmuxError> {
             Ok(())
         }
     }
@@ -1161,7 +1193,7 @@ mod tests {
 
         assert_eq!(
             nested_calls.borrow().last().unwrap(),
-            "rename_window 2 agent-2"
+            "prompt_rename_window 2 agent-2"
         );
         let parent_recorded = parent_calls.borrow();
         assert_eq!(parent_recorded.len(), 2);
@@ -1181,7 +1213,7 @@ mod tests {
             calls
                 .borrow()
                 .iter()
-                .any(|call| call.starts_with("rename_window"))
+                .any(|call| call.starts_with("prompt_rename_window"))
         );
     }
 

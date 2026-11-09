@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Include omp (Oh My Pi) agent with custom pi icon (󰏿)
 - Mouse support: click tabs to switch, click rows to select/focus, scroll to navigate long lists
+- MCP server (`aot mcp`) letting agents orchestrate windows and other agents
 
 ## [1.0.0] - 2026-09-21
 

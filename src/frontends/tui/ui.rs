@@ -688,11 +688,17 @@ mod tests {
         fn list_windows(&self) -> Result<Vec<Window>, TmuxError> {
             Ok(self.windows.borrow().clone())
         }
-        fn create_window(&self, name: &str) -> Result<Window, TmuxError> {
+        fn create_window(
+            &self,
+            name: Option<&str>,
+            _dir: Option<&str>,
+            _command: Option<&[String]>,
+            _detached: bool,
+        ) -> Result<Window, TmuxError> {
             let mut next_id = self.next_id.borrow_mut();
             let window = Window {
                 id: *next_id,
-                name: name.to_string(),
+                name: name.unwrap_or_default().to_string(),
                 pane_pid: 12345,
                 running_command: String::new(),
                 current_dir: "/home/user".to_string(),
@@ -732,6 +738,26 @@ mod tests {
                 _ => Err(command_failed("show-options")),
             }
         }
+        fn prompt_rename_window(&self, _id: u32, _name: &str) -> Result<(), TmuxError> {
+            Ok(())
+        }
+
+        fn capture_pane(&self, _id: u32, _history: u32) -> Result<String, TmuxError> {
+            Ok(String::new())
+        }
+
+        fn window_for_pane(&self, _pane_id: &str) -> Result<u32, TmuxError> {
+            Err(TmuxError::WindowNotFound)
+        }
+
+        fn send_keys(&self, _id: u32, _text: &str, _enter: bool) -> Result<(), TmuxError> {
+            Ok(())
+        }
+
+        fn paste_buffer(&self, _id: u32, _text: &str) -> Result<(), TmuxError> {
+            Ok(())
+        }
+
         fn rename_window(&self, _id: u32, _name: &str) -> Result<(), TmuxError> {
             Ok(())
         }

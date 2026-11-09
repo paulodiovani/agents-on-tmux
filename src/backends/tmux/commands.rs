@@ -1,4 +1,5 @@
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 use thiserror::Error;
 
@@ -13,19 +14,31 @@ pub trait CommandExecutor {
 }
 
 /// Contract for interacting with tmux sessions and windows.
+#[cfg_attr(test, mockall::automock)]
 pub trait Tmux {
     /// Returns the session name this driver targets.
     fn session_name(&self) -> &str;
     /// Returns the socket name this driver targets, if any.
-    fn socket_name(&self) -> Option<&str>;
+    #[allow(clippy::needless_lifetimes)]
+    fn socket_name<'a>(&'a self) -> Option<&'a str>;
     /// Ensures the tmux session exists, creating it if necessary.
-    fn create_session_if_not_exists(&self, tmux_env: Option<&str>) -> Result<(), TmuxError>;
+    #[allow(clippy::needless_lifetimes)]
+    fn create_session_if_not_exists<'a>(&self, tmux_env: Option<&'a str>) -> Result<(), TmuxError>;
     /// Attaches to the tmux session, inheriting stdio. Blocks until detached.
     fn attach_session(&self) -> Result<(), TmuxError>;
     /// Lists all windows in the session.
     fn list_windows(&self) -> Result<Vec<Window>, TmuxError>;
-    /// Creates a new window with the given name.
-    fn create_window(&self, name: &str) -> Result<Window, TmuxError>;
+    /// Creates a new window and returns it. `name` (automatic when unset), `dir`,
+    /// and `command` (program and arguments run instead of the default shell) keep
+    /// tmux defaults when `None`; `detached` keeps the current window selected.
+    #[allow(clippy::needless_lifetimes)]
+    fn create_window<'a>(
+        &self,
+        name: Option<&'a str>,
+        dir: Option<&'a str>,
+        command: Option<&'a [String]>,
+        detached: bool,
+    ) -> Result<Window, TmuxError>;
     /// Kills the window with the given id.
     fn kill_window(&self, id: u32) -> Result<(), TmuxError>;
     /// Selects (focuses) the window with the given id.
@@ -43,8 +56,25 @@ pub trait Tmux {
     /// default, or the global scope when `global` is set.
     fn show_options(&self, name: &str, global: bool) -> Result<String, TmuxError>;
     /// Prompts the user to rename the window via the tmux command prompt.
+    fn prompt_rename_window(&self, id: u32, name: &str) -> Result<(), TmuxError>;
+    /// Returns the text of the window's active pane: the visible screen plus up
+    /// to `history` lines of scrollback above it.
+    fn capture_pane(&self, id: u32, history: u32) -> Result<String, TmuxError>;
+    /// Returns the id of the window holding the given pane (`%N`).
+    fn window_for_pane(&self, pane_id: &str) -> Result<u32, TmuxError>;
+    /// Types `text` literally into the window's active pane, then presses
+    /// Enter when `enter` is set.
+    fn send_keys(&self, id: u32, text: &str, enter: bool) -> Result<(), TmuxError>;
+    /// Pastes `text` into the window's active pane, as a bracketed paste when the
+    /// pane's application enables it, so newlines stay part of the text.
+    fn paste_buffer(&self, id: u32, text: &str) -> Result<(), TmuxError>;
+    /// Sets the window's name directly, without prompting the user.
     fn rename_window(&self, id: u32, name: &str) -> Result<(), TmuxError>;
 }
+
+const PASTE_BUFFER_PREFIX: &str = "aot-paste";
+
+static PASTE_BUFFER_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub const SESSION_NAME: &str = "agents-on-tmux";
 pub const SOCKET_NAME: &str = "agents-on-tmux";
@@ -255,9 +285,12 @@ impl<E: CommandExecutor> TmuxDriver<E> {
     }
 }
 
-/// Formats a tmux target string from session, window, and pane components.
-/// Returns "session:window.pane", "session:window", "session:.pane", or "session:"
-/// depending on which components are provided.
+/// Keeps a window name literal, so tmux does not expand formats in it.
+fn escape_formats(name: &str) -> String {
+    name.replace('#', "##")
+}
+
+/// Builds a tmux target such as `session:window.pane`.
 fn target(session: &str, window: Option<&str>, pane: Option<&str>) -> String {
     match (window, pane) {
         (Some(w), Some(p)) => format!("{}:{}.{}", session, w, p),
@@ -439,20 +472,41 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
         Ok(windows)
     }
 
-    /// Creates a new window with the given name.
-    fn create_window(&self, name: &str) -> Result<Window, TmuxError> {
-        self.executor.execute(&[
-            "new-window",
-            "-t",
-            &target(&self.session, None, None),
-            "-n",
-            name,
-        ])?;
+    /// Creates a new window and returns it.
+    fn create_window<'a>(
+        &self,
+        name: Option<&'a str>,
+        dir: Option<&'a str>,
+        command: Option<&'a [String]>,
+        detached: bool,
+    ) -> Result<Window, TmuxError> {
+        let session = target(&self.session, None, None);
+        let name = name.map(escape_formats);
+        let mut args = vec!["new-window", "-t", &session, "-P", "-F", "#{window_index}"];
 
-        let windows = self.list_windows()?;
-        windows
+        if detached {
+            args.push("-d");
+        }
+        if let Some(name) = &name {
+            args.extend(["-n", name.as_str()]);
+        }
+        if let Some(dir) = dir {
+            args.extend(["-c", dir]);
+        }
+        if let Some(command) = command {
+            args.push("--");
+            args.extend(command.iter().map(String::as_str));
+        }
+
+        let output = self.executor.execute(&args)?;
+        let id = output
+            .trim()
+            .parse::<u32>()
+            .map_err(|_| TmuxError::WindowNotFound)?;
+
+        self.list_windows()?
             .into_iter()
-            .find(|w| w.name == name)
+            .find(|w| w.id == id)
             .ok_or(TmuxError::WindowNotFound)
     }
 
@@ -528,11 +582,72 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
     }
 
     /// Prompts the user to rename the window via the tmux command prompt.
-    fn rename_window(&self, id: u32, name: &str) -> Result<(), TmuxError> {
+    fn prompt_rename_window(&self, id: u32, name: &str) -> Result<(), TmuxError> {
         let target = format!("{}:{}", self.session, id);
         let template = format!("rename-window -t \"{target}\" \"%%\"");
         self.executor
             .execute(&["command-prompt", "-I", name, &template])
+            .map(|_| ())
+    }
+
+    /// Returns the text of the window's active pane: the visible screen plus up
+    /// to `history` lines of scrollback above it.
+    fn capture_pane(&self, id: u32, history: u32) -> Result<String, TmuxError> {
+        let target = target(&self.session, Some(&id.to_string()), None);
+        let start = format!("-{history}");
+        self.executor
+            .execute(&["capture-pane", "-p", "-J", "-t", &target, "-S", &start])
+    }
+
+    /// Returns the id of the window holding the given pane (`%N`).
+    fn window_for_pane(&self, pane_id: &str) -> Result<u32, TmuxError> {
+        let output =
+            self.executor
+                .execute(&["display-message", "-p", "-t", pane_id, "#{window_index}"])?;
+        output
+            .trim()
+            .parse::<u32>()
+            .map_err(|_| TmuxError::WindowNotFound)
+    }
+
+    /// Types `text` literally into the window's active pane, then presses
+    /// Enter when `enter` is set.
+    fn send_keys(&self, id: u32, text: &str, enter: bool) -> Result<(), TmuxError> {
+        let target = target(&self.session, Some(&id.to_string()), None);
+        if !text.is_empty() {
+            self.executor
+                .execute(&["send-keys", "-t", &target, "-l", "--", text])?;
+        }
+
+        if enter {
+            self.executor
+                .execute(&["send-keys", "-t", &target, "Enter"])?;
+        }
+
+        Ok(())
+    }
+
+    /// Pastes `text` into the window's active pane, as a bracketed paste when the
+    /// pane's application enables it, so newlines stay part of the text.
+    fn paste_buffer(&self, id: u32, text: &str) -> Result<(), TmuxError> {
+        let target = target(&self.session, Some(&id.to_string()), None);
+        let buffer = format!(
+            "{PASTE_BUFFER_PREFIX}-{}-{}",
+            std::process::id(),
+            PASTE_BUFFER_COUNTER.fetch_add(1, Ordering::Relaxed)
+        );
+        self.executor
+            .execute(&["set-buffer", "-b", &buffer, "--", text])?;
+        self.executor
+            .execute(&["paste-buffer", "-b", &buffer, "-p", "-d", "-t", &target])?;
+        Ok(())
+    }
+
+    /// Sets the window's name directly, without prompting the user.
+    fn rename_window(&self, id: u32, name: &str) -> Result<(), TmuxError> {
+        let target = target(&self.session, Some(&id.to_string()), None);
+        self.executor
+            .execute(&["rename-window", "-t", &target, "--", &escape_formats(name)])
             .map(|_| ())
     }
 }
@@ -640,14 +755,20 @@ mod tests {
                         started_at: None,
                     };
                     windows.push(window.clone());
-                    Ok(String::new())
+                    Ok(format!("{id}\n"))
                 }
                 Some(&"select-window") => Ok(String::new()),
                 Some(&"last-pane") => Ok(String::new()),
                 Some(&"send-keys") => Ok(String::new()),
+                Some(&"set-buffer") => Ok(String::new()),
+                Some(&"paste-buffer") => Ok(String::new()),
+                Some(&"rename-window") => Ok(String::new()),
                 Some(&"set-option") => Ok(String::new()),
                 Some(&"resize-pane") => Ok(String::new()),
                 Some(&"command-prompt") => Ok(String::new()),
+                Some(&"capture-pane") => Ok("$ ls\nsrc\n".to_string()),
+                Some(&"display-message") if args.contains(&"%7") => Ok("4\n".to_string()),
+                Some(&"display-message") => Ok(String::new()),
                 Some(&"split-window") => Ok(self.pane_id.borrow().clone()),
                 Some(&"list-keys") => Ok(concat!(
                     "bind-key -r -T prefix Up select-pane -U\n",
@@ -835,10 +956,77 @@ mod tests {
     fn test_create_window() {
         let executor = MockCommandExecutor::with_session();
         let driver = TmuxDriver::with_executor(executor);
-        let window = driver.create_window("test-window").unwrap();
+        let window = driver
+            .create_window(Some("test-window"), None, None, false)
+            .unwrap();
         assert_eq!(window.name, "test-window");
         assert!(window.started_at.is_none());
         assert!(!window.notification_pending);
+
+        let commands = driver.executor.commands.borrow();
+        let new_window = commands.iter().find(|cmd| cmd[0] == "new-window").unwrap();
+        assert_eq!(
+            new_window.as_slice(),
+            [
+                "new-window",
+                "-t",
+                "agents-on-tmux:",
+                "-P",
+                "-F",
+                "#{window_index}",
+                "-n",
+                "test-window"
+            ]
+        );
+    }
+
+    #[test]
+    fn test_create_window_with_all_options() {
+        let executor = MockCommandExecutor::with_session();
+        let driver = TmuxDriver::with_executor(executor);
+        let command = [
+            "claude".to_string(),
+            "--model".to_string(),
+            "o3".to_string(),
+        ];
+        let window = driver
+            .create_window(None, Some("/tmp/project"), Some(&command), true)
+            .unwrap();
+        assert_eq!(window.id, 1);
+
+        let commands = driver.executor.commands.borrow();
+        let new_window = commands.iter().find(|cmd| cmd[0] == "new-window").unwrap();
+        assert_eq!(
+            new_window.as_slice(),
+            [
+                "new-window",
+                "-t",
+                "agents-on-tmux:",
+                "-P",
+                "-F",
+                "#{window_index}",
+                "-d",
+                "-c",
+                "/tmp/project",
+                "--",
+                "claude",
+                "--model",
+                "o3",
+            ]
+        );
+    }
+
+    #[test]
+    fn test_create_window_finds_the_window_by_printed_index() {
+        let executor = MockCommandExecutor::with_session();
+        let driver = TmuxDriver::with_executor(executor);
+        driver
+            .create_window(Some("same"), None, None, false)
+            .unwrap();
+        let second = driver
+            .create_window(Some("same"), None, None, false)
+            .unwrap();
+        assert_eq!(second.id, 2);
     }
 
     #[test]
@@ -1172,10 +1360,10 @@ mod tests {
     }
 
     #[test]
-    fn test_rename_window_command_args() {
+    fn test_prompt_rename_window_command_args() {
         let executor = MockCommandExecutor::with_session();
         let driver = TmuxDriver::with_executor(executor);
-        driver.rename_window(1, "my-window").unwrap();
+        driver.prompt_rename_window(1, "my-window").unwrap();
 
         let commands = driver.executor.commands.borrow();
         let prompt_cmd = commands
@@ -1190,6 +1378,172 @@ mod tests {
                 "my-window".to_string(),
                 "rename-window -t \"agents-on-tmux:1\" \"%%\"".to_string(),
             ]
+        );
+    }
+
+    #[test]
+    fn test_capture_pane_command_args() {
+        let executor = MockCommandExecutor::with_session();
+        let driver = TmuxDriver::with_executor(executor);
+
+        let output = driver.capture_pane(3, 120).unwrap();
+
+        assert_eq!(output, "$ ls\nsrc\n");
+        let commands = driver.executor.commands.borrow();
+        assert_eq!(
+            commands.last().unwrap().as_slice(),
+            [
+                "capture-pane",
+                "-p",
+                "-J",
+                "-t",
+                "agents-on-tmux:3",
+                "-S",
+                "-120"
+            ]
+        );
+    }
+
+    #[test]
+    fn test_window_for_pane_command_args() {
+        let executor = MockCommandExecutor::with_session();
+        let driver = TmuxDriver::with_executor(executor);
+
+        assert_eq!(driver.window_for_pane("%7").unwrap(), 4);
+        let commands = driver.executor.commands.borrow();
+        assert_eq!(
+            commands.last().unwrap().as_slice(),
+            ["display-message", "-p", "-t", "%7", "#{window_index}"]
+        );
+    }
+
+    #[test]
+    fn test_window_for_pane_unparsable_output() {
+        let executor = MockCommandExecutor::with_session();
+        let driver = TmuxDriver::with_executor(executor);
+
+        assert!(matches!(
+            driver.window_for_pane("%1"),
+            Err(TmuxError::WindowNotFound)
+        ));
+    }
+
+    fn send_keys_commands(text: &str, enter: bool) -> Vec<Vec<String>> {
+        let executor = MockCommandExecutor::with_session();
+        let driver = TmuxDriver::with_executor(executor);
+        driver.send_keys(2, text, enter).unwrap();
+        driver.executor.commands.borrow().clone()
+    }
+
+    #[test]
+    fn test_send_keys_types_literally_then_presses_enter() {
+        assert_eq!(
+            send_keys_commands("-n ls", true),
+            [
+                vec!["send-keys", "-t", "agents-on-tmux:2", "-l", "--", "-n ls"],
+                vec!["send-keys", "-t", "agents-on-tmux:2", "Enter"],
+            ]
+        );
+    }
+
+    #[test]
+    fn test_send_keys_without_enter() {
+        assert_eq!(
+            send_keys_commands("ls", false),
+            [vec![
+                "send-keys",
+                "-t",
+                "agents-on-tmux:2",
+                "-l",
+                "--",
+                "ls"
+            ]]
+        );
+    }
+
+    #[test]
+    fn test_send_keys_enter_only() {
+        assert_eq!(
+            send_keys_commands("", true),
+            [vec!["send-keys", "-t", "agents-on-tmux:2", "Enter"]]
+        );
+    }
+
+    #[test]
+    fn test_paste_buffer_uses_a_unique_bracketed_paste_buffer() {
+        let executor = MockCommandExecutor::with_session();
+        let driver = TmuxDriver::with_executor(executor);
+
+        driver.paste_buffer(2, "-first\nsecond").unwrap();
+        driver.paste_buffer(2, "again").unwrap();
+
+        let commands = driver.executor.commands.borrow();
+        let buffer = commands[0][2].clone();
+        assert!(buffer.starts_with("aot-paste-"));
+        assert_eq!(
+            commands[0],
+            ["set-buffer", "-b", buffer.as_str(), "--", "-first\nsecond"]
+        );
+        assert_eq!(
+            commands[1],
+            [
+                "paste-buffer",
+                "-b",
+                buffer.as_str(),
+                "-p",
+                "-d",
+                "-t",
+                "agents-on-tmux:2"
+            ]
+        );
+        assert_ne!(commands[2][2], buffer);
+    }
+
+    #[test]
+    fn test_rename_window_escapes_formats() {
+        let executor = MockCommandExecutor::with_session();
+        let driver = TmuxDriver::with_executor(executor);
+
+        driver.rename_window(3, "#{pane_id} #(date)").unwrap();
+
+        let commands = driver.executor.commands.borrow();
+        assert_eq!(
+            commands.last().unwrap().as_slice(),
+            [
+                "rename-window",
+                "-t",
+                "agents-on-tmux:3",
+                "--",
+                "##{pane_id} ##(date)"
+            ]
+        );
+    }
+
+    #[test]
+    fn test_create_window_escapes_formats_in_name() {
+        let executor = MockCommandExecutor::with_session();
+        let driver = TmuxDriver::with_executor(executor);
+
+        driver
+            .create_window(Some("#(date)"), None, None, false)
+            .unwrap();
+
+        let commands = driver.executor.commands.borrow();
+        let new_window = commands.iter().find(|cmd| cmd[0] == "new-window").unwrap();
+        assert!(new_window.windows(2).any(|pair| pair == ["-n", "##(date)"]));
+    }
+
+    #[test]
+    fn test_rename_window_command_args() {
+        let executor = MockCommandExecutor::with_session();
+        let driver = TmuxDriver::with_executor(executor);
+
+        driver.rename_window(3, "-review").unwrap();
+
+        let commands = driver.executor.commands.borrow();
+        assert_eq!(
+            commands.last().unwrap().as_slice(),
+            ["rename-window", "-t", "agents-on-tmux:3", "--", "-review"]
         );
     }
 

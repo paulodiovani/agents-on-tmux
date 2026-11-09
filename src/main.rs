@@ -2,10 +2,12 @@ mod backends;
 mod frontends;
 
 use std::fmt::Display;
+use std::sync::Arc;
 
 use backends::config::{Config, LaunchMode};
 use backends::tmux::{SESSION_NAME, SOCKET_NAME, Tmux, TmuxDriver, detect_parent_session};
-use clap::Parser;
+use clap::{Parser, Subcommand};
+use frontends::mcp::{McpHandler, McpServer};
 
 use crate::backends::logger;
 
@@ -43,6 +45,15 @@ struct Cli {
     /// TUI pane ID (read from env only)
     #[arg(env = "TMUX_PANE", hide = true)]
     tui_pane: Option<String>,
+
+    #[command(subcommand)]
+    command: Option<Command>,
+}
+
+#[derive(Subcommand, Debug, PartialEq)]
+enum Command {
+    /// Run the MCP stdio server for agents (connects to the running aot)
+    Mcp,
 }
 
 // Implement Display so we can extract the cli options to forward to TUI side-panel
@@ -93,10 +104,42 @@ fn parse_bool(value: &str) -> Result<bool, String> {
     }
 }
 
+fn start_mcp_server() -> Option<McpServer> {
+    let path = frontends::mcp::socket_path();
+    let tmux = Arc::new(TmuxDriver::new_with_socket(SESSION_NAME, SOCKET_NAME));
+    let default_dir = std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir());
+    let handler = McpHandler::new(frontends::mcp::all_tools(tmux, default_dir));
+    match McpServer::start(&path, Arc::new(handler)) {
+        Ok(Some(server)) => {
+            logger::info(&format!("main: MCP server listening on {}", path.display()));
+            Some(server)
+        }
+        Ok(None) => {
+            logger::info("main: MCP socket owned by another aot instance; not starting");
+            None
+        }
+        Err(error) => {
+            logger::error(&format!("main: MCP server failed to start: {error}"));
+            None
+        }
+    }
+}
+
 fn main() -> anyhow::Result<()> {
-    let config = Config::parse()?;
     let cli = Cli::parse();
-    let config = config.merge(&cli);
+    if cli.command == Some(Command::Mcp) {
+        let path = frontends::mcp::socket_path();
+        let mut stdout = std::io::stdout();
+        frontends::mcp::run_shim(
+            &path,
+            cli.tui_pane.as_deref(),
+            std::io::stdin(),
+            &mut stdout,
+        )?;
+        return Ok(());
+    }
+
+    let config = Config::parse()?.merge(&cli);
 
     // Logger setup must precede any tmux session/thread creation, so a fatal
     // --debug failure leaves no server, session, or thread behind.
@@ -131,6 +174,8 @@ fn main() -> anyhow::Result<()> {
 
     let nested_driver = TmuxDriver::new_with_socket(SESSION_NAME, SOCKET_NAME);
     nested_driver.create_session_if_not_exists(tmux_env)?;
+
+    let mcp_server = start_mcp_server();
 
     let pane_id = config.tui_pane.clone();
     if pane_id.is_none() {
@@ -182,6 +227,8 @@ fn main() -> anyhow::Result<()> {
             nested_driver.attach_session()?;
         }
     }
+
+    drop(mcp_server);
 
     // If a signal was received (TUI mode), exit with 128 + signo.
     if let Some((signo, _name)) = backends::signals::received() {
@@ -270,6 +317,19 @@ mod tests {
         let help = Cli::command().render_long_help().to_string();
         assert!(help.contains("--tui-width"));
         assert!(help.contains("default: 35"));
+    }
+
+    #[test]
+    fn test_mcp_subcommand() {
+        let cli = Cli::parse_from(["aot", "mcp"]);
+        assert_eq!(cli.command, Some(Command::Mcp));
+        assert_eq!(format!("{}", cli), "");
+    }
+
+    #[test]
+    fn test_no_subcommand_by_default() {
+        let cli = Cli::parse_from(["aot", "--tui"]);
+        assert_eq!(cli.command, None);
     }
 
     #[test]

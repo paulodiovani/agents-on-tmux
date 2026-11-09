@@ -9,6 +9,8 @@ This directory contains the static landing page for Agents on TMUX, hosted on Gi
 - `user-manual/` — Documentation pages
   - `recommended-tmux-config.md` — Source markdown
   - `recommended-tmux-config.html` — Rendered HTML page
+  - `mcp.md` — Source markdown for the MCP server page
+  - `mcp.html` — Rendered HTML page
 - `README.md` — This file
 
 ## Demo
