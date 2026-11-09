@@ -11,11 +11,12 @@ A TMUX-based AI Agents orchestrator.
 
 ## Design
 
-`agents-on-tmux`, or just `aot`, works as a thin wrapper over tmux and a TUI control panel. Its features are divided into three primary modules:
+`agents-on-tmux`, or just `aot`, works as a thin wrapper over tmux and a TUI control panel. Its features are divided into four primary modules:
 
 - `tui` The terminal interface provides a control panel for running agents, including actions to focus, rename, stop, or start a new agent.
   The TUI run on its own TMUX pane, window, or popup, it does not highjack or wrap your terminal to run agents inside its interface.
   - Windows are organized into two tabs: **Agents** (running AI coding agents) and **Windows** (regular tmux windows).
+- `mcp` An MCP server that lets agents running inside AOT list, start, read, rename, and send commands or prompts to other windows and agents. See [MCP Server](./docs/user-manual/mcp.md).
 - `tmux` The TMUX communication interface, allowing to start and control a dedicated TMUX session.
 - `agents` The `agents` interface, supporting popular terminal-based AI Agents and interact with them.
 
@@ -30,9 +31,9 @@ A TMUX-based AI Agents orchestrator.
 │       ┌────────────┐         │         ┌────────────┐            │
 │       │    tui     │         │         │    tmux    │            │
 │       └────────────┘         │         └────────────┘            │
-│                              │         ┌────────────┐            │
-│                              │         │   agents   │            │
-│                              │         └────────────┘            │
+│       ┌────────────┐         │         ┌────────────┐            │
+│       │    mcp     │         │         │   agents   │            │
+│       └────────────┘         │         └────────────┘            │
 └──────────────────────────────┴───────────────────────────────────┘
 
 ┌──────────────────────────────────────────────────────────────────┐
@@ -137,17 +138,23 @@ Falls back to `/tmp/aot/aot.log` if the cache directory cannot be determined.
 1. User can interact with the dedicated session using the TUI control or standard TMUX bindings.
    The TUI footer shows its own keybindings while the TUI pane is focused, and the TMUX bindings for the nested session (resolved from your own `list-keys`) when it is not — including how to reach the nested session's prefix: typed twice (`C-b C-b`) when both sessions share a prefix, or just once (`C-b`) when they differ.
 
+## MCP Server
+
+While AOT runs, agents inside it can orchestrate other windows and agents through the AOT MCP server: add a stdio MCP server running `aot mcp` to each agent. See [MCP Server](./docs/user-manual/mcp.md) for per-agent configuration and the available tools.
+
 ## Supported Agents
 
-| AI Agent    | Detect | Listen | Remote Control |
-| :---------- | :----: | :----: | :------------: |
-| Aider       |   ✔️   |   -    |       -        |
-| Claude Code |   ✔️   |   -    |       -        |
-| Codex       |   ✔️   |   -    |       -        |
-| Copilot     |   ✔️   |   -    |       -        |
-| Cursor      |   ✔️   |   -    |       -        |
-| Devin       |   ✔️   |   -    |       -        |
-| Hermes      |   ✔️   |   -    |       -        |
-| omp         |   ✔️   |   -    |       -        |
-| OpenCode    |   ✔️   |   -    |       -        |
-| Pi          |   ✔️   |   -    |       -        |
+| AI Agent    | Detect | Start | Send messages | Read output |
+| :---------- | :----: | :---: | :-----------: | :---------: |
+| Aider       |   -    |   -   |       -       |      -      |
+| Claude Code |   ✔️   |  ✔️   |      ✔️       |     ✔️      |
+| Codex       |   -    |   -   |       -       |      -      |
+| Copilot     |   -    |   -   |       -       |      -      |
+| Cursor      |   -    |   -   |       -       |      -      |
+| Devin       |   ✔️   |   -   |       -       |      -      |
+| Hermes      |   -    |   -   |       -       |      -      |
+| omp         |   ✔️   |  ✔️   |      ✔️       |     ✔️      |
+| OpenCode    |   ✔️   |  ✔️   |      ✔️       |     ✔️      |
+| Pi          |   ✔️   |   -   |       -       |      -      |
+
+✔️ supported, `-` untested, ❌ unsupported.
