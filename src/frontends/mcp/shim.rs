@@ -2,6 +2,8 @@ use std::io::{self, Read, Write};
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 
 use serde_json::json;
@@ -11,6 +13,8 @@ use thiserror::Error;
 pub enum ShimError {
     #[error("AOT MCP not running (no server at {0}); start aot first")]
     NotRunning(PathBuf),
+    #[error("AOT closed the connection (did AOT exit?)")]
+    Disconnected,
     #[error("AOT MCP connection failed: {0}")]
     Io(#[from] io::Error),
 }
@@ -33,12 +37,19 @@ pub fn run(
     socket.write_all(b"\n")?;
 
     let mut upstream = socket.try_clone()?;
+    let client_closed = Arc::new(AtomicBool::new(false));
+    let input_done = Arc::clone(&client_closed);
     thread::spawn(move || {
         let _ = pump(input, &mut upstream);
+        input_done.store(true, Ordering::SeqCst);
         let _ = upstream.shutdown(Shutdown::Write);
     });
     pump(socket, output)?;
-    Ok(())
+    if client_closed.load(Ordering::SeqCst) {
+        Ok(())
+    } else {
+        Err(ShimError::Disconnected)
+    }
 }
 
 fn pump(mut from: impl Read, to: &mut impl Write) -> io::Result<()> {
@@ -177,6 +188,27 @@ mod tests {
         let error = run(&path, None, Cursor::new(Vec::new()), &mut Vec::new()).unwrap_err();
 
         assert!(matches!(error, ShimError::Io(_)));
+    }
+
+    #[test]
+    fn test_run_reports_aot_closing_the_connection() {
+        let path = temp_socket();
+        let listener = UnixListener::bind(&path).unwrap();
+        let server = thread::spawn(move || {
+            let (stream, _) = listener.accept().unwrap();
+            let mut lines = BufReader::new(stream).lines();
+            lines.next().unwrap().unwrap()
+        });
+        let (input, _keep_open) = UnixStream::pair().unwrap();
+
+        let error = run(&path, None, input, &mut Vec::new()).unwrap_err();
+
+        server.join().unwrap();
+        assert!(matches!(error, ShimError::Disconnected));
+        assert_eq!(
+            error.to_string(),
+            "AOT closed the connection (did AOT exit?)"
+        );
     }
 
     #[test]

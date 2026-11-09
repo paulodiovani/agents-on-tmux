@@ -31,6 +31,7 @@ Agents running inside AOT's nested tmux session can list, create, read, and send
   - connection refused / file missing → remove the stale file and bind.
   - Only the owner unlinks the socket on shutdown.
 - No takeover in v1: if the owner exits while other instances run, the MCP is unavailable until AOT restarts, and the shim reports "AOT MCP not running". Revisit (background rebind retry) only if multi-instance use turns out to matter.
+- When AOT exits (or restarts) while an agent is connected, the shim exits with code 1 and "AOT closed the connection (did AOT exit?)"; it exits 0 only when the client closes stdin. Agents reconnect their MCP manually; transparent reconnect was considered and rejected.
 - Verify against the current MCP spec (lifecycle + tools + stdio) at implementation time.
 
 ### Tmux backend additions (`Tmux` trait + `TmuxDriver`)
