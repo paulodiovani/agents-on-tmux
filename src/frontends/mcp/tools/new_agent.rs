@@ -469,6 +469,7 @@ mod tests {
     fn test_metadata() {
         let tool = tool(MockTmux::new());
         assert_eq!(tool.name(), "new_agent");
+        assert!(!tool.read_only());
         assert!(tool.description().contains("index"));
         let schema = tool.input_schema();
         let commands: Vec<&str> = agents::agents().iter().map(|a| a.command()).collect();

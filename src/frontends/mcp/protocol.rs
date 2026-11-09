@@ -81,6 +81,7 @@ impl McpHandler {
                     "name": tool.name(),
                     "description": tool.description(),
                     "inputSchema": tool.input_schema(),
+                    "annotations": { "readOnlyHint": tool.read_only() },
                 })
             })
             .collect();
@@ -428,6 +429,7 @@ mod tests {
                 "name": "echo",
                 "description": "Echoes the arguments",
                 "inputSchema": { "type": "object" },
+                "annotations": { "readOnlyHint": false },
             }])
         );
     }

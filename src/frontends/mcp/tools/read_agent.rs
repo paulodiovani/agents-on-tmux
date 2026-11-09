@@ -25,6 +25,10 @@ impl Tool for ReadAgent {
         "read_agent"
     }
 
+    fn read_only(&self) -> bool {
+        true
+    }
+
     fn description(&self) -> &'static str {
         "Read the latest output of an agent as plain text. Takes the agent index and an optional number of lines (default 50, max 2000)."
     }
@@ -67,6 +71,7 @@ mod tests {
         let tool = ReadAgent::new(Arc::new(MockTmux::new()));
         let read_window = ReadWindow::new(Arc::new(MockTmux::new()));
         assert_eq!(tool.name(), "read_agent");
+        assert!(tool.read_only());
         assert!(tool.description().contains("agent index"));
         assert_eq!(tool.input_schema(), read_window.input_schema());
     }

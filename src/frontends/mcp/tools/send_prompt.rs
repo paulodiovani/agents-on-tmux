@@ -289,6 +289,7 @@ mod tests {
     fn test_metadata() {
         let tool = tool(MockTmux::new());
         assert_eq!(tool.name(), "send_prompt");
+        assert!(!tool.read_only());
         assert!(tool.description().contains("[from agent N]"));
         assert_eq!(tool.input_schema()["required"], json!(["index", "prompt"]));
     }

@@ -173,6 +173,7 @@ mod tests {
         let tool = tool(MockTmux::new());
         let schema = tool.input_schema();
         assert_eq!(tool.name(), "new_window");
+        assert!(!tool.read_only());
         assert!(tool.description().contains("shell"));
         assert_eq!(schema["properties"]["command"]["type"], "array");
         assert_eq!(schema["properties"]["name"]["type"], "string");

@@ -13,6 +13,10 @@ pub trait Tool: Send + Sync {
     fn description(&self) -> &'static str;
     /// JSON Schema of the tool arguments.
     fn input_schema(&self) -> Value;
+    /// Whether the tool never changes anything, advertised to clients as a read-only hint.
+    fn read_only(&self) -> bool {
+        false
+    }
     /// Runs the tool for the given arguments on behalf of the calling connection.
     fn call(&self, arguments: &Value, context: &CallContext) -> ToolOutput;
 }

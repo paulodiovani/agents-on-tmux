@@ -139,6 +139,7 @@ mod tests {
     fn test_metadata() {
         let tool = RenameWindow::new(Arc::new(MockTmux::new()));
         assert_eq!(tool.name(), "rename_window");
+        assert!(!tool.read_only());
         assert!(tool.description().contains("index"));
         assert_eq!(tool.input_schema()["required"], json!(["index", "name"]));
     }

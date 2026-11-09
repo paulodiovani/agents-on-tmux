@@ -196,6 +196,7 @@ mod tests {
     fn test_metadata() {
         let tool = SendCommand::new(Arc::new(MockTmux::new()));
         assert_eq!(tool.name(), "send_command");
+        assert!(!tool.read_only());
         assert!(tool.description().contains("index"));
         assert_eq!(tool.input_schema()["required"], json!(["index", "command"]));
         assert_eq!(

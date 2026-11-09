@@ -73,6 +73,7 @@ mod tests {
         let tool = RenameAgent::new(Arc::new(MockTmux::new()));
         let rename_window = RenameWindow::new(Arc::new(MockTmux::new()));
         assert_eq!(tool.name(), "rename_agent");
+        assert!(!tool.read_only());
         assert!(tool.description().contains("agent index"));
         assert_eq!(tool.input_schema(), rename_window.input_schema());
     }

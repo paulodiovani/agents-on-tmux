@@ -25,6 +25,10 @@ impl Tool for ReadWindow {
         "read_window"
     }
 
+    fn read_only(&self) -> bool {
+        true
+    }
+
     fn description(&self) -> &'static str {
         "Read the latest output of a window as plain text. Takes the window index and an optional number of lines (default 50, max 2000)."
     }
@@ -202,6 +206,7 @@ mod tests {
     fn test_metadata() {
         let tool = ReadWindow::new(Arc::new(MockTmux::new()));
         assert_eq!(tool.name(), "read_window");
+        assert!(tool.read_only());
         assert!(tool.description().contains("index"));
         assert_eq!(tool.input_schema()["required"], json!(["index"]));
         assert_eq!(tool.input_schema()["properties"]["lines"]["maximum"], 2000);
