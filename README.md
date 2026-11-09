@@ -59,7 +59,7 @@ Optional dependencies:
 
 When both icon fonts are enabled, Nerd Font custom icons take precedence.
 
-Also check the [Recommended TMUX Config settings](./docs/recommended-tmux-config.md).
+Also check the [Recommended TMUX Config settings](./docs/user-manual/recommended-tmux-config.md).
 
 ### Dev Dependencies
 

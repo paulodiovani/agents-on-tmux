@@ -444,9 +444,9 @@
 │     ┌────────────┐         │       ┌────────────┐            │
 │     │    tui     │         │       │    tmux    │            │
 │     └────────────┘         │       └────────────┘            │
-│                            │       ┌────────────┐            │
-│                            │       │   agents   │            │
-│                            │       └────────────┘            │
+│     ┌────────────┐         │       ┌────────────┐            │
+│     │    mcp     │         │       │   agents   │            │
+│     └────────────┘         │       └────────────┘            │
 └────────────────────────────┴─────────────────────────────────┘
 
 ┌──────────────────────────────────────────────────────────────┐
@@ -472,6 +472,15 @@
                 and <strong>Windows</strong> (regular TMUX windows). The TUI runs
                 in its own TMUX pane and retains its width when the terminal is
                 resized.
+              </p>
+            </div>
+            <div>
+              <h3 class="font-semibold text-accent mb-2 font-mono text-sm">frontends/mcp</h3>
+              <p class="text-sm text-muted">
+                An MCP server running inside AOT. Agents connect to it through the
+                <code>aot mcp</code> stdio bridge to list, start, read, and rename
+                other windows and agents, run commands, and send prompts to each
+                other. See the <a href="user-manual/mcp.html" class="text-[#7aa2f7] hover:underline">MCP Server</a> page.
               </p>
             </div>
             <div>
