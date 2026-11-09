@@ -85,5 +85,5 @@ Settled (before task 8): prompts are delivered with bracketed paste (`set-buffer
 - [x] 9. `send_prompt` (+ `paste_text`)
 - [x] 10. `respond_prompt` (sender resolution via `window_for_pane`)
 - [x] 11. `rename_window` (+ `set_window_name`)
-- [ ] 12. `rename_agent` (alias)
+- [x] 12. `rename_agent` (alias)
 - [ ] 13. Docs: user manual page with per-agent MCP config snippets, README mention, `AGENTS.md` architecture section (add `frontends/mcp/`)

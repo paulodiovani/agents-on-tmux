@@ -7,6 +7,7 @@ use super::new_agent::NewAgent;
 use super::new_window::NewWindow;
 use super::read_agent::ReadAgent;
 use super::read_window::ReadWindow;
+use super::rename_agent::RenameAgent;
 use super::rename_window::RenameWindow;
 use super::respond_prompt::RespondPrompt;
 use super::send_command::SendCommand;
@@ -25,6 +26,7 @@ pub fn all_tools(tmux: Arc<dyn Tmux + Send + Sync>, default_dir: PathBuf) -> Vec
         Box::new(NewWindow::new(Arc::clone(&tmux), default_dir.clone())),
         Box::new(NewAgent::new(Arc::clone(&tmux), default_dir)),
         Box::new(RenameWindow::new(Arc::clone(&tmux))),
+        Box::new(RenameAgent::new(Arc::clone(&tmux))),
         Box::new(SendCommand::new(Arc::clone(&tmux))),
         Box::new(SendPrompt::new(Arc::clone(&tmux))),
         Box::new(RespondPrompt::new(tmux)),
@@ -50,6 +52,7 @@ mod tests {
                 "new_window",
                 "new_agent",
                 "rename_window",
+                "rename_agent",
                 "send_command",
                 "send_prompt",
                 "respond_prompt",
