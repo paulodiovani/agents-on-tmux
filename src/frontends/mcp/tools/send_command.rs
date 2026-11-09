@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use serde_json::{Value, json};
 
-use super::tool::{CallContext, Tool, ToolOutput, send_target, text_argument};
+use super::tool::{CallContext, Tool, ToolOutput, send_target};
 use crate::backends::tmux::Tmux;
 
 /// Runs a shell command in a non-agent window of the AOT session.
@@ -23,7 +23,7 @@ impl Tool for SendCommand {
     }
 
     fn description(&self) -> &'static str {
-        "Type a shell command into a non-agent window of the AOT session and press Enter. Takes the integer window index from list_windows (never a title) and the command. The command runs asynchronously: call read_window afterwards to see its output. Agent windows are refused; use send_prompt for them. Your own window is refused."
+        "Run a command in a non-agent window of the AOT session: it is typed into the window's shell and Enter is pressed. Takes the integer window index from list_windows (never a title) and the command as an array: the program followed by its arguments, e.g. [\"cargo\", \"test\", \"--lib\"]. Each element reaches the program as one argument; shell syntax such as pipes or redirection is not interpreted. The command runs asynchronously: call read_window afterwards to see its output. Agent windows are refused; use send_prompt for them. Your own window is refused."
     }
 
     fn input_schema(&self) -> Value {
@@ -36,8 +36,10 @@ impl Tool for SendCommand {
                     "description": "Window index from list_windows",
                 },
                 "command": {
-                    "type": "string",
-                    "description": "Shell command to type and run",
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "minItems": 1,
+                    "description": "Program followed by its arguments, e.g. [\"ls\", \"-la\"]",
                 },
             },
             "required": ["index", "command"],
@@ -46,7 +48,7 @@ impl Tool for SendCommand {
     }
 
     fn call(&self, arguments: &Value, context: &CallContext) -> ToolOutput {
-        let command = match text_argument(arguments, "command") {
+        let command = match command_argument(arguments) {
             Ok(command) => command,
             Err(error) => return error,
         };
@@ -64,6 +66,40 @@ impl Tool for SendCommand {
                 window.id
             )),
         }
+    }
+}
+
+fn command_argument(arguments: &Value) -> Result<String, ToolOutput> {
+    let Some(value) = arguments.get("command") else {
+        return Err(ToolOutput::error("Missing required argument: command"));
+    };
+    let invalid = || {
+        ToolOutput::error(format!(
+            "Invalid command {value}: pass an array with the program followed by its arguments, e.g. [\"ls\", \"-la\"]"
+        ))
+    };
+    let parts = value
+        .as_array()
+        .filter(|parts| !parts.is_empty())
+        .ok_or_else(invalid)?
+        .iter()
+        .map(|part| part.as_str().map(shell_quote).ok_or_else(invalid))
+        .collect::<Result<Vec<String>, ToolOutput>>()?;
+    if parts[0] == "''" {
+        return Err(invalid());
+    }
+    Ok(parts.join(" "))
+}
+
+fn shell_quote(word: &str) -> String {
+    let is_plain = !word.is_empty()
+        && word
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "_@%+=:,./-".contains(c));
+    if is_plain {
+        word.to_string()
+    } else {
+        format!("'{}'", word.replace('\'', "'\\''"))
     }
 }
 
@@ -92,12 +128,14 @@ mod tests {
     fn test_types_command_and_presses_enter() {
         let mut tmux = tmux_with(vec![window(3, "shell", "zsh", "/")]);
         tmux.expect_send_keys()
-            .with(eq(3), eq("cargo test"), eq(true))
+            .with(eq(3), eq("cargo test --lib"), eq(true))
             .times(1)
             .return_once(|_, _, _| Ok(()));
 
-        let output = SendCommand::new(Arc::new(tmux))
-            .call(&json!({ "index": 3, "command": "cargo test" }), &caller());
+        let output = SendCommand::new(Arc::new(tmux)).call(
+            &json!({ "index": 3, "command": ["cargo", "test", "--lib"] }),
+            &caller(),
+        );
 
         assert_eq!(
             output,
@@ -110,7 +148,7 @@ mod tests {
         let tmux = tmux_with(vec![window(3, "claude", "claude", "/")]);
 
         let output = SendCommand::new(Arc::new(tmux))
-            .call(&json!({ "index": 3, "command": "ls" }), &caller());
+            .call(&json!({ "index": 3, "command": ["ls"] }), &caller());
 
         assert!(output.is_error);
         assert!(output.text.contains("use send_prompt"));
@@ -129,13 +167,39 @@ mod tests {
     }
 
     #[test]
+    fn test_quotes_arguments_only_when_needed() {
+        let command = command_argument(&json!({
+            "command": ["grep", "-r", "it's here", "a b", "", "$HOME", "src/main.rs"]
+        }));
+        assert_eq!(
+            command,
+            Ok(r#"grep -r 'it'\''s here' 'a b' '' '$HOME' src/main.rs"#.to_string())
+        );
+    }
+
+    #[test]
+    fn test_rejects_invalid_commands() {
+        for command in [
+            json!("ls -la"),
+            json!([]),
+            json!(["ls", 1]),
+            json!([""]),
+            json!(null),
+        ] {
+            let error = command_argument(&json!({ "command": command })).unwrap_err();
+            assert!(error.is_error);
+            assert!(error.text.starts_with("Invalid command"), "{}", error.text);
+        }
+    }
+
+    #[test]
     fn test_send_failure_is_tool_error() {
         let mut tmux = tmux_with(vec![window(3, "shell", "zsh", "/")]);
         tmux.expect_send_keys()
             .return_once(|_, _, _| Err(TmuxError::WindowNotFound));
 
         let output = SendCommand::new(Arc::new(tmux))
-            .call(&json!({ "index": 3, "command": "ls" }), &caller());
+            .call(&json!({ "index": 3, "command": ["ls"] }), &caller());
 
         assert_eq!(
             output.text,
@@ -149,5 +213,9 @@ mod tests {
         assert_eq!(tool.name(), "send_command");
         assert!(tool.description().contains("index"));
         assert_eq!(tool.input_schema()["required"], json!(["index", "command"]));
+        assert_eq!(
+            tool.input_schema()["properties"]["command"]["type"],
+            "array"
+        );
     }
 }
