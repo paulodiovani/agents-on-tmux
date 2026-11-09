@@ -52,6 +52,9 @@ pub trait Tmux {
     fn capture_pane(&self, id: u32, history: u32) -> Result<String, TmuxError>;
     /// Returns the id of the window holding the given pane (`%N`).
     fn window_for_pane(&self, pane_id: &str) -> Result<u32, TmuxError>;
+    /// Types `text` literally into the window's active pane, then presses
+    /// Enter when `enter` is set.
+    fn send_keys(&self, id: u32, text: &str, enter: bool) -> Result<(), TmuxError>;
 }
 
 pub const SESSION_NAME: &str = "agents-on-tmux";
@@ -585,6 +588,21 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
             .trim()
             .parse::<u32>()
             .map_err(|_| TmuxError::WindowNotFound)
+    }
+
+    /// Types `text` literally into the window's active pane, then presses
+    /// Enter when `enter` is set.
+    fn send_keys(&self, id: u32, text: &str, enter: bool) -> Result<(), TmuxError> {
+        let target = target(&self.session, Some(&id.to_string()), None);
+        if !text.is_empty() {
+            self.executor
+                .execute(&["send-keys", "-t", &target, "-l", "--", text])?;
+        }
+        if enter {
+            self.executor
+                .execute(&["send-keys", "-t", &target, "Enter"])?;
+        }
+        Ok(())
     }
 }
 
@@ -1363,6 +1381,47 @@ mod tests {
             driver.window_for_pane("%1"),
             Err(TmuxError::WindowNotFound)
         ));
+    }
+
+    fn send_keys_commands(text: &str, enter: bool) -> Vec<Vec<String>> {
+        let executor = MockCommandExecutor::with_session();
+        let driver = TmuxDriver::with_executor(executor);
+        driver.send_keys(2, text, enter).unwrap();
+        driver.executor.commands.borrow().clone()
+    }
+
+    #[test]
+    fn test_send_keys_types_literally_then_presses_enter() {
+        assert_eq!(
+            send_keys_commands("-n ls", true),
+            [
+                vec!["send-keys", "-t", "agents-on-tmux:2", "-l", "--", "-n ls"],
+                vec!["send-keys", "-t", "agents-on-tmux:2", "Enter"],
+            ]
+        );
+    }
+
+    #[test]
+    fn test_send_keys_without_enter() {
+        assert_eq!(
+            send_keys_commands("ls", false),
+            [vec![
+                "send-keys",
+                "-t",
+                "agents-on-tmux:2",
+                "-l",
+                "--",
+                "ls"
+            ]]
+        );
+    }
+
+    #[test]
+    fn test_send_keys_enter_only() {
+        assert_eq!(
+            send_keys_commands("", true),
+            [vec!["send-keys", "-t", "agents-on-tmux:2", "Enter"]]
+        );
     }
 
     #[test]

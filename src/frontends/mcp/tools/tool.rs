@@ -2,6 +2,7 @@ use std::path::Path;
 
 use serde_json::Value;
 
+use crate::backends::agents::{self, Agent};
 use crate::backends::tmux::{Tmux, Window};
 
 /// An MCP tool exposed to agents through the AOT MCP server.
@@ -84,6 +85,19 @@ pub fn index_argument(arguments: &Value) -> Result<u32, ToolOutput> {
         })
 }
 
+/// Reads a required, non-blank string argument.
+pub fn text_argument(arguments: &Value, name: &str) -> Result<String, ToolOutput> {
+    match arguments.get(name) {
+        None => Err(ToolOutput::error(format!(
+            "Missing required argument: {name}"
+        ))),
+        Some(Value::String(text)) if !text.trim().is_empty() => Ok(text.clone()),
+        Some(value) => Err(ToolOutput::error(format!(
+            "Invalid {name} {value}: pass a non-empty string"
+        ))),
+    }
+}
+
 /// Resolves the optional `dir` argument to an existing directory: relative paths
 /// are taken from `default_dir`, and a missing argument means `default_dir`.
 pub fn dir_argument(arguments: &Value, default_dir: &Path) -> Result<String, ToolOutput> {
@@ -131,6 +145,42 @@ pub fn caller_window(tmux: &dyn Tmux, context: &CallContext) -> Result<Window, T
         ))
     })?;
     find_window(tmux, index)
+}
+
+/// Resolves and validates the `index` target of a send tool: the window must
+/// exist, be an agent window exactly when `agent` is set, and not be the caller's own.
+pub fn send_target(
+    tmux: &dyn Tmux,
+    arguments: &Value,
+    context: &CallContext,
+    agent: bool,
+) -> Result<Window, ToolOutput> {
+    let index = index_argument(arguments)?;
+    let window = find_window(tmux, index)?;
+    match (agent, agents::is_agent(&window.running_command)) {
+        (true, None) => {
+            return Err(ToolOutput::error(format!(
+                "Window {index} is not an agent window; use send_command to run commands in it"
+            )));
+        }
+        (false, Some(found)) => {
+            return Err(ToolOutput::error(format!(
+                "Window {index} runs an agent ({}); use send_prompt to give it a prompt",
+                found.name()
+            )));
+        }
+        _ => {}
+    }
+    let own_index = context
+        .pane
+        .as_deref()
+        .and_then(|pane| tmux.window_for_pane(pane).ok());
+    if own_index == Some(index) {
+        return Err(ToolOutput::error(format!(
+            "Window {index} is your own window; send to another window"
+        )));
+    }
+    Ok(window)
 }
 
 #[cfg(test)]
@@ -309,5 +359,110 @@ pub(super) mod tests {
             error.text,
             "Failed to find the calling window (pane %3): Window not found"
         );
+    }
+
+    fn send_tmux(windows: Vec<Window>, own_index: Option<u32>) -> MockTmux {
+        let mut tmux = MockTmux::new();
+        tmux.expect_list_windows()
+            .returning(move || Ok(windows.clone()));
+        tmux.expect_window_for_pane()
+            .returning(move |_| own_index.ok_or(TmuxError::WindowNotFound));
+        tmux
+    }
+
+    fn shell_and_agent() -> Vec<Window> {
+        vec![
+            window(1, "shell", "zsh", "/"),
+            window(2, "claude", "claude", "/"),
+        ]
+    }
+
+    #[test]
+    fn test_send_target_accepts_matching_kind() {
+        let tmux = send_tmux(shell_and_agent(), Some(5));
+        let context = caller_context();
+        assert_eq!(
+            send_target(&tmux, &json!({ "index": 1 }), &context, false)
+                .unwrap()
+                .id,
+            1
+        );
+        assert_eq!(
+            send_target(&tmux, &json!({ "index": 2 }), &context, true)
+                .unwrap()
+                .id,
+            2
+        );
+    }
+
+    #[test]
+    fn test_send_target_rejects_wrong_kind() {
+        let tmux = send_tmux(shell_and_agent(), None);
+        let context = CallContext::default();
+
+        let error = send_target(&tmux, &json!({ "index": 1 }), &context, true).unwrap_err();
+        assert!(
+            error
+                .text
+                .starts_with("Window 1 is not an agent window; use send_command")
+        );
+
+        let error = send_target(&tmux, &json!({ "index": 2 }), &context, false).unwrap_err();
+        assert!(
+            error
+                .text
+                .starts_with("Window 2 runs an agent (Claude); use send_prompt")
+        );
+    }
+
+    #[test]
+    fn test_send_target_rejects_own_window() {
+        let tmux = send_tmux(shell_and_agent(), Some(2));
+        let error =
+            send_target(&tmux, &json!({ "index": 2 }), &caller_context(), true).unwrap_err();
+        assert_eq!(
+            error.text,
+            "Window 2 is your own window; send to another window"
+        );
+    }
+
+    #[test]
+    fn test_send_target_allows_unknown_caller() {
+        let tmux = send_tmux(shell_and_agent(), None);
+        assert!(send_target(&tmux, &json!({ "index": 2 }), &caller_context(), true).is_ok());
+    }
+
+    #[test]
+    fn test_send_target_propagates_index_and_lookup_errors() {
+        let tmux = send_tmux(shell_and_agent(), None);
+        let context = CallContext::default();
+        assert!(
+            send_target(&tmux, &json!({}), &context, false)
+                .unwrap_err()
+                .text
+                .starts_with("Missing")
+        );
+        assert!(
+            send_target(&tmux, &json!({ "index": 9 }), &context, false)
+                .unwrap_err()
+                .text
+                .starts_with("No window")
+        );
+    }
+
+    #[test]
+    fn test_text_argument() {
+        assert_eq!(
+            text_argument(&json!({ "a": "x y" }), "a"),
+            Ok("x y".to_string())
+        );
+        assert_eq!(
+            text_argument(&json!({}), "a").unwrap_err().text,
+            "Missing required argument: a"
+        );
+        for value in [json!(""), json!("  "), json!(1)] {
+            let error = text_argument(&json!({ "a": value }), "a").unwrap_err();
+            assert!(error.text.starts_with("Invalid a"), "{}", error.text);
+        }
     }
 }

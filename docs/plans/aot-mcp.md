@@ -37,7 +37,7 @@ Agents running inside AOT's nested tmux session can list, create, read, and send
 
 - `create_window(&NewWindow { name, dir, command: Vec<String>, detached })` (`new-window -P -F '#{window_index}' [-d] [-n name] [-c dir] [program args...]`; with several entries tmux runs the program directly, no shell parsing), returning the window found by the printed index; the TUI passes only the name, keeping its behavior.
 - `capture_pane(index, history)` → `capture-pane -p -J -t <session>:<index> -S -<history>` (visible screen plus `history` scrollback lines); `read_window` drops trailing blank lines and keeps the last `lines`.
-- `send_keys(index, text, enter)` → `send-keys -t <session>:<index> -l <text>` then `Enter` (literal mode so text is never interpreted as key names).
+- `send_keys(index, text, enter)` → `send-keys -t <session>:<index> -l -- <text>` then `send-keys ... Enter` (literal mode and `--` so text is never interpreted as key names or flags; empty text sends only Enter).
 - `window_for_pane(pane_id)` → `display-message -p -t %N '#{window_index}'`.
 - `Window` already carries `running_command` and `current_dir`; agent vs. plain window decided with `agents::is_agent`.
 
@@ -57,9 +57,9 @@ All take/return window indexes (field/arg `index`, integer). Names are the final
 | `send_prompt` | `index`, `prompt` | confirmation; prompt delivered + Enter |
 | `respond_prompt` | `index`, `prompt` | like `send_prompt`, prefixed with sender (`[from window N] ...`) and a hint on how to reply; sender resolved from the connection's pane |
 
-Guardrails: unknown/non-nested indexes → tool error; `send_*` refuse to target the caller's own window; `lines` clamped.
+Guardrails: unknown/non-nested indexes → tool error; `send_*` refuse to target the caller's own window (when the caller's pane is known); `send_command` only targets non-agent windows and `send_prompt`/`respond_prompt` only agent windows, with errors pointing to the right tool; `lines` clamped.
 
-Open points to settle during implementation (ask before deciding): multi-line prompts (plain `send-keys -l` vs. bracketed paste via `load-buffer`/`paste-buffer -p`), whether `send_prompt` also gets the sender prefix, and per-agent submit delay.
+Settled (before task 8): prompts are delivered with bracketed paste (`set-buffer` + `paste-buffer -p -d`) so newlines stay in one prompt; a fixed ~200 ms delay separates the pasted text from Enter; `send_prompt` has no sender prefix (only `respond_prompt` adds it).
 
 ## Workflow
 
@@ -77,7 +77,7 @@ Open points to settle during implementation (ask before deciding): multi-line pr
 - [x] 5. `read_agent` (alias)
 - [x] 6. `new_window` (+ `create_window` cwd/command)
 - [x] 7. `new_agent` (+ `window_for_pane`, moved up from task 10 for the caller's default command)
-- [ ] 8. `send_command` (+ `send_keys`)
+- [x] 8. `send_command` (+ `send_keys`)
 - [ ] 9. `send_prompt`
 - [ ] 10. `respond_prompt` (sender resolution via `window_for_pane`)
 - [ ] 11. Docs: user manual page with per-agent MCP config snippets, README mention, `AGENTS.md` architecture section (add `frontends/mcp/`)

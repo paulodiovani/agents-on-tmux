@@ -743,6 +743,10 @@ mod tests {
         fn window_for_pane(&self, _pane_id: &str) -> Result<u32, TmuxError> {
             Err(TmuxError::WindowNotFound)
         }
+
+        fn send_keys(&self, _id: u32, _text: &str, _enter: bool) -> Result<(), TmuxError> {
+            Ok(())
+        }
     }
 
     fn command_failed(command: &str) -> TmuxError {

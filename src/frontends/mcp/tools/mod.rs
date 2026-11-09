@@ -5,6 +5,7 @@ mod new_window;
 mod read_agent;
 mod read_window;
 mod registry;
+mod send_command;
 mod tool;
 
 pub use registry::all_tools;
