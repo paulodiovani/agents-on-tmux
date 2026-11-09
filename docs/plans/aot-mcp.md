@@ -56,7 +56,7 @@ All take/return window indexes (field/arg `index`, integer). Names are the final
 | `new_agent` | `command?` (enum of known agent commands; default: caller's agent if the caller is an agent, else error asking for it), `args?` (string array passed to the agent as-is), `dir?` (default AOT's PWD) | `{index, title, agent, cwd}`; created detached; after ~500 ms the window (same index and pane pid) must still exist, else a tool error (agent not installed or failed on startup) |
 | `send_command` | `index`, `command` (array: program then arguments; each element shell-quoted only when needed and joined, so no shell syntax is interpreted) | confirmation; types the command and Enter |
 | `send_prompt` | `index`, `prompt` | confirmation; prompt delivered + Enter |
-| `respond_prompt` | `index`, `prompt` | like `send_prompt`, prefixed with sender (`[from window N] ...`) and a hint on how to reply; sender resolved from the connection's pane |
+| `respond_prompt` | `index`, `prompt` | like `send_prompt`, delivered as `[from window N] <prompt>` plus a hint to answer with `respond_prompt` and index N; sender resolved from the connection's pane on each call and must be an agent window |
 
 Guardrails: unknown/non-nested indexes → tool error; `send_*` refuse to target the caller's own window (when the caller's pane is known); `send_command` only targets non-agent windows and `send_prompt`/`respond_prompt` only agent windows, with errors pointing to the right tool; `lines` clamped.
 
@@ -80,5 +80,5 @@ Settled (before task 8): prompts are delivered with bracketed paste (`set-buffer
 - [x] 7. `new_agent` (+ `window_for_pane`, moved up from task 10 for the caller's default command)
 - [x] 8. `send_command` (+ `send_keys`)
 - [x] 9. `send_prompt` (+ `paste_text`)
-- [ ] 10. `respond_prompt` (sender resolution via `window_for_pane`)
+- [x] 10. `respond_prompt` (sender resolution via `window_for_pane`)
 - [ ] 11. Docs: user manual page with per-agent MCP config snippets, README mention, `AGENTS.md` architecture section (add `frontends/mcp/`)

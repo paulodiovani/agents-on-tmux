@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 use super::tool::{CallContext, Tool, ToolOutput, send_target, text_argument};
 use crate::backends::tmux::Tmux;
 
-const SUBMIT_DELAY: Duration = Duration::from_millis(200);
+pub const SUBMIT_DELAY: Duration = Duration::from_millis(200);
 
 /// Gives a prompt to an agent window of the AOT session.
 pub struct SendPrompt {
@@ -31,7 +31,7 @@ impl Tool for SendPrompt {
     }
 
     fn description(&self) -> &'static str {
-        "Give a prompt to an agent in the AOT session and submit it, as if the user typed it (the agent is not told who sent it). Takes the integer window index from list_agents (never a title) and the prompt; multi-line prompts are fine. The agent works asynchronously: call read_agent afterwards to follow its progress. Non-agent windows are refused; use send_command for them. Your own window is refused."
+        "Give a prompt to an agent in the AOT session and submit it, as if the user typed it (the agent is not told who sent it; use respond_prompt to sign it with your window). Takes the integer window index from list_agents (never a title) and the prompt; multi-line prompts are fine. The agent works asynchronously: call read_agent afterwards to follow its progress. Non-agent windows are refused; use send_command for them. Your own window is refused."
     }
 
     fn input_schema(&self) -> Value {
