@@ -23,6 +23,10 @@ impl Tool for ListAgents {
         "list_agents"
     }
 
+    fn read_only(&self) -> bool {
+        true
+    }
+
     fn description(&self) -> &'static str {
         "List agents: windows running an AI coding agent. Returns {\"agents\": [{\"index\", \"name\", \"agent\", \"command\", \"current_dir\", \"active\"}]}."
     }
@@ -117,6 +121,7 @@ mod tests {
     fn test_metadata() {
         let tool = ListAgents::new(Arc::new(MockTmux::new()));
         assert_eq!(tool.name(), "list_agents");
+        assert!(tool.read_only());
         assert!(tool.description().contains("index"));
         assert_eq!(
             tool.input_schema(),

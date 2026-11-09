@@ -23,6 +23,10 @@ impl Tool for ListWindows {
         "list_windows"
     }
 
+    fn read_only(&self) -> bool {
+        true
+    }
+
     fn description(&self) -> &'static str {
         "List windows running a shell or a command. Returns {\"windows\": [{\"index\", \"name\", \"command\", \"current_dir\", \"active\"}]}."
     }
@@ -116,6 +120,7 @@ mod tests {
     fn test_metadata() {
         let tool = ListWindows::new(Arc::new(MockTmux::new()));
         assert_eq!(tool.name(), "list_windows");
+        assert!(tool.read_only());
         assert!(tool.description().contains("index"));
         assert_eq!(
             tool.input_schema(),
