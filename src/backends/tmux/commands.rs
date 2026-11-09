@@ -65,8 +65,8 @@ pub trait Tmux {
     /// Types `text` literally into the window's active pane, then presses
     /// Enter when `enter` is set.
     fn send_keys(&self, id: u32, text: &str, enter: bool) -> Result<(), TmuxError>;
-    /// Pastes `text` into the window's active pane as a bracketed paste, so
-    /// newlines stay part of the text instead of acting as Enter.
+    /// Pastes `text` into the window's active pane, as a bracketed paste when the
+    /// pane's application enables it, so newlines stay part of the text.
     fn paste_buffer(&self, id: u32, text: &str) -> Result<(), TmuxError>;
     /// Sets the window's name directly, without prompting the user.
     fn rename_window(&self, id: u32, name: &str) -> Result<(), TmuxError>;
@@ -285,9 +285,12 @@ impl<E: CommandExecutor> TmuxDriver<E> {
     }
 }
 
-/// Formats a tmux target string from session, window, and pane components.
-/// Returns "session:window.pane", "session:window", "session:.pane", or "session:"
-/// depending on which components are provided.
+/// Keeps a window name literal, so tmux does not expand formats in it.
+fn escape_formats(name: &str) -> String {
+    name.replace('#', "##")
+}
+
+/// Builds a tmux target such as `session:window.pane`.
 fn target(session: &str, window: Option<&str>, pane: Option<&str>) -> String {
     match (window, pane) {
         (Some(w), Some(p)) => format!("{}:{}.{}", session, w, p),
@@ -478,17 +481,21 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
         detached: bool,
     ) -> Result<Window, TmuxError> {
         let session = target(&self.session, None, None);
+        let name = name.map(escape_formats);
         let mut args = vec!["new-window", "-t", &session, "-P", "-F", "#{window_index}"];
         if detached {
             args.push("-d");
         }
-        if let Some(name) = name {
-            args.extend(["-n", name]);
+        if let Some(name) = &name {
+            args.extend(["-n", name.as_str()]);
         }
         if let Some(dir) = dir {
             args.extend(["-c", dir]);
         }
-        args.extend(command.unwrap_or_default().iter().map(String::as_str));
+        if let Some(command) = command {
+            args.push("--");
+            args.extend(command.iter().map(String::as_str));
+        }
         let output = self.executor.execute(&args)?;
         let id = output
             .trim()
@@ -616,8 +623,8 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
         Ok(())
     }
 
-    /// Pastes `text` into the window's active pane as a bracketed paste, so
-    /// newlines stay part of the text instead of acting as Enter.
+    /// Pastes `text` into the window's active pane, as a bracketed paste when the
+    /// pane's application enables it, so newlines stay part of the text.
     fn paste_buffer(&self, id: u32, text: &str) -> Result<(), TmuxError> {
         let target = target(&self.session, Some(&id.to_string()), None);
         let buffer = format!(
@@ -636,7 +643,7 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
     fn rename_window(&self, id: u32, name: &str) -> Result<(), TmuxError> {
         let target = target(&self.session, Some(&id.to_string()), None);
         self.executor
-            .execute(&["rename-window", "-t", &target, "--", name])
+            .execute(&["rename-window", "-t", &target, "--", &escape_formats(name)])
             .map(|_| ())
     }
 }
@@ -997,6 +1004,7 @@ mod tests {
                 "-d",
                 "-c",
                 "/tmp/project",
+                "--",
                 "claude",
                 "--model",
                 "o3",
@@ -1485,6 +1493,40 @@ mod tests {
             ]
         );
         assert_ne!(commands[2][2], buffer);
+    }
+
+    #[test]
+    fn test_rename_window_escapes_formats() {
+        let executor = MockCommandExecutor::with_session();
+        let driver = TmuxDriver::with_executor(executor);
+
+        driver.rename_window(3, "#{pane_id} #(date)").unwrap();
+
+        let commands = driver.executor.commands.borrow();
+        assert_eq!(
+            commands.last().unwrap().as_slice(),
+            [
+                "rename-window",
+                "-t",
+                "agents-on-tmux:3",
+                "--",
+                "##{pane_id} ##(date)"
+            ]
+        );
+    }
+
+    #[test]
+    fn test_create_window_escapes_formats_in_name() {
+        let executor = MockCommandExecutor::with_session();
+        let driver = TmuxDriver::with_executor(executor);
+
+        driver
+            .create_window(Some("#(date)"), None, None, false)
+            .unwrap();
+
+        let commands = driver.executor.commands.borrow();
+        let new_window = commands.iter().find(|cmd| cmd[0] == "new-window").unwrap();
+        assert!(new_window.windows(2).any(|pair| pair == ["-n", "##(date)"]));
     }
 
     #[test]

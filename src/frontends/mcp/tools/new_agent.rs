@@ -7,7 +7,7 @@ use serde_json::{Value, json};
 
 use super::tool::{CallContext, Tool, ToolOutput, caller_window, dir_argument, name_argument};
 use crate::backends::agents::{self, Agent, GenericAgent};
-use crate::backends::tmux::{Tmux, Window};
+use crate::backends::tmux::{Tmux, TmuxError, Window};
 
 const STARTUP_WAIT: Duration = Duration::from_millis(500);
 
@@ -37,14 +37,7 @@ impl NewAgent {
         let alive = windows
             .iter()
             .any(|w| w.id == window.id && w.pane_pid == window.pane_pid);
-        if alive {
-            Ok(())
-        } else {
-            Err(ToolOutput::error(format!(
-                "'{}' exited right after starting: it may not be installed, or it failed on startup (check its args)",
-                agent.command()
-            )))
-        }
+        if alive { Ok(()) } else { Err(exited(agent)) }
     }
 
     fn agent(&self, arguments: &Value, context: &CallContext) -> Result<GenericAgent, ToolOutput> {
@@ -137,6 +130,7 @@ impl Tool for NewAgent {
                 .create_window(name.as_deref(), Some(&dir), Some(&command), true)
             {
                 Ok(window) => window,
+                Err(TmuxError::WindowNotFound) => return exited(&agent),
                 Err(error) => return ToolOutput::error(format!("Failed to start agent: {error}")),
             };
         if let Err(error) = self.check_still_running(&window, &agent) {
@@ -162,6 +156,13 @@ fn args_argument(arguments: &Value) -> Result<Vec<String>, ToolOutput> {
         .iter()
         .map(|arg| arg.as_str().map(str::to_string).ok_or_else(invalid))
         .collect()
+}
+
+fn exited(agent: &GenericAgent) -> ToolOutput {
+    ToolOutput::error(format!(
+        "'{}' exited right after starting: it may not be installed, or it failed on startup (check its args)",
+        agent.command()
+    ))
 }
 
 fn known_commands() -> String {
@@ -424,7 +425,7 @@ mod tests {
     }
 
     #[test]
-    fn test_tmux_failure_is_tool_error() {
+    fn test_window_gone_before_lookup_counts_as_exited() {
         let mut tmux = MockTmux::new();
         tmux.expect_create_window()
             .return_once(|_, _, _, _| Err(TmuxError::WindowNotFound));
@@ -432,7 +433,31 @@ mod tests {
         let output = tool(tmux).call(&json!({ "command": "codex" }), &CallContext::default());
 
         assert!(output.is_error);
-        assert_eq!(output.text, "Failed to start agent: Window not found");
+        assert!(
+            output
+                .text
+                .starts_with("'codex' exited right after starting")
+        );
+    }
+
+    #[test]
+    fn test_tmux_failure_is_tool_error() {
+        let mut tmux = MockTmux::new();
+        tmux.expect_create_window().return_once(|_, _, _, _| {
+            Err(TmuxError::CommandFailed {
+                message: "boom".into(),
+                stderr: String::new(),
+                code: Some(1),
+            })
+        });
+
+        let output = tool(tmux).call(&json!({ "command": "codex" }), &CallContext::default());
+
+        assert!(output.is_error);
+        assert_eq!(
+            output.text,
+            "Failed to start agent: Command failed: boom (exit 1)"
+        );
     }
 
     #[test]
