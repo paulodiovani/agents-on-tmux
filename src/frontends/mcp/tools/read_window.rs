@@ -56,13 +56,16 @@ impl Tool for ReadWindow {
             Ok(index) => index,
             Err(error) => return error,
         };
+
         let lines = match lines_argument(arguments) {
             Ok(lines) => lines,
             Err(error) => return error,
         };
+
         if let Err(error) = find_window(self.tmux.as_ref(), index) {
             return error;
         }
+
         match self.tmux.capture_pane(index, lines) {
             Ok(capture) => ToolOutput::text(last_lines(&capture, lines as usize)),
             Err(error) => ToolOutput::error(format!("Failed to read window {index}: {error}")),

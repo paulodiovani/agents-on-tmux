@@ -52,10 +52,12 @@ impl Tool for SendCommand {
             Ok(command) => command,
             Err(error) => return error,
         };
+
         let window = match send_target(self.tmux.as_ref(), arguments, context, false) {
             Ok(window) => window,
             Err(error) => return error,
         };
+
         match self.tmux.send_keys(window.id, &command, true) {
             Ok(()) => ToolOutput::text(format!("Sent command to window {}", window.id)),
             Err(error) => ToolOutput::error(format!(

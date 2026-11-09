@@ -51,13 +51,16 @@ impl Tool for RenameWindow {
             Ok(None) => return ToolOutput::error("Missing required argument: name"),
             Err(error) => return error,
         };
+
         let index = match index_argument(arguments) {
             Ok(index) => index,
             Err(error) => return error,
         };
+
         if let Err(error) = find_window(self.tmux.as_ref(), index) {
             return error;
         }
+
         match self.tmux.rename_window(index, &name) {
             Ok(()) => ToolOutput::json(json!({ "index": index, "name": name })),
             Err(error) => ToolOutput::error(format!("Failed to rename window {index}: {error}")),

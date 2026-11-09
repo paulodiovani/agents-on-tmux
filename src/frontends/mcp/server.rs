@@ -49,12 +49,15 @@ impl McpServer {
             path: path.to_path_buf(),
             source,
         };
+
         match std::fs::remove_file(path) {
             Err(error) if error.kind() != io::ErrorKind::NotFound => {
                 return Err(socket_error(error));
             }
+
             _ => {}
         }
+
         if let Some(dir) = path.parent() {
             DirBuilder::new()
                 .recursive(true)
@@ -62,6 +65,7 @@ impl McpServer {
                 .create(dir)
                 .map_err(socket_error)?;
         }
+
         let listener = UnixListener::bind(path).map_err(socket_error)?;
         let server = Self {
             path: path.to_path_buf(),
@@ -104,6 +108,7 @@ fn serve(listener: UnixListener, protocol: Arc<dyn Protocol + Send + Sync>) {
                     }
                 });
             }
+
             Err(error) => logger::error(&format!("mcp: accept failed: {error}")),
         }
     }
@@ -130,6 +135,7 @@ fn handle_connection(stream: UnixStream, protocol: &dyn Protocol) -> io::Result<
         if line.trim().is_empty() {
             continue;
         }
+
         if let Some(reply) = protocol.handle(&line, &context) {
             writer.write_all(reply.as_bytes())?;
             writer.write_all(b"\n")?;

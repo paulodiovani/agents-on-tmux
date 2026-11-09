@@ -36,6 +36,7 @@ impl Tool for ListAgents {
             Ok(windows) => windows,
             Err(error) => return ToolOutput::error(format!("Failed to list agents: {error}")),
         };
+
         let agents: Vec<Value> = windows
             .iter()
             .filter_map(|window| {

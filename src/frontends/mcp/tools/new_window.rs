@@ -57,14 +57,17 @@ impl Tool for NewWindow {
             Ok(command) => command,
             Err(error) => return error,
         };
+
         let name = match name_argument(arguments) {
             Ok(name) => name,
             Err(error) => return error,
         };
+
         let dir = match dir_argument(arguments, &self.default_dir) {
             Ok(dir) => dir,
             Err(error) => return error,
         };
+
         match self
             .tmux
             .create_window(name.as_deref(), Some(&dir), command.as_deref(), true)

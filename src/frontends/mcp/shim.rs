@@ -30,6 +30,7 @@ pub fn run(
         io::ErrorKind::NotFound | io::ErrorKind::ConnectionRefused => {
             ShimError::NotRunning(path.to_path_buf())
         }
+
         _ => ShimError::Io(error),
     })?;
     let handshake = json!({ "pane": pane }).to_string();
@@ -61,6 +62,7 @@ fn pump(mut from: impl Read, to: &mut impl Write) -> io::Result<()> {
             Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
             Err(error) => return Err(error),
         };
+
         to.write_all(&buffer[..read])?;
         to.flush()?;
     }

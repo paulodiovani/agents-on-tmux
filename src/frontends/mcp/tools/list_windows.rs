@@ -36,6 +36,7 @@ impl Tool for ListWindows {
             Ok(windows) => windows,
             Err(error) => return ToolOutput::error(format!("Failed to list windows: {error}")),
         };
+
         let windows: Vec<Value> = windows
             .iter()
             .filter(|window| agents::is_agent(&window.running_command).is_none())

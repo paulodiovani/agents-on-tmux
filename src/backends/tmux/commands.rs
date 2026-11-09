@@ -483,6 +483,7 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
         let session = target(&self.session, None, None);
         let name = name.map(escape_formats);
         let mut args = vec!["new-window", "-t", &session, "-P", "-F", "#{window_index}"];
+
         if detached {
             args.push("-d");
         }
@@ -496,6 +497,7 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
             args.push("--");
             args.extend(command.iter().map(String::as_str));
         }
+
         let output = self.executor.execute(&args)?;
         let id = output
             .trim()
@@ -616,10 +618,12 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
             self.executor
                 .execute(&["send-keys", "-t", &target, "-l", "--", text])?;
         }
+
         if enter {
             self.executor
                 .execute(&["send-keys", "-t", &target, "Enter"])?;
         }
+
         Ok(())
     }
 

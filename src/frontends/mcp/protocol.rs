@@ -57,7 +57,9 @@ impl McpHandler {
         if method == "initialize" {
             return Ok(initialize(params));
         }
+
         check_modern_meta(params)?;
+
         match method {
             "ping" => Ok(json!({})),
             "server/discover" => Ok(discover()),
@@ -94,11 +96,13 @@ impl McpHandler {
             .get("name")
             .and_then(Value::as_str)
             .ok_or_else(|| RpcError::new(INVALID_PARAMS, "Missing tool name"))?;
+
         let tool = self
             .tools
             .iter()
             .find(|tool| tool.name() == name)
             .ok_or_else(|| RpcError::new(INVALID_PARAMS, format!("Unknown tool: {name}")))?;
+
         let arguments = match params.get("arguments") {
             None => json!({}),
             Some(arguments) if arguments.is_object() => arguments.clone(),
@@ -118,6 +122,7 @@ impl McpHandler {
         if let Some(structured) = output.structured {
             result["structuredContent"] = structured;
         }
+
         Ok(result)
     }
 }
@@ -130,6 +135,7 @@ impl Protocol for McpHandler {
                 RpcError::new(PARSE_ERROR, "Parse error"),
             ));
         };
+
         let Some(message) = message.as_object() else {
             return Some(error_response(&Value::Null, invalid_request()));
         };
@@ -141,7 +147,9 @@ impl Protocol for McpHandler {
             let id = id.filter(|id| is_valid_id(id)).unwrap_or(&Value::Null);
             return Some(error_response(id, invalid_request()));
         };
+
         let id = id?;
+
         if !is_valid_id(id) {
             return Some(error_response(&Value::Null, invalid_request()));
         }

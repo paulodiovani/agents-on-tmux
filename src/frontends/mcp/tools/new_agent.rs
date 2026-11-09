@@ -51,6 +51,7 @@ impl NewAgent {
                     ))
                 })
             }
+
             Some(Value::String(command)) => agents::is_agent(command).ok_or_else(|| {
                 ToolOutput::error(format!(
                     "'{command}' is not a known agent command; pass one of the {}",
@@ -110,18 +111,22 @@ impl Tool for NewAgent {
             Ok(agent) => agent,
             Err(error) => return error,
         };
+
         let args = match args_argument(arguments) {
             Ok(args) => args,
             Err(error) => return error,
         };
+
         let name = match name_argument(arguments) {
             Ok(name) => name,
             Err(error) => return error,
         };
+
         let dir = match dir_argument(arguments, &self.default_dir) {
             Ok(dir) => dir,
             Err(error) => return error,
         };
+
         let mut command = vec![agent.command().to_string()];
         command.extend(args);
         let window =
