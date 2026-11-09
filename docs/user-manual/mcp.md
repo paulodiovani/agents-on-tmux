@@ -56,6 +56,28 @@ Project scope, in `opencode.jsonc` at the project root (see [OpenCode MCP server
 
 Use `opencode mcp add --global` to make it available in every project.
 
+AOT identifies each agent by its own window, so each OpenCode instance must run its own server (see [OpenCode CLI](https://opencode.ai/docs/cli/)). Either:
+
+- start OpenCode with `opencode --standalone` (with `new_agent`, pass `"args": ["--standalone"]`), or
+- run `opencode service set disabled true` once, so every OpenCode instance runs standalone.
+
+#### omp
+
+User scope, in `~/.omp/agent/mcp.json` (project scope: `.omp/mcp.json`; see [omp MCP](https://omp.sh/docs/mcp)):
+
+```json
+{
+  "mcpServers": {
+    "aot": {
+      "command": "aot",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Or add it with `/mcp add` in a session. omp also imports MCP servers configured for other agents, such as Claude Code, so an existing `aot` entry there works too. Run `/mcp reload` in a running session to pick up changes.
+
 #### Pi
 
 User scope, in `~/.pi/agent/mcp.json` (project scope: `.pi/mcp.json`):
@@ -115,7 +137,7 @@ Prompts sent with `send_prompt` and `respond_prompt` are signed with the sender'
 
 The receiving agent knows who sent the prompt and, when a response is needed, answers with `respond_prompt` using that index. Not every prompt needs a response.
 
-Sending and responding to prompts requires AOT to identify the sending agent, which works when the agent starts `aot mcp` itself, from its own window. OpenCode starts MCP servers from a shared background service instead, so OpenCode agents can receive prompts but cannot send or respond to them.
+Sending and responding to prompts requires AOT to identify the sending agent, which works when the agent starts `aot mcp` itself, from its own window. For OpenCode, see its configuration above.
 
 ### Multiple AOT instances
 
@@ -128,5 +150,6 @@ All AOT instances share the same session, so a single MCP server is enough: the 
 | `AOT MCP not running (no server at ...)`      | AOT is not running. Start AOT, then reconnect the agent's MCP server.                         |
 | `AOT closed the connection (did AOT exit?)`   | AOT exited or was restarted after the agent connected. Reconnect the agent's MCP server.      |
 | `You are not running inside AOT, ...`         | The agent was not started in a window of the AOT session, so it cannot be identified.         |
+| `Failed to identify your own window: ...`     | The agent's MCP server runs outside its window. For OpenCode, which also fails to connect at start in this case, run it standalone (see [OpenCode](#opencode)). |
 
 Run AOT with `--debug` to log MCP server activity to the AOT log file.

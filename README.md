@@ -154,7 +154,7 @@ While AOT runs, agents inside it can orchestrate other windows and agents throug
 | Devin       |   ✔️   |   -   |       -       |        -         |      -      |
 | Hermes      |   -    |   -   |       -       |        -         |      -      |
 | omp         |   ✔️   |   ✔️  |       ✔️      |        ✔️        |      ✔️     |
-| OpenCode    |   ✔️   |   ✔️  |       ✔️      |        ❌         |      ✔️     |
+| OpenCode    |   ✔️   |   ✔️  |       ✔️      |        ✔️        |      ✔️     |
 | Pi          |   ✔️   |   ✔️  |       ✔️      |        ✔️        |      ✔️     |
 
 ✔️ supported, `-` untested, ❌ unsupported.
