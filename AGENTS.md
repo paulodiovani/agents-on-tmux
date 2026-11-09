@@ -32,8 +32,8 @@ Binary crate (`aot`, package name `agents-on-tmux`).
 Two top-level modules under `src/`:
 
 - `backends/` — tmux communication interface
-  - `Tmux` trait defines the contract (session management, window CRUD, split_window, resize_pane, list_keys, show_options, prompt_rename_window, capture_pane, window_for_pane, send_keys, paste_text, set_window_name)
-  - `NewWindow` struct holds `create_window` options (name, dir, command as program + arguments, detached)
+  - `Tmux` trait defines the contract (session management, window CRUD, split_window, resize_pane, list_keys, show_options, prompt_rename_window, capture_pane, window_for_pane, send_keys, paste_buffer, rename_window)
+  - Methods that run a single tmux command are named after it
   - `TmuxDriver<E: CommandExecutor>` implements `Tmux` with dependency injection
   - `CommandExecutor` trait abstracts tmux command execution (real `ShellCommandExecutor` + mock for tests)
   - `Window` struct represents tmux window state (id, name, running_command, started_at, notification_pending, is_active, current_dir)
@@ -53,7 +53,8 @@ Two top-level modules under `src/`:
     - `shim.rs` the `aot mcp` stdio bridge agents spawn; sends the agent's `TMUX_PANE` in a handshake, then copies bytes both ways
     - `protocol.rs` hand-rolled JSON-RPC/MCP handler (`McpHandler`, `Protocol` trait), dual-era: legacy `initialize` and modern per-request `_meta`
     - `tools/` one file per tool implementing the `Tool` trait, registered in `registry.rs`; shared argument and target helpers in `tool.rs`
-    - Agent-visible text (descriptions, instructions, errors) never mentions tmux or other implementation details, and tool descriptions don't point to other tools
+    - Agent-visible text (descriptions, instructions, errors) never mentions tmux or other implementation details; descriptions are short, state only what things are and do, and don't point to other tools
+    - Tool arguments and results use tmux names (`name`, `current_dir`, `active`)
     - Windows are addressed by their tmux window index (`Window.id`), as a plain integer
 
 Presentation belongs to the frontend: backends never carry icons, colors, or any other display data

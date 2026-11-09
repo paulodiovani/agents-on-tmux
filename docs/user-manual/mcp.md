@@ -79,18 +79,20 @@ Configure a local (stdio) MCP server named `aot` that runs `aot` with the single
 
 ### Tools
 
-Windows and agents are addressed by their **index**, the number shown in the TUI, never by title. Indexes can change when windows are moved; agents list again when unsure.
+A **window** is a terminal in the AOT session running a shell or a command; an **agent** is a window running an AI coding agent.
+
+Windows and agents are addressed by their **index**, the number shown in the TUI. Indexes can change when windows are moved.
 
 | Tool             | Description                                                                              |
 | ---------------- | ---------------------------------------------------------------------------------------- |
-| `list_windows`   | List non-agent windows: index, title, command, working directory, active                 |
-| `list_agents`    | List agents: index, title, agent, command, working directory, active                     |
+| `list_windows`   | List windows running a shell or a command: index, name, command, current_dir, active     |
+| `list_agents`    | List agents: index, name, agent, command, current_dir, active                            |
 | `read_window`    | Read the latest output of a window (default 50 lines, max 2000)                          |
 | `read_agent`     | Read the latest output of an agent                                                       |
-| `new_window`     | Open a new shell window, optionally in a given directory                                 |
-| `new_agent`      | Start a new agent (defaults to the caller's agent), with optional arguments and directory |
-| `rename_window`  | Change the title of a window                                                             |
-| `rename_agent`   | Change the title of an agent, including the caller itself                                |
+| `new_window`     | Open a new window running a shell or a given command, with optional name and directory   |
+| `new_agent`      | Start a new agent (defaults to the caller's agent), with optional arguments, name, and directory |
+| `rename_window`  | Rename a window                                                                          |
+| `rename_agent`   | Rename an agent, including the caller itself                                             |
 | `send_command`   | Run a command (program and arguments) in a non-agent window                              |
 | `send_prompt`    | Give a prompt to another agent                                                           |
 | `respond_prompt` | Respond to a prompt received from another agent                                          |
@@ -98,6 +100,7 @@ Windows and agents are addressed by their **index**, the number shown in the TUI
 Notes:
 
 - New windows and agents open in the background; your current view does not switch.
+- A window started with a command closes when the command exits.
 - `new_agent` reports an error when the agent exits right after starting (for example, when it is not installed).
 - `send_command` passes each argument as-is; shell syntax such as pipes or redirection is not interpreted.
 - Agents cannot send commands or prompts to their own window.
