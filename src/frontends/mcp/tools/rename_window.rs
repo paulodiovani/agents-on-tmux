@@ -2,10 +2,10 @@ use std::sync::Arc;
 
 use serde_json::{Value, json};
 
-use super::tool::{CallContext, Tool, ToolOutput, find_window, index_argument, text_argument};
+use super::tool::{CallContext, Tool, ToolOutput, find_window, index_argument, name_argument};
 use crate::backends::tmux::Tmux;
 
-/// Changes the title of a window managed by AOT.
+/// Renames a window managed by AOT.
 pub struct RenameWindow {
     tmux: Arc<dyn Tmux + Send + Sync>,
 }
@@ -23,7 +23,7 @@ impl Tool for RenameWindow {
     }
 
     fn description(&self) -> &'static str {
-        "Change the title of a window managed by AOT. Takes the window's index (never its title) and the new title, a single line. Returns {\"index\", \"title\"}."
+        "Rename a window. Takes the window index and the new name, a single line. Returns {\"index\", \"name\"}."
     }
 
     fn input_schema(&self) -> Value {
@@ -33,21 +33,22 @@ impl Tool for RenameWindow {
                 "index": {
                     "type": "integer",
                     "minimum": 0,
-                    "description": "Index of the window",
+                    "description": "Window index",
                 },
-                "title": {
+                "name": {
                     "type": "string",
-                    "description": "New title, a single line",
+                    "description": "New name, a single line",
                 },
             },
-            "required": ["index", "title"],
+            "required": ["index", "name"],
             "additionalProperties": false,
         })
     }
 
     fn call(&self, arguments: &Value, _context: &CallContext) -> ToolOutput {
-        let title = match title_argument(arguments) {
-            Ok(title) => title,
+        let name = match name_argument(arguments) {
+            Ok(Some(name)) => name,
+            Ok(None) => return ToolOutput::error("Missing required argument: name"),
             Err(error) => return error,
         };
         let index = match index_argument(arguments) {
@@ -57,20 +58,11 @@ impl Tool for RenameWindow {
         if let Err(error) = find_window(self.tmux.as_ref(), index) {
             return error;
         }
-        match self.tmux.set_window_name(index, &title) {
-            Ok(()) => ToolOutput::json(json!({ "index": index, "title": title })),
+        match self.tmux.rename_window(index, &name) {
+            Ok(()) => ToolOutput::json(json!({ "index": index, "name": name })),
             Err(error) => ToolOutput::error(format!("Failed to rename window {index}: {error}")),
         }
     }
-}
-
-fn title_argument(arguments: &Value) -> Result<String, ToolOutput> {
-    let title = text_argument(arguments, "title")?;
-    let title = title.trim();
-    if title.contains(['\n', '\r']) {
-        return Err(ToolOutput::error("Invalid title: it must be a single line"));
-    }
-    Ok(title.to_string())
 }
 
 #[cfg(test)]
@@ -94,48 +86,48 @@ mod tests {
     #[test]
     fn test_renames_window() {
         let mut tmux = tmux_with_window(3);
-        tmux.expect_set_window_name()
+        tmux.expect_rename_window()
             .with(eq(3), eq("tests"))
             .times(1)
             .return_once(|_, _| Ok(()));
 
-        let output = call(tmux, json!({ "index": 3, "title": "  tests " }));
+        let output = call(tmux, json!({ "index": 3, "name": "  tests " }));
 
         assert_eq!(
             output.structured,
-            Some(json!({ "index": 3, "title": "tests" }))
+            Some(json!({ "index": 3, "name": "tests" }))
         );
     }
 
     #[test]
-    fn test_rejects_multi_line_or_blank_title() {
-        let output = call(MockTmux::new(), json!({ "index": 3, "title": "a\nb" }));
-        assert_eq!(output.text, "Invalid title: it must be a single line");
+    fn test_rejects_multi_line_or_blank_name() {
+        let output = call(MockTmux::new(), json!({ "index": 3, "name": "a\nb" }));
+        assert_eq!(output.text, "Invalid name: it must be a single line");
 
-        let output = call(MockTmux::new(), json!({ "index": 3, "title": " " }));
-        assert!(output.text.starts_with("Invalid title"));
+        let output = call(MockTmux::new(), json!({ "index": 3, "name": " " }));
+        assert!(output.text.starts_with("Invalid name"));
     }
 
     #[test]
     fn test_unknown_index_is_tool_error() {
-        let output = call(tmux_with_window(3), json!({ "index": 4, "title": "x" }));
+        let output = call(tmux_with_window(3), json!({ "index": 4, "name": "x" }));
         assert!(output.is_error);
         assert!(output.text.starts_with("No window or agent with index 4"));
     }
 
     #[test]
     fn test_invalid_index_is_tool_error() {
-        let output = call(MockTmux::new(), json!({ "index": "x", "title": "x" }));
+        let output = call(MockTmux::new(), json!({ "index": "x", "name": "x" }));
         assert!(output.text.starts_with("Invalid index"));
     }
 
     #[test]
     fn test_rename_failure_is_tool_error() {
         let mut tmux = tmux_with_window(3);
-        tmux.expect_set_window_name()
+        tmux.expect_rename_window()
             .return_once(|_, _| Err(TmuxError::WindowNotFound));
 
-        let output = call(tmux, json!({ "index": 3, "title": "x" }));
+        let output = call(tmux, json!({ "index": 3, "name": "x" }));
 
         assert_eq!(output.text, "Failed to rename window 3: Window not found");
     }
@@ -145,6 +137,6 @@ mod tests {
         let tool = RenameWindow::new(Arc::new(MockTmux::new()));
         assert_eq!(tool.name(), "rename_window");
         assert!(tool.description().contains("index"));
-        assert_eq!(tool.input_schema()["required"], json!(["index", "title"]));
+        assert_eq!(tool.input_schema()["required"], json!(["index", "name"]));
     }
 }

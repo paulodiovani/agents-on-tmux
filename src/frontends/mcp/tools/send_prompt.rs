@@ -41,7 +41,7 @@ impl Tool for SendPrompt {
     }
 
     fn description(&self) -> &'static str {
-        "Give a prompt to another agent managed by AOT and submit it. The prompt is delivered as \"[from agent N] <prompt>\" (N is your own index) so the agent knows who sent it. Takes the agent's index (never its title) and the prompt; multi-line prompts are fine. Only works between agents, and never on yourself."
+        "Give another agent a prompt, signed \"[from agent N]\" with your index N. Takes the agent index and the prompt; multi-line prompts are fine."
     }
 
     fn input_schema(&self) -> Value {
@@ -51,7 +51,7 @@ impl Tool for SendPrompt {
                 "index": {
                     "type": "integer",
                     "minimum": 0,
-                    "description": "Index of the agent",
+                    "description": "Agent index",
                 },
                 "prompt": {
                     "type": "string",
@@ -96,7 +96,7 @@ pub fn send_signed_prompt(
             target.id
         ))
     };
-    tmux.paste_text(target.id, &sign(sender.id, &prompt))
+    tmux.paste_buffer(target.id, &sign(sender.id, &prompt))
         .map_err(failed)?;
     thread::sleep(delay);
     tmux.send_keys(target.id, "", true).map_err(failed)?;
@@ -162,7 +162,7 @@ mod tests {
         let mut tmux = tmux_with(windows(), 2);
         let mut sequence = Sequence::new();
         let expected = "[from agent 2] fix the tests\nthen commit";
-        tmux.expect_paste_text()
+        tmux.expect_paste_buffer()
             .with(eq(4), eq(expected))
             .times(1)
             .in_sequence(&mut sequence)
@@ -238,7 +238,7 @@ mod tests {
     #[test]
     fn test_paste_failure_is_tool_error() {
         let mut tmux = tmux_with(windows(), 2);
-        tmux.expect_paste_text()
+        tmux.expect_paste_buffer()
             .return_once(|_, _| Err(TmuxError::WindowNotFound));
 
         let error = send(tmux, json!({ "index": 4, "prompt": "hi" }), &caller()).unwrap_err();
@@ -252,7 +252,7 @@ mod tests {
     #[test]
     fn test_enter_failure_is_tool_error() {
         let mut tmux = tmux_with(windows(), 2);
-        tmux.expect_paste_text().return_once(|_, _| Ok(()));
+        tmux.expect_paste_buffer().return_once(|_, _| Ok(()));
         tmux.expect_send_keys()
             .return_once(|_, _, _| Err(TmuxError::WindowNotFound));
 
@@ -262,7 +262,7 @@ mod tests {
     #[test]
     fn test_tool_confirms_delivery() {
         let mut tmux = tmux_with(windows(), 2);
-        tmux.expect_paste_text().return_once(|_, _| Ok(()));
+        tmux.expect_paste_buffer().return_once(|_, _| Ok(()));
         tmux.expect_send_keys().return_once(|_, _, _| Ok(()));
 
         let output = tool(tmux).call(&json!({ "index": 4, "prompt": "hi" }), &caller());

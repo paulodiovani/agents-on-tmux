@@ -28,8 +28,17 @@ pub trait Tmux {
     fn attach_session(&self) -> Result<(), TmuxError>;
     /// Lists all windows in the session.
     fn list_windows(&self) -> Result<Vec<Window>, TmuxError>;
-    /// Creates a new window as described by `options` and returns it.
-    fn create_window(&self, options: &NewWindow) -> Result<Window, TmuxError>;
+    /// Creates a new window and returns it. `name` (automatic when unset), `dir`,
+    /// and `command` (program and arguments run instead of the default shell) keep
+    /// tmux defaults when `None`; `detached` keeps the current window selected.
+    #[allow(clippy::needless_lifetimes)]
+    fn create_window<'a>(
+        &self,
+        name: Option<&'a str>,
+        dir: Option<&'a str>,
+        command: Option<&'a [String]>,
+        detached: bool,
+    ) -> Result<Window, TmuxError>;
     /// Kills the window with the given id.
     fn kill_window(&self, id: u32) -> Result<(), TmuxError>;
     /// Selects (focuses) the window with the given id.
@@ -58,9 +67,9 @@ pub trait Tmux {
     fn send_keys(&self, id: u32, text: &str, enter: bool) -> Result<(), TmuxError>;
     /// Pastes `text` into the window's active pane as a bracketed paste, so
     /// newlines stay part of the text instead of acting as Enter.
-    fn paste_text(&self, id: u32, text: &str) -> Result<(), TmuxError>;
+    fn paste_buffer(&self, id: u32, text: &str) -> Result<(), TmuxError>;
     /// Sets the window's name directly, without prompting the user.
-    fn set_window_name(&self, id: u32, name: &str) -> Result<(), TmuxError>;
+    fn rename_window(&self, id: u32, name: &str) -> Result<(), TmuxError>;
 }
 
 const PASTE_BUFFER_PREFIX: &str = "aot-paste";
@@ -108,20 +117,6 @@ pub struct Window {
 pub struct KeyBinding {
     pub command: String,
     pub key: String,
-}
-
-/// Options for creating a window; unset fields keep tmux defaults.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct NewWindow {
-    /// Window name; tmux names it automatically when unset.
-    pub name: Option<String>,
-    /// Working directory of the new window.
-    pub dir: Option<String>,
-    /// Program and arguments to run instead of the default shell; tmux runs a
-    /// single entry through the shell and several entries directly.
-    pub command: Vec<String>,
-    /// Creates the window without making it the current one.
-    pub detached: bool,
 }
 
 fn check_inside_tmux(tmux_env: Option<&str>) -> Result<(), TmuxError> {
@@ -474,20 +469,26 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
         Ok(windows)
     }
 
-    /// Creates a new window with the given name.
-    fn create_window(&self, options: &NewWindow) -> Result<Window, TmuxError> {
+    /// Creates a new window and returns it.
+    fn create_window<'a>(
+        &self,
+        name: Option<&'a str>,
+        dir: Option<&'a str>,
+        command: Option<&'a [String]>,
+        detached: bool,
+    ) -> Result<Window, TmuxError> {
         let session = target(&self.session, None, None);
         let mut args = vec!["new-window", "-t", &session, "-P", "-F", "#{window_index}"];
-        if options.detached {
+        if detached {
             args.push("-d");
         }
-        if let Some(name) = &options.name {
+        if let Some(name) = name {
             args.extend(["-n", name]);
         }
-        if let Some(dir) = &options.dir {
+        if let Some(dir) = dir {
             args.extend(["-c", dir]);
         }
-        args.extend(options.command.iter().map(String::as_str));
+        args.extend(command.unwrap_or_default().iter().map(String::as_str));
         let output = self.executor.execute(&args)?;
         let id = output
             .trim()
@@ -617,7 +618,7 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
 
     /// Pastes `text` into the window's active pane as a bracketed paste, so
     /// newlines stay part of the text instead of acting as Enter.
-    fn paste_text(&self, id: u32, text: &str) -> Result<(), TmuxError> {
+    fn paste_buffer(&self, id: u32, text: &str) -> Result<(), TmuxError> {
         let target = target(&self.session, Some(&id.to_string()), None);
         let buffer = format!(
             "{PASTE_BUFFER_PREFIX}-{}-{}",
@@ -632,7 +633,7 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
     }
 
     /// Sets the window's name directly, without prompting the user.
-    fn set_window_name(&self, id: u32, name: &str) -> Result<(), TmuxError> {
+    fn rename_window(&self, id: u32, name: &str) -> Result<(), TmuxError> {
         let target = target(&self.session, Some(&id.to_string()), None);
         self.executor
             .execute(&["rename-window", "-t", &target, "--", name])
@@ -944,11 +945,9 @@ mod tests {
     fn test_create_window() {
         let executor = MockCommandExecutor::with_session();
         let driver = TmuxDriver::with_executor(executor);
-        let options = NewWindow {
-            name: Some("test-window".to_string()),
-            ..NewWindow::default()
-        };
-        let window = driver.create_window(&options).unwrap();
+        let window = driver
+            .create_window(Some("test-window"), None, None, false)
+            .unwrap();
         assert_eq!(window.name, "test-window");
         assert!(window.started_at.is_none());
         assert!(!window.notification_pending);
@@ -974,17 +973,14 @@ mod tests {
     fn test_create_window_with_all_options() {
         let executor = MockCommandExecutor::with_session();
         let driver = TmuxDriver::with_executor(executor);
-        let options = NewWindow {
-            name: None,
-            dir: Some("/tmp/project".to_string()),
-            command: vec![
-                "claude".to_string(),
-                "--model".to_string(),
-                "o3".to_string(),
-            ],
-            detached: true,
-        };
-        let window = driver.create_window(&options).unwrap();
+        let command = [
+            "claude".to_string(),
+            "--model".to_string(),
+            "o3".to_string(),
+        ];
+        let window = driver
+            .create_window(None, Some("/tmp/project"), Some(&command), true)
+            .unwrap();
         assert_eq!(window.id, 1);
 
         let commands = driver.executor.commands.borrow();
@@ -1012,12 +1008,12 @@ mod tests {
     fn test_create_window_finds_the_window_by_printed_index() {
         let executor = MockCommandExecutor::with_session();
         let driver = TmuxDriver::with_executor(executor);
-        let named = |name: &str| NewWindow {
-            name: Some(name.to_string()),
-            ..NewWindow::default()
-        };
-        driver.create_window(&named("same")).unwrap();
-        let second = driver.create_window(&named("same")).unwrap();
+        driver
+            .create_window(Some("same"), None, None, false)
+            .unwrap();
+        let second = driver
+            .create_window(Some("same"), None, None, false)
+            .unwrap();
         assert_eq!(second.id, 2);
     }
 
@@ -1462,12 +1458,12 @@ mod tests {
     }
 
     #[test]
-    fn test_paste_text_uses_a_unique_bracketed_paste_buffer() {
+    fn test_paste_buffer_uses_a_unique_bracketed_paste_buffer() {
         let executor = MockCommandExecutor::with_session();
         let driver = TmuxDriver::with_executor(executor);
 
-        driver.paste_text(2, "-first\nsecond").unwrap();
-        driver.paste_text(2, "again").unwrap();
+        driver.paste_buffer(2, "-first\nsecond").unwrap();
+        driver.paste_buffer(2, "again").unwrap();
 
         let commands = driver.executor.commands.borrow();
         let buffer = commands[0][2].clone();
@@ -1492,11 +1488,11 @@ mod tests {
     }
 
     #[test]
-    fn test_set_window_name_command_args() {
+    fn test_rename_window_command_args() {
         let executor = MockCommandExecutor::with_session();
         let driver = TmuxDriver::with_executor(executor);
 
-        driver.set_window_name(3, "-review").unwrap();
+        driver.rename_window(3, "-review").unwrap();
 
         let commands = driver.executor.commands.borrow();
         assert_eq!(

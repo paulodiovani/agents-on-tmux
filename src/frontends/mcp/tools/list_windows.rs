@@ -24,7 +24,7 @@ impl Tool for ListWindows {
     }
 
     fn description(&self) -> &'static str {
-        "List the non-agent windows managed by AOT, such as shells, servers, or editors. Returns {\"windows\": [{\"index\", \"title\", \"command\", \"cwd\", \"active\"}]}. Windows are addressed by their index, never by title; indexes can change when windows are moved."
+        "List windows running a shell or a command. Returns {\"windows\": [{\"index\", \"name\", \"command\", \"current_dir\", \"active\"}]}."
     }
 
     fn input_schema(&self) -> Value {
@@ -42,9 +42,9 @@ impl Tool for ListWindows {
             .map(|window| {
                 json!({
                     "index": window.id,
-                    "title": window.name,
+                    "name": window.name,
                     "command": window.running_command,
-                    "cwd": window.current_dir,
+                    "current_dir": window.current_dir,
                     "active": window.is_active,
                 })
             })
@@ -85,8 +85,8 @@ mod tests {
 
         assert!(!output.is_error);
         let expected = json!({ "windows": [
-            { "index": 1, "title": "shell", "command": "zsh", "cwd": "/home/u", "active": true },
-            { "index": 4, "title": "server", "command": "cargo", "cwd": "/home/u/project", "active": false },
+            { "index": 1, "name": "shell", "command": "zsh", "current_dir": "/home/u", "active": true },
+            { "index": 4, "name": "server", "command": "cargo", "current_dir": "/home/u/project", "active": false },
         ] });
         assert_eq!(output.structured, Some(expected.clone()));
         assert_eq!(output.text, expected.to_string());

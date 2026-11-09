@@ -80,7 +80,7 @@ pub fn index_argument(arguments: &Value) -> Result<u32, ToolOutput> {
         .and_then(|index| u32::try_from(index).ok())
         .ok_or_else(|| {
             ToolOutput::error(format!(
-                "Invalid index {value}: pass an integer index (e.g. 3), not a title"
+                "Invalid index {value}: pass an integer index (e.g. 3)"
             ))
         })
 }
@@ -96,6 +96,42 @@ pub fn text_argument(arguments: &Value, name: &str) -> Result<String, ToolOutput
             "Invalid {name} {value}: pass a non-empty string"
         ))),
     }
+}
+
+/// Reads the optional `name` argument: a non-blank single line, trimmed.
+pub fn name_argument(arguments: &Value) -> Result<Option<String>, ToolOutput> {
+    if arguments.get("name").is_none() {
+        return Ok(None);
+    }
+    let name = text_argument(arguments, "name")?;
+    let name = name.trim();
+    if name.contains(['\n', '\r']) {
+        return Err(ToolOutput::error("Invalid name: it must be a single line"));
+    }
+    Ok(Some(name.to_string()))
+}
+
+/// Reads the optional `command` argument: a program followed by its arguments.
+pub fn command_argument(arguments: &Value) -> Result<Option<Vec<String>>, ToolOutput> {
+    let Some(value) = arguments.get("command") else {
+        return Ok(None);
+    };
+    let invalid = || {
+        ToolOutput::error(format!(
+            "Invalid command {value}: pass an array with the program followed by its arguments, e.g. [\"ls\", \"-la\"]"
+        ))
+    };
+    let parts = value
+        .as_array()
+        .filter(|parts| !parts.is_empty())
+        .ok_or_else(invalid)?
+        .iter()
+        .map(|part| part.as_str().map(str::to_string).ok_or_else(invalid))
+        .collect::<Result<Vec<String>, ToolOutput>>()?;
+    if parts[0].is_empty() {
+        return Err(invalid());
+    }
+    Ok(Some(parts))
 }
 
 /// Resolves the optional `dir` argument to an existing directory: relative paths
@@ -458,6 +494,49 @@ pub(super) mod tests {
         for value in [json!(""), json!("  "), json!(1)] {
             let error = text_argument(&json!({ "a": value }), "a").unwrap_err();
             assert!(error.text.starts_with("Invalid a"), "{}", error.text);
+        }
+    }
+
+    #[test]
+    fn test_name_argument() {
+        assert_eq!(name_argument(&json!({})), Ok(None));
+        assert_eq!(
+            name_argument(&json!({ "name": "  tests " })),
+            Ok(Some("tests".to_string()))
+        );
+        assert_eq!(
+            name_argument(&json!({ "name": "a\nb" })).unwrap_err().text,
+            "Invalid name: it must be a single line"
+        );
+        assert!(
+            name_argument(&json!({ "name": " " }))
+                .unwrap_err()
+                .text
+                .starts_with("Invalid name")
+        );
+    }
+
+    #[test]
+    fn test_command_argument() {
+        assert_eq!(command_argument(&json!({})), Ok(None));
+        assert_eq!(
+            command_argument(&json!({ "command": ["cargo", "watch", "-x", "test"] })),
+            Ok(Some(vec![
+                "cargo".to_string(),
+                "watch".to_string(),
+                "-x".to_string(),
+                "test".to_string()
+            ]))
+        );
+        for command in [
+            json!("ls -la"),
+            json!([]),
+            json!(["ls", 1]),
+            json!([""]),
+            json!(null),
+        ] {
+            let error = command_argument(&json!({ "command": command })).unwrap_err();
+            assert!(error.text.starts_with("Invalid command"), "{}", error.text);
         }
     }
 }

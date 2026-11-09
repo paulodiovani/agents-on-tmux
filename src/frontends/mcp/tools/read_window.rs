@@ -26,7 +26,7 @@ impl Tool for ReadWindow {
     }
 
     fn description(&self) -> &'static str {
-        "Read the latest output of a window managed by AOT, as plain text. Takes the window's index (never its title) and an optional number of lines (default 50, max 2000). Trailing blank lines are dropped."
+        "Read the latest output of a window as plain text. Takes the window index and an optional number of lines (default 50, max 2000)."
     }
 
     fn input_schema(&self) -> Value {
@@ -36,7 +36,7 @@ impl Tool for ReadWindow {
                 "index": {
                     "type": "integer",
                     "minimum": 0,
-                    "description": "Index of the window",
+                    "description": "Window index",
                 },
                 "lines": {
                     "type": "integer",

@@ -8,7 +8,7 @@ pub trait Protocol {
     fn handle(&self, line: &str, context: &CallContext) -> Option<String>;
 }
 
-const INSTRUCTIONS: &str = "AOT orchestrates windows and coding agents: list, create, read, and send input to them. Windows and agents are always referenced by their index (e.g. 3), never by title; resolve titles to indexes with list_windows and list_agents. Indexes can change when windows are moved, so list again when unsure. Prompts between agents are signed \"[from agent N]\": use send_prompt to give another agent a prompt, and respond_prompt to respond, when needed, to a prompt received from agent N.";
+const INSTRUCTIONS: &str = "AOT orchestrates windows and AI coding agents. A window is a terminal running a shell or a command; an agent is a window running an AI coding agent. Windows and agents are referenced by their index (e.g. 3), which can change when windows move. Prompts between agents are signed \"[from agent N]\" with the sender's index N.";
 const INVALID_PARAMS: i64 = -32602;
 const INVALID_REQUEST: i64 = -32600;
 const LEGACY_VERSIONS: [&str; 4] = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];

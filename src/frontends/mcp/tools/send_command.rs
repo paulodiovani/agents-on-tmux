@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use serde_json::{Value, json};
 
-use super::tool::{CallContext, Tool, ToolOutput, send_target};
+use super::tool::{CallContext, Tool, ToolOutput, command_argument, send_target};
 use crate::backends::tmux::Tmux;
 
 /// Runs a shell command in a non-agent window of the AOT session.
@@ -23,7 +23,7 @@ impl Tool for SendCommand {
     }
 
     fn description(&self) -> &'static str {
-        "Run a command in a non-agent window managed by AOT. Takes the window's index (never its title) and the command as an array: the program followed by its arguments, e.g. [\"cargo\", \"test\", \"--lib\"]. Each element is passed to the program as one argument; shell syntax such as pipes or redirection is not interpreted. The command runs asynchronously; the tool does not wait for it to finish. Only works on non-agent windows, and never on your own."
+        "Run a command in a window running a shell. Takes the window index and the command as an array: the program followed by its arguments, e.g. [\"cargo\", \"test\"]; each element is passed as one argument. Returns once the command is sent."
     }
 
     fn input_schema(&self) -> Value {
@@ -33,7 +33,7 @@ impl Tool for SendCommand {
                 "index": {
                     "type": "integer",
                     "minimum": 0,
-                    "description": "Index of the window",
+                    "description": "Window index",
                 },
                 "command": {
                     "type": "array",
@@ -48,7 +48,7 @@ impl Tool for SendCommand {
     }
 
     fn call(&self, arguments: &Value, context: &CallContext) -> ToolOutput {
-        let command = match command_argument(arguments) {
+        let command = match command_line(arguments) {
             Ok(command) => command,
             Err(error) => return error,
         };
@@ -66,26 +66,11 @@ impl Tool for SendCommand {
     }
 }
 
-fn command_argument(arguments: &Value) -> Result<String, ToolOutput> {
-    let Some(value) = arguments.get("command") else {
-        return Err(ToolOutput::error("Missing required argument: command"));
-    };
-    let invalid = || {
-        ToolOutput::error(format!(
-            "Invalid command {value}: pass an array with the program followed by its arguments, e.g. [\"ls\", \"-la\"]"
-        ))
-    };
-    let parts = value
-        .as_array()
-        .filter(|parts| !parts.is_empty())
-        .ok_or_else(invalid)?
-        .iter()
-        .map(|part| part.as_str().map(shell_quote).ok_or_else(invalid))
-        .collect::<Result<Vec<String>, ToolOutput>>()?;
-    if parts[0] == "''" {
-        return Err(invalid());
-    }
-    Ok(parts.join(" "))
+fn command_line(arguments: &Value) -> Result<String, ToolOutput> {
+    let parts = command_argument(arguments)?
+        .ok_or_else(|| ToolOutput::error("Missing required argument: command"))?;
+    let quoted: Vec<String> = parts.iter().map(|part| shell_quote(part)).collect();
+    Ok(quoted.join(" "))
 }
 
 fn shell_quote(word: &str) -> String {
@@ -166,7 +151,7 @@ mod tests {
 
     #[test]
     fn test_quotes_arguments_only_when_needed() {
-        let command = command_argument(&json!({
+        let command = command_line(&json!({
             "command": ["grep", "-r", "it's here", "a b", "", "$HOME", "src/main.rs"]
         }));
         assert_eq!(
@@ -184,7 +169,7 @@ mod tests {
             json!([""]),
             json!(null),
         ] {
-            let error = command_argument(&json!({ "command": command })).unwrap_err();
+            let error = command_line(&json!({ "command": command })).unwrap_err();
             assert!(error.is_error);
             assert!(error.text.starts_with("Invalid command"), "{}", error.text);
         }

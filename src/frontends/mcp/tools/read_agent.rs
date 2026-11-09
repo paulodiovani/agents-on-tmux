@@ -26,7 +26,7 @@ impl Tool for ReadAgent {
     }
 
     fn description(&self) -> &'static str {
-        "Read the latest output of an agent managed by AOT, as plain text. Takes the agent's index (never its title) and an optional number of lines (default 50, max 2000). Trailing blank lines are dropped."
+        "Read the latest output of an agent as plain text. Takes the agent index and an optional number of lines (default 50, max 2000)."
     }
 
     fn input_schema(&self) -> Value {
@@ -67,7 +67,7 @@ mod tests {
         let tool = ReadAgent::new(Arc::new(MockTmux::new()));
         let read_window = ReadWindow::new(Arc::new(MockTmux::new()));
         assert_eq!(tool.name(), "read_agent");
-        assert!(tool.description().contains("agent's"));
+        assert!(tool.description().contains("agent index"));
         assert_eq!(tool.input_schema(), read_window.input_schema());
     }
 }

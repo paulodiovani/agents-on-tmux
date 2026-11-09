@@ -24,7 +24,7 @@ impl Tool for ListAgents {
     }
 
     fn description(&self) -> &'static str {
-        "List the agents managed by AOT. Returns {\"agents\": [{\"index\", \"title\", \"agent\", \"command\", \"cwd\", \"active\"}]}. Agents are addressed by their index, never by title; indexes can change when agents are moved."
+        "List agents: windows running an AI coding agent. Returns {\"agents\": [{\"index\", \"name\", \"agent\", \"command\", \"current_dir\", \"active\"}]}."
     }
 
     fn input_schema(&self) -> Value {
@@ -42,10 +42,10 @@ impl Tool for ListAgents {
                 let agent = agents::is_agent(&window.running_command)?;
                 Some(json!({
                     "index": window.id,
-                    "title": window.name,
+                    "name": window.name,
                     "agent": agent.name(),
                     "command": window.running_command,
-                    "cwd": window.current_dir,
+                    "current_dir": window.current_dir,
                     "active": window.is_active,
                 }))
             })
@@ -86,8 +86,8 @@ mod tests {
 
         assert!(!output.is_error);
         let expected = json!({ "agents": [
-            { "index": 2, "title": "reviewer", "agent": "Claude", "command": "claude", "cwd": "/home/u/project", "active": true },
-            { "index": 3, "title": "codex", "agent": "Codex", "command": "codex", "cwd": "/home/u/other", "active": false },
+            { "index": 2, "name": "reviewer", "agent": "Claude", "command": "claude", "current_dir": "/home/u/project", "active": true },
+            { "index": 3, "name": "codex", "agent": "Codex", "command": "codex", "current_dir": "/home/u/other", "active": false },
         ] });
         assert_eq!(output.structured, Some(expected.clone()));
         assert_eq!(output.text, expected.to_string());

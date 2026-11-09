@@ -29,7 +29,7 @@ impl Tool for RespondPrompt {
     }
 
     fn description(&self) -> &'static str {
-        "Respond, when needed, to a prompt you received from another agent, identified by its \"[from agent N]\" tag: pass that N as index. The response is delivered as \"[from agent M] <response>\" (M is your own index). Multi-line responses are fine."
+        "Respond to a prompt signed \"[from agent N]\", when it needs a response. Takes N as index and the response, signed with your index."
     }
 
     fn input_schema(&self) -> Value {
@@ -39,7 +39,7 @@ impl Tool for RespondPrompt {
                 "index": {
                     "type": "integer",
                     "minimum": 0,
-                    "description": "N from the [from agent N] tag of the prompt you are responding to",
+                    "description": "N from the [from agent N] tag",
                 },
                 "prompt": {
                     "type": "string",
@@ -92,7 +92,7 @@ mod tests {
             ])
         });
         tmux.expect_window_for_pane().returning(|_| Ok(2));
-        tmux.expect_paste_text()
+        tmux.expect_paste_buffer()
             .withf(|index, text| *index == 5 && text == "[from agent 2] hello")
             .times(1)
             .return_once(|_, _| Ok(()));

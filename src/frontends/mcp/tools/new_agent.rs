@@ -5,9 +5,9 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 
-use super::tool::{CallContext, Tool, ToolOutput, caller_window, dir_argument};
+use super::tool::{CallContext, Tool, ToolOutput, caller_window, dir_argument, name_argument};
 use crate::backends::agents::{self, Agent, GenericAgent};
-use crate::backends::tmux::{NewWindow, Tmux, Window};
+use crate::backends::tmux::{Tmux, Window};
 
 const STARTUP_WAIT: Duration = Duration::from_millis(500);
 
@@ -78,7 +78,7 @@ impl Tool for NewAgent {
     }
 
     fn description(&self) -> &'static str {
-        "Start a new coding agent in AOT, in its own window, in the background (the user's view does not switch). Optional command: the agent to start; defaults to the caller's own agent. Optional args: arguments passed to the agent as-is, e.g. [\"--model\", \"o3\"]. Optional dir: absolute, or relative to AOT's working directory (the default). Returns {\"index\", \"title\", \"agent\", \"cwd\"}."
+        "Start an AI coding agent in a new background window. Optional: command (the agent, defaults to your own), args (passed to the agent as-is), name, and dir (absolute or relative to AOT's working directory). Returns {\"index\", \"name\", \"agent\", \"current_dir\"}."
     }
 
     fn input_schema(&self) -> Value {
@@ -92,16 +92,20 @@ impl Tool for NewAgent {
                 "command": {
                     "type": "string",
                     "enum": commands,
-                    "description": "Agent to start; defaults to the caller's agent",
+                    "description": "Agent to start; defaults to your own agent",
                 },
                 "args": {
                     "type": "array",
                     "items": { "type": "string" },
                     "description": "Arguments passed to the agent as-is, e.g. [\"--model\", \"o3\"]",
                 },
+                "name": {
+                    "type": "string",
+                    "description": "Agent name, a single line",
+                },
                 "dir": {
                     "type": "string",
-                    "description": "Working directory; absolute or relative to AOT's working directory",
+                    "description": "Working directory, absolute or relative to AOT's working directory",
                 },
             },
             "additionalProperties": false,
@@ -117,30 +121,32 @@ impl Tool for NewAgent {
             Ok(args) => args,
             Err(error) => return error,
         };
+        let name = match name_argument(arguments) {
+            Ok(name) => name,
+            Err(error) => return error,
+        };
         let dir = match dir_argument(arguments, &self.default_dir) {
             Ok(dir) => dir,
             Err(error) => return error,
         };
         let mut command = vec![agent.command().to_string()];
         command.extend(args);
-        let options = NewWindow {
-            dir: Some(dir),
-            command,
-            detached: true,
-            ..NewWindow::default()
-        };
-        let window = match self.tmux.create_window(&options) {
-            Ok(window) => window,
-            Err(error) => return ToolOutput::error(format!("Failed to start agent: {error}")),
-        };
+        let window =
+            match self
+                .tmux
+                .create_window(name.as_deref(), Some(&dir), Some(&command), true)
+            {
+                Ok(window) => window,
+                Err(error) => return ToolOutput::error(format!("Failed to start agent: {error}")),
+            };
         if let Err(error) = self.check_still_running(&window, &agent) {
             return error;
         }
         ToolOutput::json(json!({
             "index": window.id,
-            "title": window.name,
+            "name": window.name,
             "agent": agent.name(),
-            "cwd": window.current_dir,
+            "current_dir": window.current_dir,
         }))
     }
 }
@@ -197,17 +203,26 @@ mod tests {
     }
 
     fn expect_create(tmux: &mut MockTmux, command: &[&str]) {
+        expect_create_named(tmux, None, command);
+    }
+
+    fn expect_create_named(
+        tmux: &mut MockTmux,
+        expected_name: Option<&'static str>,
+        command: &[&str],
+    ) {
         let dir = temp_dir();
-        let expected = NewWindow {
-            name: None,
-            dir: Some(dir.clone()),
-            command: command.iter().map(|part| part.to_string()).collect(),
-            detached: true,
-        };
+        let expected_dir = dir.clone();
+        let expected: Vec<String> = command.iter().map(|part| part.to_string()).collect();
         tmux.expect_create_window()
-            .withf(move |options| *options == expected)
+            .withf(move |name, dir, command, detached| {
+                *name == expected_name
+                    && *dir == Some(expected_dir.as_str())
+                    && *command == Some(expected.as_slice())
+                    && *detached
+            })
             .times(1)
-            .return_once(move |_| Ok(window(6, "claude", "claude", &dir)));
+            .return_once(move |_, _, _, _| Ok(window(6, "claude", "claude", &dir)));
     }
 
     fn started() -> Window {
@@ -227,7 +242,9 @@ mod tests {
 
         assert_eq!(
             output.structured,
-            Some(json!({ "index": 6, "title": "claude", "agent": "Claude", "cwd": temp_dir() }))
+            Some(
+                json!({ "index": 6, "name": "claude", "agent": "Claude", "current_dir": temp_dir() })
+            )
         );
     }
 
@@ -378,6 +395,29 @@ mod tests {
     }
 
     #[test]
+    fn test_passes_name() {
+        let mut tmux = MockTmux::new();
+        expect_create_named(&mut tmux, Some("reviewer"), &["claude"]);
+        expect_windows(&mut tmux, vec![started()]);
+
+        let output = tool(tmux).call(
+            &json!({ "command": "claude", "name": "reviewer" }),
+            &CallContext::default(),
+        );
+
+        assert!(!output.is_error, "{}", output.text);
+    }
+
+    #[test]
+    fn test_invalid_name_is_tool_error() {
+        let output = tool(MockTmux::new()).call(
+            &json!({ "command": "claude", "name": "a\nb" }),
+            &CallContext::default(),
+        );
+        assert_eq!(output.text, "Invalid name: it must be a single line");
+    }
+
+    #[test]
     fn test_new_uses_default_startup_wait() {
         let tool = NewAgent::new(Arc::new(MockTmux::new()), PathBuf::from("/"));
         assert_eq!(tool.startup_wait, STARTUP_WAIT);
@@ -387,7 +427,7 @@ mod tests {
     fn test_tmux_failure_is_tool_error() {
         let mut tmux = MockTmux::new();
         tmux.expect_create_window()
-            .return_once(|_| Err(TmuxError::WindowNotFound));
+            .return_once(|_, _, _, _| Err(TmuxError::WindowNotFound));
 
         let output = tool(tmux).call(&json!({ "command": "codex" }), &CallContext::default());
 
