@@ -6,6 +6,7 @@ mod read_agent;
 mod read_window;
 mod registry;
 mod send_command;
+mod send_prompt;
 mod tool;
 
 pub use registry::all_tools;

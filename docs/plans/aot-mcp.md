@@ -38,6 +38,7 @@ Agents running inside AOT's nested tmux session can list, create, read, and send
 - `create_window(&NewWindow { name, dir, command: Vec<String>, detached })` (`new-window -P -F '#{window_index}' [-d] [-n name] [-c dir] [program args...]`; with several entries tmux runs the program directly, no shell parsing), returning the window found by the printed index; the TUI passes only the name, keeping its behavior.
 - `capture_pane(index, history)` → `capture-pane -p -J -t <session>:<index> -S -<history>` (visible screen plus `history` scrollback lines); `read_window` drops trailing blank lines and keeps the last `lines`.
 - `send_keys(index, text, enter)` → `send-keys -t <session>:<index> -l -- <text>` then `send-keys ... Enter` (literal mode and `--` so text is never interpreted as key names or flags; empty text sends only Enter).
+- `paste_text(index, text)` → `set-buffer -b aot-paste-<pid>-<n> -- <text>` then `paste-buffer -b <name> -p -d -t <session>:<index>` (bracketed paste, unique buffer deleted after use).
 - `window_for_pane(pane_id)` → `display-message -p -t %N '#{window_index}'`.
 - `Window` already carries `running_command` and `current_dir`; agent vs. plain window decided with `agents::is_agent`.
 
@@ -78,6 +79,6 @@ Settled (before task 8): prompts are delivered with bracketed paste (`set-buffer
 - [x] 6. `new_window` (+ `create_window` cwd/command)
 - [x] 7. `new_agent` (+ `window_for_pane`, moved up from task 10 for the caller's default command)
 - [x] 8. `send_command` (+ `send_keys`)
-- [ ] 9. `send_prompt`
+- [x] 9. `send_prompt` (+ `paste_text`)
 - [ ] 10. `respond_prompt` (sender resolution via `window_for_pane`)
 - [ ] 11. Docs: user manual page with per-agent MCP config snippets, README mention, `AGENTS.md` architecture section (add `frontends/mcp/`)

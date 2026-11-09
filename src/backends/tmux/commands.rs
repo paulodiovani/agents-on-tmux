@@ -1,4 +1,5 @@
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 use thiserror::Error;
 
@@ -55,7 +56,14 @@ pub trait Tmux {
     /// Types `text` literally into the window's active pane, then presses
     /// Enter when `enter` is set.
     fn send_keys(&self, id: u32, text: &str, enter: bool) -> Result<(), TmuxError>;
+    /// Pastes `text` into the window's active pane as a bracketed paste, so
+    /// newlines stay part of the text instead of acting as Enter.
+    fn paste_text(&self, id: u32, text: &str) -> Result<(), TmuxError>;
 }
+
+const PASTE_BUFFER_PREFIX: &str = "aot-paste";
+
+static PASTE_BUFFER_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 pub const SESSION_NAME: &str = "agents-on-tmux";
 pub const SOCKET_NAME: &str = "agents-on-tmux";
@@ -604,6 +612,22 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
         }
         Ok(())
     }
+
+    /// Pastes `text` into the window's active pane as a bracketed paste, so
+    /// newlines stay part of the text instead of acting as Enter.
+    fn paste_text(&self, id: u32, text: &str) -> Result<(), TmuxError> {
+        let target = target(&self.session, Some(&id.to_string()), None);
+        let buffer = format!(
+            "{PASTE_BUFFER_PREFIX}-{}-{}",
+            std::process::id(),
+            PASTE_BUFFER_COUNTER.fetch_add(1, Ordering::Relaxed)
+        );
+        self.executor
+            .execute(&["set-buffer", "-b", &buffer, "--", text])?;
+        self.executor
+            .execute(&["paste-buffer", "-b", &buffer, "-p", "-d", "-t", &target])?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -714,6 +738,8 @@ mod tests {
                 Some(&"select-window") => Ok(String::new()),
                 Some(&"last-pane") => Ok(String::new()),
                 Some(&"send-keys") => Ok(String::new()),
+                Some(&"set-buffer") => Ok(String::new()),
+                Some(&"paste-buffer") => Ok(String::new()),
                 Some(&"set-option") => Ok(String::new()),
                 Some(&"resize-pane") => Ok(String::new()),
                 Some(&"command-prompt") => Ok(String::new()),
@@ -1422,6 +1448,36 @@ mod tests {
             send_keys_commands("", true),
             [vec!["send-keys", "-t", "agents-on-tmux:2", "Enter"]]
         );
+    }
+
+    #[test]
+    fn test_paste_text_uses_a_unique_bracketed_paste_buffer() {
+        let executor = MockCommandExecutor::with_session();
+        let driver = TmuxDriver::with_executor(executor);
+
+        driver.paste_text(2, "-first\nsecond").unwrap();
+        driver.paste_text(2, "again").unwrap();
+
+        let commands = driver.executor.commands.borrow();
+        let buffer = commands[0][2].clone();
+        assert!(buffer.starts_with("aot-paste-"));
+        assert_eq!(
+            commands[0],
+            ["set-buffer", "-b", buffer.as_str(), "--", "-first\nsecond"]
+        );
+        assert_eq!(
+            commands[1],
+            [
+                "paste-buffer",
+                "-b",
+                buffer.as_str(),
+                "-p",
+                "-d",
+                "-t",
+                "agents-on-tmux:2"
+            ]
+        );
+        assert_ne!(commands[2][2], buffer);
     }
 
     #[test]

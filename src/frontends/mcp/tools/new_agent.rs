@@ -78,7 +78,7 @@ impl Tool for NewAgent {
     }
 
     fn description(&self) -> &'static str {
-        "Start a new coding agent in its own window of the AOT session, in the background (the user's view does not switch). Optional command: the agent to start; defaults to the caller's own agent. Optional args: arguments passed to the agent as-is, e.g. [\"--model\", \"o3\"]. Optional dir: absolute, or relative to AOT's working directory (the default). Returns {\"index\", \"title\", \"agent\", \"cwd\"}; use the index with read_agent and the other tools."
+        "Start a new coding agent in its own window of the AOT session, in the background (the user's view does not switch). Optional command: the agent to start; defaults to the caller's own agent. Optional args: arguments passed to the agent as-is, e.g. [\"--model\", \"o3\"]. Optional dir: absolute, or relative to AOT's working directory (the default). Returns {\"index\", \"title\", \"agent\", \"cwd\"}; use the index with send_prompt and read_agent."
     }
 
     fn input_schema(&self) -> Value {

@@ -1029,6 +1029,10 @@ mod tests {
         fn send_keys(&self, _id: u32, _text: &str, _enter: bool) -> Result<(), TmuxError> {
             Ok(())
         }
+
+        fn paste_text(&self, _id: u32, _text: &str) -> Result<(), TmuxError> {
+            Ok(())
+        }
     }
 
     fn command_failed(command: &str) -> TmuxError {
