@@ -10,7 +10,7 @@ use crate::backends::tmux::Tmux;
 
 pub const SUBMIT_DELAY: Duration = Duration::from_millis(200);
 
-/// Starts a conversation with another agent of the AOT session by giving it a signed prompt.
+/// Gives another agent of the AOT session a prompt signed with the caller's agent index.
 pub struct SendPrompt {
     tmux: Arc<dyn Tmux + Send + Sync>,
     submit_delay: Duration,
@@ -41,7 +41,7 @@ impl Tool for SendPrompt {
     }
 
     fn description(&self) -> &'static str {
-        "Start a conversation with another agent in the AOT session: give it a prompt and submit it. The prompt is delivered as \"[from agent N] <prompt>\" (N is your current window index) followed by a hint to answer with respond_prompt, so the agent knows who asked; its answer arrives later as a new prompt in your window. Takes the integer window index from list_agents (never a title) and the prompt; multi-line prompts are fine. Use read_agent to follow its progress. To answer a prompt tagged [from agent N], use respond_prompt instead. Only works between agent windows (use send_command for shells); your own window is refused."
+        "Give a prompt to another agent managed by AOT and submit it. The prompt is delivered as \"[from agent N] <prompt>\" (N is your own index) so the agent knows who sent it. Takes the agent's index (never its title) and the prompt; multi-line prompts are fine. Only works between agents, and never on yourself."
     }
 
     fn input_schema(&self) -> Value {
@@ -51,7 +51,7 @@ impl Tool for SendPrompt {
                 "index": {
                     "type": "integer",
                     "minimum": 0,
-                    "description": "Window index of the agent, from list_agents",
+                    "description": "Index of the agent",
                 },
                 "prompt": {
                     "type": "string",
@@ -66,7 +66,7 @@ impl Tool for SendPrompt {
     fn call(&self, arguments: &Value, context: &CallContext) -> ToolOutput {
         match send_signed_prompt(self.tmux.as_ref(), arguments, context, self.submit_delay) {
             Ok(delivery) => ToolOutput::text(format!(
-                "Sent prompt to the agent in window {} as agent {}; its answer will arrive as a new prompt, and read_agent shows its progress",
+                "Sent prompt to the agent in window {} as agent {}",
                 delivery.target, delivery.sender
             )),
             Err(error) => error,
@@ -75,7 +75,7 @@ impl Tool for SendPrompt {
 }
 
 /// Delivers the `prompt` argument to the agent at the `index` argument, signed
-/// with the calling agent's window index and a hint on how to answer.
+/// with the calling agent's window index.
 pub fn send_signed_prompt(
     tmux: &dyn Tmux,
     arguments: &Value,
@@ -86,7 +86,7 @@ pub fn send_signed_prompt(
     let sender = caller_window(tmux, context)?;
     if agents::is_agent(&sender.running_command).is_none() {
         return Err(ToolOutput::error(
-            "Prompts can only be sent from an agent window, since they are signed with the sender agent's index",
+            "Only agents can send prompts, since prompts are signed with the sender agent's index",
         ));
     }
     let target = send_target(tmux, arguments, context, true)?;
@@ -107,9 +107,7 @@ pub fn send_signed_prompt(
 }
 
 fn sign(sender: u32, prompt: &str) -> String {
-    format!(
-        "[from agent {sender}] {prompt}\n\n(To answer, use the respond_prompt tool of the AOT MCP with index {sender}.)"
-    )
+    format!("[from agent {sender}] {prompt}")
 }
 
 #[cfg(test)]
@@ -163,7 +161,7 @@ mod tests {
     fn test_pastes_signed_prompt_then_presses_enter() {
         let mut tmux = tmux_with(windows(), 2);
         let mut sequence = Sequence::new();
-        let expected = "[from agent 2] fix the tests\nthen commit\n\n(To answer, use the respond_prompt tool of the AOT MCP with index 2.)";
+        let expected = "[from agent 2] fix the tests\nthen commit";
         tmux.expect_paste_text()
             .with(eq(4), eq(expected))
             .times(1)
@@ -198,7 +196,7 @@ mod tests {
             &CallContext::default(),
         )
         .unwrap_err();
-        assert!(error.text.starts_with("The calling window is unknown"));
+        assert!(error.text.starts_with("You are not running inside AOT"));
     }
 
     #[test]
@@ -209,11 +207,7 @@ mod tests {
             &caller(),
         )
         .unwrap_err();
-        assert!(
-            error
-                .text
-                .starts_with("Prompts can only be sent from an agent window")
-        );
+        assert!(error.text.starts_with("Only agents can send prompts"));
     }
 
     #[test]
@@ -224,7 +218,7 @@ mod tests {
             &caller(),
         )
         .unwrap_err();
-        assert!(error.text.contains("use send_command"));
+        assert!(error.text.contains("only agents accept prompts"));
 
         let error = send(
             tmux_with(windows(), 2),
@@ -232,7 +226,7 @@ mod tests {
             &caller(),
         )
         .unwrap_err();
-        assert!(error.text.starts_with("Window 2 is your own window"));
+        assert!(error.text.starts_with("Index 2 is yourself"));
     }
 
     #[test]
@@ -275,9 +269,7 @@ mod tests {
 
         assert_eq!(
             output,
-            ToolOutput::text(
-                "Sent prompt to the agent in window 4 as agent 2; its answer will arrive as a new prompt, and read_agent shows its progress"
-            )
+            ToolOutput::text("Sent prompt to the agent in window 4 as agent 2")
         );
     }
 

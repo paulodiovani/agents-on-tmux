@@ -26,7 +26,7 @@ impl Tool for ReadWindow {
     }
 
     fn description(&self) -> &'static str {
-        "Read the last lines of a window's screen and scrollback in the AOT session, as plain text. Use it to check command output or what an agent has written. Takes the integer window index from list_windows or list_agents (never a title) and an optional number of lines (default 50, max 2000). Trailing blank lines are dropped."
+        "Read the latest output of a window managed by AOT, as plain text. Takes the window's index (never its title) and an optional number of lines (default 50, max 2000). Trailing blank lines are dropped."
     }
 
     fn input_schema(&self) -> Value {
@@ -36,14 +36,14 @@ impl Tool for ReadWindow {
                 "index": {
                     "type": "integer",
                     "minimum": 0,
-                    "description": "Window index from list_windows or list_agents",
+                    "description": "Index of the window",
                 },
                 "lines": {
                     "type": "integer",
                     "minimum": 1,
                     "maximum": MAX_LINES,
                     "default": DEFAULT_LINES,
-                    "description": "How many of the last lines to return",
+                    "description": "How many of the latest lines to return",
                 },
             },
             "required": ["index"],
@@ -174,7 +174,7 @@ mod tests {
     fn test_unknown_window_is_tool_error() {
         let output = call(tmux_with_window(1), json!({ "index": 5 }));
         assert!(output.is_error);
-        assert!(output.text.starts_with("No window with index 5"));
+        assert!(output.text.starts_with("No window or agent with index 5"));
     }
 
     #[test]

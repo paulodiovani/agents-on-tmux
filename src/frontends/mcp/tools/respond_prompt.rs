@@ -7,7 +7,7 @@ use super::send_prompt::{SUBMIT_DELAY, send_signed_prompt};
 use super::tool::{CallContext, Tool, ToolOutput};
 use crate::backends::tmux::Tmux;
 
-/// Answers a prompt another agent sent, signed with the caller's agent index.
+/// Responds to a prompt received from another agent, signed with the caller's agent index.
 pub struct RespondPrompt {
     tmux: Arc<dyn Tmux + Send + Sync>,
     submit_delay: Duration,
@@ -29,7 +29,7 @@ impl Tool for RespondPrompt {
     }
 
     fn description(&self) -> &'static str {
-        "Answer a prompt from another agent in the AOT session, i.e. a prompt tagged \"[from agent N]\": pass that N as index. The answer is delivered as \"[from agent M] <prompt>\" (M is your current window index) with the same hint, so the conversation can continue. Multi-line answers are fine. To start a new conversation, use send_prompt instead. Only works between agent windows; your own window is refused."
+        "Respond, when needed, to a prompt you received from another agent, identified by its \"[from agent N]\" tag: pass that N as index. The response is delivered as \"[from agent M] <response>\" (M is your own index). Multi-line responses are fine."
     }
 
     fn input_schema(&self) -> Value {
@@ -39,11 +39,11 @@ impl Tool for RespondPrompt {
                 "index": {
                     "type": "integer",
                     "minimum": 0,
-                    "description": "N from the [from agent N] tag of the prompt being answered",
+                    "description": "N from the [from agent N] tag of the prompt you are responding to",
                 },
                 "prompt": {
                     "type": "string",
-                    "description": "Answer to send",
+                    "description": "Response to send",
                 },
             },
             "required": ["index", "prompt"],
@@ -54,7 +54,7 @@ impl Tool for RespondPrompt {
     fn call(&self, arguments: &Value, context: &CallContext) -> ToolOutput {
         match send_signed_prompt(self.tmux.as_ref(), arguments, context, self.submit_delay) {
             Ok(delivery) => ToolOutput::text(format!(
-                "Sent answer to agent {} as agent {}",
+                "Sent response to agent {} as agent {}",
                 delivery.target, delivery.sender
             )),
             Err(error) => error,
@@ -83,7 +83,7 @@ mod tests {
     }
 
     #[test]
-    fn test_delivers_signed_answer() {
+    fn test_delivers_signed_response() {
         let mut tmux = MockTmux::new();
         tmux.expect_list_windows().returning(|| {
             Ok(vec![
@@ -93,7 +93,7 @@ mod tests {
         });
         tmux.expect_window_for_pane().returning(|_| Ok(2));
         tmux.expect_paste_text()
-            .withf(|index, text| *index == 5 && text.starts_with("[from agent 2] hello\n"))
+            .withf(|index, text| *index == 5 && text == "[from agent 2] hello")
             .times(1)
             .return_once(|_, _| Ok(()));
         tmux.expect_send_keys()
@@ -105,7 +105,7 @@ mod tests {
 
         assert_eq!(
             output,
-            ToolOutput::text("Sent answer to agent 5 as agent 2")
+            ToolOutput::text("Sent response to agent 5 as agent 2")
         );
     }
 

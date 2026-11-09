@@ -26,7 +26,7 @@ impl Tool for NewWindow {
     }
 
     fn description(&self) -> &'static str {
-        "Open a new shell window in the AOT session, in the background (the user's view does not switch). Optional dir: absolute, or relative to AOT's working directory (the default). Returns {\"index\", \"title\", \"cwd\"}; use the index with send_command and read_window."
+        "Open a new shell window in AOT, in the background (the user's view does not switch). Optional dir: absolute, or relative to AOT's working directory (the default). Returns {\"index\", \"title\", \"cwd\"}."
     }
 
     fn input_schema(&self) -> Value {

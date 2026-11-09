@@ -23,7 +23,7 @@ impl Tool for SendCommand {
     }
 
     fn description(&self) -> &'static str {
-        "Run a command in a non-agent window of the AOT session: it is typed into the window's shell and Enter is pressed. Takes the integer window index from list_windows (never a title) and the command as an array: the program followed by its arguments, e.g. [\"cargo\", \"test\", \"--lib\"]. Each element reaches the program as one argument; shell syntax such as pipes or redirection is not interpreted. The command runs asynchronously: call read_window afterwards to see its output. Agent windows are refused; use send_prompt for them. Your own window is refused."
+        "Run a command in a non-agent window managed by AOT. Takes the window's index (never its title) and the command as an array: the program followed by its arguments, e.g. [\"cargo\", \"test\", \"--lib\"]. Each element is passed to the program as one argument; shell syntax such as pipes or redirection is not interpreted. The command runs asynchronously; the tool does not wait for it to finish. Only works on non-agent windows, and never on your own."
     }
 
     fn input_schema(&self) -> Value {
@@ -33,7 +33,7 @@ impl Tool for SendCommand {
                 "index": {
                     "type": "integer",
                     "minimum": 0,
-                    "description": "Window index from list_windows",
+                    "description": "Index of the window",
                 },
                 "command": {
                     "type": "array",
@@ -57,10 +57,7 @@ impl Tool for SendCommand {
             Err(error) => return error,
         };
         match self.tmux.send_keys(window.id, &command, true) {
-            Ok(()) => ToolOutput::text(format!(
-                "Sent command to window {}; use read_window to see its output",
-                window.id
-            )),
+            Ok(()) => ToolOutput::text(format!("Sent command to window {}", window.id)),
             Err(error) => ToolOutput::error(format!(
                 "Failed to send command to window {}: {error}",
                 window.id
@@ -137,10 +134,7 @@ mod tests {
             &caller(),
         );
 
-        assert_eq!(
-            output,
-            ToolOutput::text("Sent command to window 3; use read_window to see its output")
-        );
+        assert_eq!(output, ToolOutput::text("Sent command to window 3"));
     }
 
     #[test]
@@ -151,7 +145,11 @@ mod tests {
             .call(&json!({ "index": 3, "command": ["ls"] }), &caller());
 
         assert!(output.is_error);
-        assert!(output.text.contains("use send_prompt"));
+        assert!(
+            output
+                .text
+                .contains("commands only run in non-agent windows")
+        );
     }
 
     #[test]

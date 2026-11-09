@@ -26,7 +26,7 @@ impl Tool for ReadAgent {
     }
 
     fn description(&self) -> &'static str {
-        "Read the last lines of an agent's screen and scrollback in the AOT session, as plain text. Use it to see an agent's progress, answer, or a question it is waiting on. Takes the integer window index from list_agents (never a title) and an optional number of lines (default 50, max 2000). Trailing blank lines are dropped. Same as read_window."
+        "Read the latest output of an agent managed by AOT, as plain text. Takes the agent's index (never its title) and an optional number of lines (default 50, max 2000). Trailing blank lines are dropped."
     }
 
     fn input_schema(&self) -> Value {
@@ -67,7 +67,7 @@ mod tests {
         let tool = ReadAgent::new(Arc::new(MockTmux::new()));
         let read_window = ReadWindow::new(Arc::new(MockTmux::new()));
         assert_eq!(tool.name(), "read_agent");
-        assert!(tool.description().contains("list_agents"));
+        assert!(tool.description().contains("agent's"));
         assert_eq!(tool.input_schema(), read_window.input_schema());
     }
 }

@@ -24,7 +24,7 @@ impl Tool for ListWindows {
     }
 
     fn description(&self) -> &'static str {
-        "List the plain (non-agent) windows of the AOT session, such as shells, servers, or editors. Returns {\"windows\": [{\"index\", \"title\", \"command\", \"cwd\", \"active\"}]}. Address windows in other tools by their integer index (e.g. 3), never by title. Indexes can change when windows are moved or renumbered; list again if a window is not where you expect. Use list_agents for agent windows."
+        "List the non-agent windows managed by AOT, such as shells, servers, or editors. Returns {\"windows\": [{\"index\", \"title\", \"command\", \"cwd\", \"active\"}]}. Windows are addressed by their index, never by title; indexes can change when windows are moved."
     }
 
     fn input_schema(&self) -> Value {

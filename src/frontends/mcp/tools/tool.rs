@@ -68,7 +68,7 @@ impl ToolOutput {
 pub fn index_argument(arguments: &Value) -> Result<u32, ToolOutput> {
     let value = arguments.get("index").ok_or_else(|| {
         ToolOutput::error(
-            "Missing required argument: index (the integer window index from list_windows or list_agents)",
+            "Missing required argument: index (the integer index of a window or agent)",
         )
     })?;
     let index = match value {
@@ -80,7 +80,7 @@ pub fn index_argument(arguments: &Value) -> Result<u32, ToolOutput> {
         .and_then(|index| u32::try_from(index).ok())
         .ok_or_else(|| {
             ToolOutput::error(format!(
-                "Invalid index {value}: pass the integer window index (e.g. 3) from list_windows or list_agents, not a title"
+                "Invalid index {value}: pass an integer index (e.g. 3), not a title"
             ))
         })
 }
@@ -129,7 +129,7 @@ pub fn find_window(tmux: &dyn Tmux, index: u32) -> Result<Window, ToolOutput> {
         .find(|window| window.id == index)
         .ok_or_else(|| {
             ToolOutput::error(format!(
-                "No window with index {index}; call list_windows or list_agents for the current indexes"
+                "No window or agent with index {index}; indexes may have changed"
             ))
         })
 }
@@ -137,12 +137,10 @@ pub fn find_window(tmux: &dyn Tmux, index: u32) -> Result<Window, ToolOutput> {
 /// Finds the window of the agent issuing the call, from its tmux pane.
 pub fn caller_window(tmux: &dyn Tmux, context: &CallContext) -> Result<Window, ToolOutput> {
     let pane = context.pane.as_deref().ok_or_else(|| {
-        ToolOutput::error("The calling window is unknown: the MCP client did not run inside an AOT window (TMUX_PANE unset)")
+        ToolOutput::error("You are not running inside AOT, so your own window is unknown")
     })?;
     let index = tmux.window_for_pane(pane).map_err(|error| {
-        ToolOutput::error(format!(
-            "Failed to find the calling window (pane {pane}): {error}"
-        ))
+        ToolOutput::error(format!("Failed to identify your own window: {error}"))
     })?;
     find_window(tmux, index)
 }
@@ -160,12 +158,12 @@ pub fn send_target(
     match (agent, agents::is_agent(&window.running_command)) {
         (true, None) => {
             return Err(ToolOutput::error(format!(
-                "Window {index} is not an agent window; use send_command to run commands in it"
+                "Index {index} is not an agent; only agents accept prompts"
             )));
         }
         (false, Some(found)) => {
             return Err(ToolOutput::error(format!(
-                "Window {index} runs an agent ({}); use send_prompt to give it a prompt",
+                "Index {index} is an agent ({}); commands only run in non-agent windows",
                 found.name()
             )));
         }
@@ -177,7 +175,7 @@ pub fn send_target(
         .and_then(|pane| tmux.window_for_pane(pane).ok());
     if own_index == Some(index) {
         return Err(ToolOutput::error(format!(
-            "Window {index} is your own window; send to another window"
+            "Index {index} is yourself; choose another target"
         )));
     }
     Ok(window)
@@ -273,7 +271,7 @@ pub(super) mod tests {
 
         let error = find_window(&tmux, 9).unwrap_err();
         assert!(error.is_error);
-        assert!(error.text.starts_with("No window with index 9"));
+        assert!(error.text.starts_with("No window or agent with index 9"));
     }
 
     #[test]
@@ -345,7 +343,7 @@ pub(super) mod tests {
     fn test_caller_window_without_pane() {
         let error = caller_window(&MockTmux::new(), &CallContext::default()).unwrap_err();
         assert!(error.is_error);
-        assert!(error.text.starts_with("The calling window is unknown"));
+        assert!(error.text.starts_with("You are not running inside AOT"));
     }
 
     #[test]
@@ -357,7 +355,7 @@ pub(super) mod tests {
         let error = caller_window(&tmux, &caller_context()).unwrap_err();
         assert_eq!(
             error.text,
-            "Failed to find the calling window (pane %3): Window not found"
+            "Failed to identify your own window: Window not found"
         );
     }
 
@@ -404,14 +402,14 @@ pub(super) mod tests {
         assert!(
             error
                 .text
-                .starts_with("Window 1 is not an agent window; use send_command")
+                .starts_with("Index 1 is not an agent; only agents accept prompts")
         );
 
         let error = send_target(&tmux, &json!({ "index": 2 }), &context, false).unwrap_err();
         assert!(
-            error
-                .text
-                .starts_with("Window 2 runs an agent (Claude); use send_prompt")
+            error.text.starts_with(
+                "Index 2 is an agent (Claude); commands only run in non-agent windows"
+            )
         );
     }
 
@@ -420,10 +418,7 @@ pub(super) mod tests {
         let tmux = send_tmux(shell_and_agent(), Some(2));
         let error =
             send_target(&tmux, &json!({ "index": 2 }), &caller_context(), true).unwrap_err();
-        assert_eq!(
-            error.text,
-            "Window 2 is your own window; send to another window"
-        );
+        assert_eq!(error.text, "Index 2 is yourself; choose another target");
     }
 
     #[test]

@@ -53,7 +53,7 @@ impl NewAgent {
                 let caller = caller_window(self.tmux.as_ref(), context)?;
                 agents::is_agent(&caller.running_command).ok_or_else(|| {
                     ToolOutput::error(format!(
-                        "No command given and the calling window is not an agent; pass command, one of the {}",
+                        "No command given and you are not an agent; pass command, one of the {}",
                         known_commands()
                     ))
                 })
@@ -78,7 +78,7 @@ impl Tool for NewAgent {
     }
 
     fn description(&self) -> &'static str {
-        "Start a new coding agent in its own window of the AOT session, in the background (the user's view does not switch). Optional command: the agent to start; defaults to the caller's own agent. Optional args: arguments passed to the agent as-is, e.g. [\"--model\", \"o3\"]. Optional dir: absolute, or relative to AOT's working directory (the default). Returns {\"index\", \"title\", \"agent\", \"cwd\"}; use the index with send_prompt and read_agent."
+        "Start a new coding agent in AOT, in its own window, in the background (the user's view does not switch). Optional command: the agent to start; defaults to the caller's own agent. Optional args: arguments passed to the agent as-is, e.g. [\"--model\", \"o3\"]. Optional dir: absolute, or relative to AOT's working directory (the default). Returns {\"index\", \"title\", \"agent\", \"cwd\"}."
     }
 
     fn input_schema(&self) -> Value {
@@ -258,7 +258,7 @@ mod tests {
         assert!(
             output
                 .text
-                .starts_with("No command given and the calling window is not an agent")
+                .starts_with("No command given and you are not an agent")
         );
         assert!(output.text.contains("claude"));
     }
@@ -267,7 +267,7 @@ mod tests {
     fn test_default_requires_a_known_caller() {
         let output = tool(MockTmux::new()).call(&json!({}), &CallContext::default());
         assert!(output.is_error);
-        assert!(output.text.starts_with("The calling window is unknown"));
+        assert!(output.text.starts_with("You are not running inside AOT"));
     }
 
     #[test]

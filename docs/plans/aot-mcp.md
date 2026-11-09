@@ -55,12 +55,12 @@ All take/return window indexes (field/arg `index`, integer). Names are the final
 | `new_window` | `dir?` (default AOT's PWD; relative paths resolve from it; must exist) | `{index, title, cwd}`; created detached so the user's view does not switch |
 | `new_agent` | `command?` (enum of known agent commands; default: caller's agent if the caller is an agent, else error asking for it), `args?` (string array passed to the agent as-is), `dir?` (default AOT's PWD) | `{index, title, agent, cwd}`; created detached; after ~500 ms the window (same index and pane pid) must still exist, else a tool error (agent not installed or failed on startup) |
 | `send_command` | `index`, `command` (array: program then arguments; each element shell-quoted only when needed and joined, so no shell syntax is interpreted) | confirmation; types the command and Enter |
-| `send_prompt` | `index`, `prompt` | starts a conversation: delivered as `[from agent N] <prompt>` plus a hint to answer with `respond_prompt` and index N, then Enter; sender (N = caller's window index) resolved from the connection's pane on each call and must be an agent window |
-| `respond_prompt` | `index` (N of the `[from agent N]` tag being answered), `prompt` | answers a conversation; same signed delivery as `send_prompt`, only the intent and description differ |
+| `send_prompt` | `index`, `prompt` | gives another agent a prompt, delivered as `[from agent N] <prompt>` then Enter; no response is implied; sender (N = caller's window index) resolved from the connection's pane on each call and must be an agent window |
+| `respond_prompt` | `index` (N of the `[from agent N]` tag being responded to), `prompt` | responds, when needed, to a prompt previously received from agent N; same signed delivery as `send_prompt`, different purpose |
 
 Guardrails: unknown/non-nested indexes → tool error; `send_*` refuse to target the caller's own window (when the caller's pane is known); `send_command` only targets non-agent windows and `send_prompt`/`respond_prompt` only agent windows, with errors pointing to the right tool; `lines` clamped.
 
-Settled (before task 8): prompts are delivered with bracketed paste (`set-buffer` + `paste-buffer -p -d`) so newlines stay in one prompt; a fixed ~200 ms delay separates the pasted text from Enter; both `send_prompt` and `respond_prompt` sign prompts with `[from agent N]` (revised after task 10: `send_prompt` always starts a conversation).
+Settled (before task 8): prompts are delivered with bracketed paste (`set-buffer` + `paste-buffer -p -d`) so newlines stay in one prompt; a fixed ~200 ms delay separates the pasted text from Enter; both `send_prompt` and `respond_prompt` sign prompts with `[from agent N]` and add no footer (revised after task 10); a prompt does not necessarily need a response.
 
 ## Workflow
 

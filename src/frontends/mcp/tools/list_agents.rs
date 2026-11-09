@@ -24,7 +24,7 @@ impl Tool for ListAgents {
     }
 
     fn description(&self) -> &'static str {
-        "List the agent windows of the AOT session (coding agents such as Claude, Codex, or OpenCode). Returns {\"agents\": [{\"index\", \"title\", \"agent\", \"command\", \"cwd\", \"active\"}]}. Address agents in other tools by their integer index (e.g. 3), never by title. Indexes can change when windows are moved or renumbered; list again if an agent is not where you expect. Use list_windows for non-agent windows."
+        "List the agents managed by AOT. Returns {\"agents\": [{\"index\", \"title\", \"agent\", \"command\", \"cwd\", \"active\"}]}. Agents are addressed by their index, never by title; indexes can change when agents are moved."
     }
 
     fn input_schema(&self) -> Value {
