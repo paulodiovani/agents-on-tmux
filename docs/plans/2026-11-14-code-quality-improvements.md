@@ -136,7 +136,7 @@ checks, but only by convention.
 | 3. MCP hardening | ⛔ Blocked (needs confirmation) |
 | 4. Architecture | ⬜ Not started |
 | 5. Tests and CI | ⬜ Not started |
-| 6. Logging | ✅ Done (2026-11-14, branch `chore/code-quality-plan-step6`) |
+| 6. Logging | ✅ Done (2026-11-14, PR #74) |
 
 Statuses: `⬜ Not started`, `🔄 In progress`, `⛔ Blocked (<reason>)`, `✅ Done (<date>, <commit or PR>)`.
 
@@ -229,7 +229,7 @@ Status: ⬜ Not started
 
 ### 6. Logging (small to medium, std-only)
 
-Status: ✅ Done (2026-11-14, branch `chore/code-quality-plan-step6`)
+Status: ✅ Done (2026-11-14, PR #74)
 
 - Trace every tmux command in the executor at debug level: argv, exit code,
   elapsed ms, and stderr on failure. Truncate `set-buffer` and `send-keys`
