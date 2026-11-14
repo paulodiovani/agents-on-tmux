@@ -10,6 +10,7 @@ pub enum LaunchMode {
 
 /// Application configuration options
 #[derive(serde::Deserialize, Clone, Default)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     #[serde(default)]
     pub tui: Option<bool>,
@@ -23,9 +24,9 @@ pub struct Config {
     pub font_awesome: Option<bool>,
     #[serde(default)]
     pub debug: Option<bool>,
-    #[serde(default)]
+    #[serde(skip)]
     pub tmux_env: Option<String>,
-    #[serde(default)]
+    #[serde(skip)]
     pub tui_pane: Option<String>,
 }
 
@@ -203,6 +204,18 @@ mod tests {
     fn test_parse_malformed_toml_returns_error() {
         let result: Result<Config, _> = toml::from_str("not valid {{{ toml");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_unknown_field_returns_error() {
+        let result: Result<Config, _> = toml::from_str("nerd_fonts = true\n");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_parse_rejects_env_only_fields() {
+        assert!(toml::from_str::<Config>("tmux_env = \"/tmp/x,1,0\"\n").is_err());
+        assert!(toml::from_str::<Config>("tui_pane = \"%1\"\n").is_err());
     }
 
     #[test]

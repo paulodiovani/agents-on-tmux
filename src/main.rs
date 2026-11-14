@@ -1,7 +1,6 @@
 mod backends;
 mod frontends;
 
-use std::fmt::Display;
 use std::sync::Arc;
 
 use backends::config::{Config, LaunchMode};
@@ -56,28 +55,20 @@ enum Command {
     Mcp,
 }
 
-// Implement Display so we can extract the cli options to forward to TUI side-panel
-impl Display for Cli {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if let Some(tui) = self.tui {
-            write!(f, "--tui={}", tui)?;
-        }
-        if let Some(no_tui) = self.no_tui {
-            write!(f, " --no-tui={}", no_tui)?;
-        }
-        if let Some(tui_width) = self.tui_width {
-            write!(f, " --tui-width={}", tui_width)?;
-        }
+impl Cli {
+    /// Options the TUI side-panel child must inherit from this invocation.
+    fn forwarded_args(&self) -> Vec<String> {
+        let mut args = Vec::new();
         if let Some(nerd_font) = self.nerd_font {
-            write!(f, " --nerd-font={}", nerd_font)?;
+            args.push(format!("--nerd-font={nerd_font}"));
         }
         if let Some(font_awesome) = self.font_awesome {
-            write!(f, " --font-awesome={}", font_awesome)?;
+            args.push(format!("--font-awesome={font_awesome}"));
         }
         if let Some(debug) = self.debug {
-            write!(f, " --debug={}", debug)?;
+            args.push(format!("--debug={debug}"));
         }
-        Ok(())
+        args
     }
 }
 
@@ -102,6 +93,15 @@ fn parse_bool(value: &str) -> Result<bool, String> {
         "0" | "false" | "no" | "off" => Ok(false),
         _ => Err(format!("expected boolean value, got '{value}'")),
     }
+}
+
+/// Shell command that launches the TUI side-panel in the parent session.
+fn split_command(exe: &str, cli: &Cli, width: u16) -> String {
+    let mut argv = vec![exe.to_string()];
+    argv.extend(cli.forwarded_args());
+    argv.push("--tui=true".to_string());
+    argv.push(format!("--tui-width={width}"));
+    backends::shell::join(&argv)
 }
 
 fn start_mcp_server() -> Option<McpServer> {
@@ -217,12 +217,7 @@ fn main() -> anyhow::Result<()> {
                 logger::error(&format!("main: signal install failed: {error}"));
             }
             let exe = std::env::current_exe()?;
-            let command = format!(
-                "{}{} --tui=true --tui-width={}",
-                exe.to_string_lossy(),
-                cli,
-                width,
-            );
+            let command = split_command(&exe.to_string_lossy(), &cli, width);
             parent_driver.split_window(&command, width)?;
             nested_driver.attach_session()?;
         }
@@ -245,33 +240,36 @@ mod tests {
     #[test]
     fn test_cli_display_without_icon_flags() {
         let cli = Cli::parse_from(["aot"]);
-        assert_eq!(format!("{}", cli), "");
+        assert!(cli.forwarded_args().is_empty());
     }
 
     #[test]
     fn test_cli_display_with_nerd_font_flag() {
         let cli = Cli::parse_from(["aot", "--nerd-font"]);
-        assert_eq!(format!("{}", cli), " --nerd-font=true");
+        assert_eq!(cli.forwarded_args(), ["--nerd-font=true"]);
     }
 
     #[test]
     fn test_cli_display_with_font_awesome_flag() {
         let cli = Cli::parse_from(["aot", "--font-awesome"]);
-        assert_eq!(format!("{}", cli), " --font-awesome=true");
+        assert_eq!(cli.forwarded_args(), ["--font-awesome=true"]);
     }
 
     #[test]
     fn test_cli_display_with_both_icon_flags() {
         let cli = Cli::parse_from(["aot", "--nerd-font", "--font-awesome"]);
-        assert_eq!(format!("{}", cli), " --nerd-font=true --font-awesome=true");
+        assert_eq!(
+            cli.forwarded_args(),
+            ["--nerd-font=true", "--font-awesome=true"]
+        );
     }
 
     #[test]
     fn test_cli_display_with_explicit_false_values() {
         let cli = Cli::parse_from(["aot", "--nerd-font=false", "--font-awesome=false"]);
         assert_eq!(
-            format!("{}", cli),
-            " --nerd-font=false --font-awesome=false"
+            cli.forwarded_args(),
+            ["--nerd-font=false", "--font-awesome=false"]
         );
     }
 
@@ -304,11 +302,39 @@ mod tests {
     }
 
     #[test]
-    fn test_tui_width_forwarded_to_tui_command() {
-        // The width must survive the hop to the TUI child process: pane
-        // processes are spawned by the tmux server, not by aot.
+    fn test_split_command_passes_width_to_tui() {
         let cli = Cli::parse_from(["aot", "--tui-width=50"]);
-        assert_eq!(format!("{}", cli), " --tui-width=50");
+        assert_eq!(
+            split_command("/usr/bin/aot", &cli, 50),
+            "/usr/bin/aot --tui=true --tui-width=50"
+        );
+    }
+
+    #[test]
+    fn test_split_command_forwards_options() {
+        let cli = Cli::parse_from(["aot", "--nerd-font", "--debug=false"]);
+        assert_eq!(
+            split_command("/usr/bin/aot", &cli, 35),
+            "/usr/bin/aot --nerd-font=true --debug=false --tui=true --tui-width=35"
+        );
+    }
+
+    #[test]
+    fn test_split_command_quotes_exe_path() {
+        let cli = Cli::parse_from(["aot"]);
+        assert_eq!(
+            split_command("/home/me/my apps/aot", &cli, 35),
+            "'/home/me/my apps/aot' --tui=true --tui-width=35"
+        );
+    }
+
+    #[test]
+    fn test_split_command_drops_conflicting_tui_flags() {
+        let cli = Cli::parse_from(["aot", "--no-tui=false"]);
+        let command = split_command("aot", &cli, 40);
+        let child = Cli::try_parse_from(command.split(' ')).unwrap();
+        assert_eq!(child.tui, Some(true));
+        assert_eq!(child.tui_width, Some(40));
     }
 
     #[test]
@@ -323,7 +349,7 @@ mod tests {
     fn test_mcp_subcommand() {
         let cli = Cli::parse_from(["aot", "mcp"]);
         assert_eq!(cli.command, Some(Command::Mcp));
-        assert_eq!(format!("{}", cli), "");
+        assert!(cli.forwarded_args().is_empty());
     }
 
     #[test]
@@ -341,6 +367,6 @@ mod tests {
     #[test]
     fn test_cli_display_with_debug_flag() {
         let cli = Cli::parse_from(["aot", "--debug"]);
-        assert_eq!(format!("{}", cli), " --debug=true");
+        assert_eq!(cli.forwarded_args(), ["--debug=true"]);
     }
 }
