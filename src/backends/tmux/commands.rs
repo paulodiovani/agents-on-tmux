@@ -95,6 +95,8 @@ pub enum TmuxError {
     InsideOwnServer(String),
     #[error("Not running inside a tmux session")]
     NotInsideTmux,
+    #[error("Unexpected tmux output: {0:?}")]
+    UnexpectedOutput(String),
     #[error("Window not found")]
     WindowNotFound,
 }
@@ -508,7 +510,7 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
         let id = output
             .trim()
             .parse::<u32>()
-            .map_err(|_| TmuxError::WindowNotFound)?;
+            .map_err(|_| TmuxError::UnexpectedOutput(output))?;
 
         self.list_windows()?
             .into_iter()
@@ -613,7 +615,7 @@ impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
         output
             .trim()
             .parse::<u32>()
-            .map_err(|_| TmuxError::WindowNotFound)
+            .map_err(|_| TmuxError::UnexpectedOutput(output))
     }
 
     /// Types `text` literally into the window's active pane, then presses
@@ -742,6 +744,7 @@ mod tests {
                     *self.session_exists.borrow_mut() = true;
                     Ok(String::new())
                 }
+                Some(&"new-window") if args.contains(&"garbled") => Ok("oops\n".to_string()),
                 Some(&"new-window") => {
                     let name = args
                         .windows(2)
@@ -1033,6 +1036,16 @@ mod tests {
             .create_window(Some("same"), None, None, false)
             .unwrap();
         assert_eq!(second.id, 2);
+    }
+
+    #[test]
+    fn test_create_window_unparsable_output() {
+        let executor = MockCommandExecutor::with_session();
+        let driver = TmuxDriver::with_executor(executor);
+        assert!(matches!(
+            driver.create_window(Some("garbled"), None, None, false),
+            Err(TmuxError::UnexpectedOutput(output)) if output == "oops\n"
+        ));
     }
 
     #[test]
@@ -1430,7 +1443,7 @@ mod tests {
 
         assert!(matches!(
             driver.window_for_pane("%1"),
-            Err(TmuxError::WindowNotFound)
+            Err(TmuxError::UnexpectedOutput(output)) if output.is_empty()
         ));
     }
 

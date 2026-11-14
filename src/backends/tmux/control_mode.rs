@@ -34,8 +34,9 @@ pub enum EventProducer {
 enum PumpOutcome {
     /// Stop reconnecting (exit received or receiver dropped).
     Exit,
-    /// Connection lost, should reconnect.
-    Reconnect,
+    /// Connection lost, should reconnect. `forwarded` tells whether the
+    /// connection delivered any event before it ended.
+    Reconnect { forwarded: bool },
 }
 
 /// Owns the control-mode child process. Reading delegates to the child's stdout;
@@ -139,6 +140,7 @@ fn pump_events(
     event_tx: &mpsc::Sender<TmuxEvent>,
 ) -> PumpOutcome {
     let mut buf = Vec::new();
+    let mut forwarded = false;
     loop {
         buf.clear();
         match reader.read_until(b'\n', &mut buf) {
@@ -146,7 +148,7 @@ fn pump_events(
             Ok(_) => {}
             Err(error) => {
                 logger::error(&format!("control_mode: read error: {error}"));
-                return PumpOutcome::Reconnect;
+                return PumpOutcome::Reconnect { forwarded };
             }
         }
         let line = String::from_utf8_lossy(&buf).trim_end().to_string();
@@ -157,9 +159,7 @@ fn pump_events(
 
             // Exit event: always forward and stop
             (_, Some(TmuxEvent::Exit)) => {
-                if let Err(error) = event_tx.send(TmuxEvent::Exit) {
-                    logger::error(&format!("control_mode: failed to send exit: {error}"));
-                }
+                send_exit(event_tx);
                 return PumpOutcome::Exit;
             }
 
@@ -169,6 +169,7 @@ fn pump_events(
                     logger::error(&format!("control_mode: failed to send event: {error}"));
                     return PumpOutcome::Exit;
                 }
+                forwarded = true;
             }
 
             // Nested producer: forward everything except pane focus changes
@@ -177,16 +178,19 @@ fn pump_events(
                     logger::error(&format!("control_mode: failed to send event: {error}"));
                     return PumpOutcome::Exit;
                 }
+                forwarded = true;
             }
 
             // All other combinations: skip (filtered out by producer)
             _ => continue,
         }
     }
-    PumpOutcome::Reconnect
+    PumpOutcome::Reconnect { forwarded }
 }
 
 /// Retry/backoff loop, decoupled from tmux and from real time for testing.
+/// A connection that ends after delivering events resets the retry count; one
+/// that ends without delivering any counts as a failed attempt.
 fn run_with_reconnect<C, R>(
     mut connect: C,
     producer: EventProducer,
@@ -198,33 +202,41 @@ fn run_with_reconnect<C, R>(
 {
     let mut retries = 0u32;
     loop {
-        match connect() {
-            Ok(reader) => {
-                let outcome = pump_events(reader, producer, event_tx);
-                if matches!(outcome, PumpOutcome::Exit) {
-                    if let Err(error) = event_tx.send(TmuxEvent::Exit) {
-                        logger::error(&format!("control_mode: failed to send exit: {error}"));
-                    }
+        let failure = match connect() {
+            Ok(reader) => match pump_events(reader, producer, event_tx) {
+                PumpOutcome::Exit => {
+                    send_exit(event_tx);
                     return;
                 }
-                retries = 0;
-            }
-            Err(e) => {
-                let error_msg = e.to_string();
-                crate::backends::logger::debug(&format!("control_mode: connect failed: {e}"));
-                retries += 1;
-                if retries as usize >= MAX_RETRIES {
-                    crate::backends::logger::error(&format!(
-                        "control_mode: max reconnection attempts reached: {error_msg}"
-                    ));
-                    if let Err(error) = event_tx.send(TmuxEvent::Exit) {
-                        logger::error(&format!("control_mode: failed to send exit: {error}"));
-                    }
-                    return;
+                PumpOutcome::Reconnect { forwarded: true } => {
+                    logger::debug("control_mode: connection ended, reconnecting");
+                    retries = 0;
+                    None
                 }
-                std::thread::sleep(backoff(retries));
+                PumpOutcome::Reconnect { forwarded: false } => {
+                    Some("connection ended without events".to_string())
+                }
+            },
+            Err(error) => Some(error.to_string()),
+        };
+        if let Some(error) = failure {
+            logger::debug(&format!("control_mode: connect failed: {error}"));
+            retries += 1;
+            if retries as usize >= MAX_RETRIES {
+                logger::error(&format!(
+                    "control_mode: max reconnection attempts reached: {error}"
+                ));
+                send_exit(event_tx);
+                return;
             }
         }
+        std::thread::sleep(backoff(retries.max(1)));
+    }
+}
+
+fn send_exit(event_tx: &mpsc::Sender<TmuxEvent>) {
+    if let Err(error) = event_tx.send(TmuxEvent::Exit) {
+        logger::error(&format!("control_mode: failed to send exit: {error}"));
     }
 }
 
@@ -289,6 +301,7 @@ fn spawn_control_mode(session: &str, socket: Option<&str>) -> std::io::Result<Co
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::cell::RefCell;
 
     #[test]
     fn test_parse_window_add() {
@@ -413,7 +426,7 @@ mod tests {
         let input = std::io::Cursor::new("%window-add @3\n");
         assert_eq!(
             pump_events(input, EventProducer::Nested, &tx),
-            PumpOutcome::Reconnect
+            PumpOutcome::Reconnect { forwarded: true }
         ); // plain EOF, no %exit
         assert_eq!(rx.recv().unwrap(), TmuxEvent::Refresh);
     }
@@ -483,6 +496,57 @@ mod tests {
         assert_eq!(attempts, 10);
         assert_eq!(rx.recv().unwrap(), TmuxEvent::Refresh);
         assert_eq!(rx.recv().unwrap(), TmuxEvent::Exit);
+    }
+
+    #[test]
+    fn test_pump_filtered_events_are_not_forwarded() {
+        let (tx, _rx) = mpsc::channel();
+        let input = std::io::Cursor::new("%window-add @3\n");
+        assert_eq!(
+            pump_events(input, EventProducer::Parent, &tx),
+            PumpOutcome::Reconnect { forwarded: false }
+        );
+    }
+
+    #[test]
+    fn test_eof_without_events_counts_as_failure() {
+        let (tx, rx) = mpsc::channel();
+        let mut attempts = 0;
+        run_with_reconnect(
+            || -> std::io::Result<std::io::Cursor<&[u8]>> {
+                attempts += 1;
+                Ok(std::io::Cursor::new(b""))
+            },
+            EventProducer::Nested,
+            &tx,
+            |_| Duration::ZERO,
+        );
+        assert_eq!(attempts, MAX_RETRIES);
+        assert_eq!(rx.recv().unwrap(), TmuxEvent::Exit);
+    }
+
+    #[test]
+    fn test_backs_off_after_every_reconnect() {
+        let (tx, _rx) = mpsc::channel();
+        let mut attempts = 0;
+        let delays = RefCell::new(Vec::new());
+        run_with_reconnect(
+            || -> std::io::Result<std::io::Cursor<Vec<u8>>> {
+                attempts += 1;
+                match attempts {
+                    1 | 2 => Ok(std::io::Cursor::new(b"%window-add @1\n".to_vec())),
+                    3 => Err(std::io::Error::other("boom")),
+                    _ => Ok(std::io::Cursor::new(b"%exit\n".to_vec())),
+                }
+            },
+            EventProducer::Nested,
+            &tx,
+            |n| {
+                delays.borrow_mut().push(n);
+                Duration::ZERO
+            },
+        );
+        assert_eq!(*delays.borrow(), [1, 1, 1]);
     }
 
     #[test]

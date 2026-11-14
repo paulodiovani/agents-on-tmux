@@ -14,9 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Forbid `unwrap`, `expect`, `panic!`, indexing and string slicing in non-test code through clippy lints
+- Reject unknown keys in the config file, and the env-only `tmux_env`/`tui_pane` keys
+- Report unparsable tmux output as its own error instead of "window not found"
 
 ### Fixed
 - Crash when logging a malformed tmux window line containing multibyte characters
+- Tight reconnect loop when the tmux control-mode connection ends without `%exit`
+- TUI side-panel failing to launch when the `aot` path contains spaces, or when `--tui`/`--no-tui` were passed explicitly
 
 ## [1.0.0] - 2026-09-21
 
