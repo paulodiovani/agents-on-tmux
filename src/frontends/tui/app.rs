@@ -60,15 +60,11 @@ fn effective_prefix(driver: &dyn Tmux) -> Option<String> {
     match driver.show_options("prefix", false) {
         Ok(value) if !value.is_empty() => Some(value),
         Err(error) => {
-            logger::debug(&format!(
-                "app: show-options prefix (session) failed: {error}"
-            ));
+            logger::debug!("app: show-options prefix (session) failed: {error}");
             match driver.show_options("prefix", true) {
                 Ok(value) if !value.is_empty() => Some(value),
                 Err(error) => {
-                    logger::debug(&format!(
-                        "app: show-options prefix (global) failed: {error}"
-                    ));
+                    logger::debug!("app: show-options prefix (global) failed: {error}");
                     None
                 }
                 _ => None,
@@ -77,9 +73,7 @@ fn effective_prefix(driver: &dyn Tmux) -> Option<String> {
         _ => match driver.show_options("prefix", true) {
             Ok(value) if !value.is_empty() => Some(value),
             Err(error) => {
-                logger::debug(&format!(
-                    "app: show-options prefix (global) failed: {error}"
-                ));
+                logger::debug!("app: show-options prefix (global) failed: {error}");
                 None
             }
             _ => None,
@@ -102,7 +96,7 @@ fn resolve_tmux_hints(nested: &dyn Tmux, parent: &dyn Tmux) -> Vec<(String, Stri
     let keys = match nested.list_keys("prefix") {
         Ok(keys) => keys,
         Err(error) => {
-            logger::debug(&format!("app: list-keys nested failed: {error}"));
+            logger::debug!("app: list-keys nested failed: {error}");
             return Vec::new();
         }
     };
@@ -111,7 +105,7 @@ fn resolve_tmux_hints(nested: &dyn Tmux, parent: &dyn Tmux) -> Vec<(String, Stri
         let parent_keys = match parent.list_keys("prefix") {
             Ok(keys) => keys,
             Err(error) => {
-                logger::debug(&format!("app: list-keys parent failed: {error}"));
+                logger::debug!("app: list-keys parent failed: {error}");
                 return Vec::new();
             }
         };
@@ -202,11 +196,9 @@ impl App {
             && let Some(pane_id) = &self.pane_id
             && current_width != target
         {
-            logger::debug(&format!(
-                "app: enforce panel width {target} (was {current_width})"
-            ));
+            logger::debug!("app: enforce panel width {target} (was {current_width})");
             if let Err(error) = self.parent_driver.resize_pane(pane_id, target) {
-                logger::error(&format!("app: resize pane failed: {error}"));
+                logger::error!("app: resize pane failed: {error}");
             }
         }
     }
@@ -225,9 +217,7 @@ impl App {
         let parent_session = self.parent_driver.session_name().to_string();
         let parent_socket = self.parent_driver.socket_name().map(|s| s.to_string());
         let parent_tx = event_tx.clone();
-        logger::info(&format!(
-            "app: starting parent control mode: session={parent_session}"
-        ));
+        logger::info!("app: starting parent control mode: session={parent_session}");
         std::thread::spawn(move || {
             tmux::control_mode_thread(
                 parent_session,
@@ -239,9 +229,7 @@ impl App {
 
         let nested_session = self.nested_driver.session_name().to_string();
         let nested_socket = self.nested_driver.socket_name().map(|s| s.to_string());
-        logger::info(&format!(
-            "app: starting nested control mode: session={nested_session}"
-        ));
+        logger::info!("app: starting nested control mode: session={nested_session}");
         std::thread::spawn(move || {
             tmux::control_mode_thread(
                 nested_session,
@@ -300,7 +288,7 @@ impl App {
 
             // Check for signals (SIGTERM, SIGINT, etc.). If received, shut down cleanly.
             if let Some((signo, name)) = crate::backends::signals::received() {
-                logger::error(&format!("app: received {name} ({signo}), shutting down"));
+                logger::error!("app: received {name} ({signo}), shutting down");
                 self.running = false;
             }
         }
@@ -335,7 +323,7 @@ impl App {
         }
 
         if needs_refresh && let Err(error) = self.refresh_windows() {
-            logger::error(&format!("app: refresh windows failed: {error}"));
+            logger::error!("app: refresh windows failed: {error}");
         }
         if should_exit {
             self.running = false;
@@ -430,14 +418,14 @@ impl App {
 
     /// Signals the application to stop running.
     fn quit(&mut self) {
-        logger::info("app: quit");
+        logger::info!("app: quit");
         self.running = false;
     }
 
     /// Updates the pane focus state.
     pub fn set_pane_active(&mut self, active: bool) {
         if self.pane_active != active {
-            logger::debug(&format!("app: pane active {active}"));
+            logger::debug!("app: pane active {active}");
             self.pane_active = active;
         }
     }
@@ -468,12 +456,12 @@ impl App {
     /// Focuses the currently selected tmux window.
     fn focus_window(&self) {
         if let Some(window) = self.current_tab_window() {
-            logger::debug(&format!("app: focus window @{}", window.id));
+            logger::debug!("app: focus window @{}", window.id);
             if let Err(error) = self.nested_driver.select_window(window.id) {
-                logger::error(&format!("app: select window failed: {error}"));
+                logger::error!("app: select window failed: {error}");
             }
             if let Err(error) = self.parent_driver.last_pane() {
-                logger::error(&format!("app: last pane failed: {error}"));
+                logger::error!("app: last pane failed: {error}");
             }
         }
     }
@@ -482,14 +470,14 @@ impl App {
     fn create_window(&mut self) {
         self.active_tab = Tab::Windows;
         let name = format!("agent-{}", self.windows.len() + 1);
-        logger::debug(&format!("app: create window {name}"));
+        logger::debug!("app: create window {name}");
         match self
             .nested_driver
             .create_window(Some(&name), None, None, false)
         {
             Ok(new_window) => {
                 if let Err(error) = self.refresh_windows() {
-                    logger::error(&format!("app: refresh windows failed: {error}"));
+                    logger::error!("app: refresh windows failed: {error}");
                 }
                 let indices = self.current_tab_indices();
                 if let Some(pos) = indices
@@ -502,7 +490,7 @@ impl App {
                 self.focus_window();
             }
             Err(error) => {
-                logger::error(&format!("app: create window failed: {error}"));
+                logger::error!("app: create window failed: {error}");
             }
         }
     }
@@ -510,12 +498,12 @@ impl App {
     /// Kills the currently selected tmux window.
     pub fn kill_window(&mut self) {
         if let Some(window) = self.current_tab_window() {
-            logger::debug(&format!("app: kill window @{}", window.id));
+            logger::debug!("app: kill window @{}", window.id);
             if let Err(error) = self.nested_driver.kill_window(window.id) {
-                logger::error(&format!("app: kill window failed: {error}"));
+                logger::error!("app: kill window failed: {error}");
             }
             if let Err(error) = self.refresh_windows() {
-                logger::error(&format!("app: refresh windows failed: {error}"));
+                logger::error!("app: refresh windows failed: {error}");
             }
         }
     }
@@ -526,18 +514,18 @@ impl App {
     /// later through the usual control-mode refresh.
     fn rename_window(&self) {
         if let Some(window) = self.current_tab_window() {
-            logger::debug(&format!("app: rename window @{}", window.id));
+            logger::debug!("app: rename window @{}", window.id);
             if let Err(error) = self.parent_driver.last_pane() {
-                logger::error(&format!("app: last pane failed: {error}"));
+                logger::error!("app: last pane failed: {error}");
             }
             if let Err(error) = self
                 .nested_driver
                 .prompt_rename_window(window.id, &window.name)
             {
-                logger::error(&format!("app: rename window failed: {error}"));
+                logger::error!("app: rename window failed: {error}");
             }
             if let Err(error) = self.parent_driver.last_pane() {
-                logger::error(&format!("app: last pane failed: {error}"));
+                logger::error!("app: last pane failed: {error}");
             }
         }
     }
@@ -545,7 +533,7 @@ impl App {
     /// Switches to the given tab if it is not empty.
     pub fn switch_tab(&mut self, tab: Tab) {
         if !self.is_tab_empty(tab) {
-            logger::debug(&format!("app: switch tab -> {tab:?}"));
+            logger::debug!("app: switch tab -> {tab:?}");
             let current_dir = self
                 .current_tab_window()
                 .map(|w| w.current_dir.clone())

@@ -1,6 +1,9 @@
+use std::time::{Duration, Instant};
+
 use serde_json::{Map, Value, json};
 
-use super::tools::{CallContext, Tool};
+use super::tools::{CallContext, Tool, ToolOutput};
+use crate::backends::logger;
 
 /// Answers MCP JSON-RPC messages, one line at a time.
 pub trait Protocol {
@@ -121,7 +124,12 @@ impl McpHandler {
             }
         };
 
+        let started = Instant::now();
         let output = tool.call(&arguments, context);
+        logger::info!(
+            "{}",
+            call_summary(name, &arguments, context, &output, started.elapsed())
+        );
         let mut result = Map::new();
         result.insert(
             "content".into(),
@@ -265,10 +273,30 @@ fn error_response(id: &Value, error: RpcError) -> String {
     json!({ "jsonrpc": "2.0", "id": id, "error": body }).to_string()
 }
 
+/// Log line describing one tool call, with argument sizes but not their values.
+fn call_summary(
+    name: &str,
+    arguments: &Value,
+    context: &CallContext,
+    output: &ToolOutput,
+    elapsed: Duration,
+) -> String {
+    let pane = context.pane.as_deref().unwrap_or("unknown");
+    let index = arguments
+        .get("index")
+        .map_or_else(|| "-".to_string(), Value::to_string);
+    let outcome = if output.is_error { "error" } else { "ok" };
+    format!(
+        "mcp: pane {pane} called {name} index={index} args={}B -> {outcome} in {}ms",
+        arguments.to_string().len(),
+        elapsed.as_millis()
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::frontends::mcp::tools::ToolOutput;
+    use crate::backends::logger::tests::{init_for_test, temp_log_path};
 
     struct EchoTool;
 
@@ -487,6 +515,37 @@ mod tests {
         );
         assert_eq!(response["result"]["isError"], true);
         assert!(response["result"].get("structuredContent").is_none());
+    }
+
+    #[test]
+    fn test_tools_call_is_logged_without_argument_values() {
+        let path = temp_log_path();
+        let _guard = init_for_test(&path);
+
+        reply(
+            &handler(),
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"echo","arguments":{"index":3,"text":"secret"}}}"#,
+        );
+
+        let log = std::fs::read_to_string(&path).unwrap();
+        assert!(log.contains("INFO mcp: pane %1 called echo index=3 args=27B -> ok in "));
+        assert!(!log.contains("secret"));
+    }
+
+    #[test]
+    fn test_call_summary_reports_errors_and_missing_fields() {
+        let output = ToolOutput::error("boom");
+        let summary = call_summary(
+            "echo",
+            &json!({}),
+            &CallContext { pane: None },
+            &output,
+            Duration::from_millis(12),
+        );
+        assert_eq!(
+            summary,
+            "mcp: pane unknown called echo index=- args=2B -> error in 12ms"
+        );
     }
 
     #[test]

@@ -71,11 +71,11 @@ impl Drop for ControlModeReader {
         match self.child.wait() {
             Ok(status) => {
                 if !status.success() {
-                    logger::debug(&format!("control_mode: tmux exited with {status}"));
+                    logger::debug!("control_mode: tmux exited with {status}");
                 }
             }
             Err(error) => {
-                logger::error(&format!("control_mode: failed to wait for tmux: {error}"));
+                logger::error!("control_mode: failed to wait for tmux: {error}");
             }
         }
         if let Some(handle) = self.stderr_thread.take() {
@@ -91,36 +91,36 @@ fn parse_event(line: &str) -> Option<TmuxEvent> {
 
     match command {
         "%exit" => {
-            crate::backends::logger::debug(&format!("control_mode: {command}"));
+            logger::debug!("control_mode: {command}");
             Some(TmuxEvent::Exit)
         }
         // Activity changes: keep the active window live.
         "%session-changed" | "%session-window-changed" => {
-            crate::backends::logger::debug(&format!("control_mode: {command}"));
+            logger::debug!("control_mode: {command}");
             Some(TmuxEvent::Refresh)
         }
         // Structural changes: validate the id so malformed lines are ignored.
         "%window-add" | "%window-close" | "%window-renamed" => {
-            crate::backends::logger::debug(&format!("control_mode: {command}"));
+            logger::debug!("control_mode: {command}");
             let raw = parts.next()?;
             let id = raw.strip_prefix('@')?;
             match id.parse::<u32>() {
                 Ok(_) => Some(TmuxEvent::Refresh),
                 Err(_) => {
-                    logger::debug(&format!("control_mode: malformed window id '{id}'"));
+                    logger::debug!("control_mode: malformed window id '{id}'");
                     None
                 }
             }
         }
         // Pane focus changes: extract the pane-id so the TUI can compare it.
         "%window-pane-changed" => {
-            crate::backends::logger::debug(&format!("control_mode: {command}"));
+            logger::debug!("control_mode: {command}");
             let id = parts.nth(1); // skip window id and pick pane id
             let id = id.filter(|id| id.starts_with("%"));
             match id {
                 Some(id) => Some(TmuxEvent::PaneChanged(id.to_string())),
                 None => {
-                    logger::debug(&format!("control_mode: {} missing pane id", command));
+                    logger::debug!("control_mode: {} missing pane id", command);
                     None
                 }
             }
@@ -147,7 +147,7 @@ fn pump_events(
             Ok(0) => break,
             Ok(_) => {}
             Err(error) => {
-                logger::error(&format!("control_mode: read error: {error}"));
+                logger::error!("control_mode: read error: {error}");
                 return PumpOutcome::Reconnect { forwarded };
             }
         }
@@ -166,7 +166,7 @@ fn pump_events(
             // Parent producer: only forward pane focus changes
             (EventProducer::Parent, Some(event @ TmuxEvent::PaneChanged(_))) => {
                 if let Err(error) = event_tx.send(event) {
-                    logger::error(&format!("control_mode: failed to send event: {error}"));
+                    logger::error!("control_mode: failed to send event: {error}");
                     return PumpOutcome::Exit;
                 }
                 forwarded = true;
@@ -175,7 +175,7 @@ fn pump_events(
             // Nested producer: forward everything except pane focus changes
             (EventProducer::Nested, Some(event)) if !matches!(event, TmuxEvent::PaneChanged(_)) => {
                 if let Err(error) = event_tx.send(event) {
-                    logger::error(&format!("control_mode: failed to send event: {error}"));
+                    logger::error!("control_mode: failed to send event: {error}");
                     return PumpOutcome::Exit;
                 }
                 forwarded = true;
@@ -209,7 +209,7 @@ fn run_with_reconnect<C, R>(
                     return;
                 }
                 PumpOutcome::Reconnect { forwarded: true } => {
-                    logger::debug("control_mode: connection ended, reconnecting");
+                    logger::debug!("control_mode: connection ended, reconnecting");
                     retries = 0;
                     None
                 }
@@ -220,12 +220,10 @@ fn run_with_reconnect<C, R>(
             Err(error) => Some(error.to_string()),
         };
         if let Some(error) = failure {
-            logger::debug(&format!("control_mode: connect failed: {error}"));
+            logger::debug!("control_mode: connect failed: {error}");
             retries += 1;
             if retries as usize >= MAX_RETRIES {
-                logger::error(&format!(
-                    "control_mode: max reconnection attempts reached: {error}"
-                ));
+                logger::error!("control_mode: max reconnection attempts reached: {error}");
                 send_exit(event_tx);
                 return;
             }
@@ -236,7 +234,7 @@ fn run_with_reconnect<C, R>(
 
 fn send_exit(event_tx: &mpsc::Sender<TmuxEvent>) {
     if let Err(error) = event_tx.send(TmuxEvent::Exit) {
-        logger::error(&format!("control_mode: failed to send exit: {error}"));
+        logger::error!("control_mode: failed to send exit: {error}");
     }
 }
 
@@ -285,7 +283,7 @@ fn spawn_control_mode(session: &str, socket: Option<&str>) -> std::io::Result<Co
         let reader = BufReader::new(stderr);
         for line in reader.lines().map_while(Result::ok) {
             if !line.is_empty() {
-                logger::error(&format!("control_mode: tmux: {line}"));
+                logger::error!("control_mode: tmux: {line}");
             }
         }
     });

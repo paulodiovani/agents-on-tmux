@@ -25,7 +25,7 @@ pub fn install(policy: OnSignal) -> std::io::Result<()> {
     std::thread::spawn(move || {
         for signo in signals.forever() {
             if let Some(name) = name_of(signo) {
-                logger::error(&format!("signal: received {name} ({signo})"));
+                logger::error!("signal: received {name} ({signo})");
             }
             RECEIVED.store(signo as usize, Ordering::SeqCst);
 

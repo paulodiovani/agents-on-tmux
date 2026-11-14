@@ -136,7 +136,7 @@ checks, but only by convention.
 | 3. MCP hardening | ⛔ Blocked (needs confirmation) |
 | 4. Architecture | ⬜ Not started |
 | 5. Tests and CI | ⬜ Not started |
-| 6. Logging | ⬜ Not started |
+| 6. Logging | ✅ Done (2026-11-14, branch `chore/code-quality-plan-step6`) |
 
 Statuses: `⬜ Not started`, `🔄 In progress`, `⛔ Blocked (<reason>)`, `✅ Done (<date>, <commit or PR>)`.
 
@@ -229,7 +229,7 @@ Status: ⬜ Not started
 
 ### 6. Logging (small to medium, std-only)
 
-Status: ⬜ Not started
+Status: ✅ Done (2026-11-14, branch `chore/code-quality-plan-step6`)
 
 - Trace every tmux command in the executor at debug level: argv, exit code,
   elapsed ms, and stderr on failure. Truncate `set-buffer` and `send-keys`
@@ -245,6 +245,12 @@ Status: ⬜ Not started
 - Truncate or rotate once at startup when the file exceeds a size cap (for
   example keep one `aot.log.old`).
 - Log the resolved config and launch mode once at startup.
+
+Outcome: the role is per process (`main`, `tui`, `shim`), and MCP server
+threads override it with `mcp`. Typed and pasted text is replaced by its byte
+count instead of truncated. The size cap is 5 MiB. Converting the call sites to
+`logger::debug!`/`info!`/`error!` also unified the mixed logger paths listed
+under step 4.
 
 ## Open decisions
 

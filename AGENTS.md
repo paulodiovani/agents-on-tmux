@@ -41,7 +41,7 @@ Two top-level modules under `src/`:
   - `TmuxError` enum for error handling
   - `agents.rs` identifies agents by name and command
   - `shell.rs` builds shell-quoted command lines from argv
-  - `logger.rs` is a std-only global file logger (`init`/`debug`/`error`), it never writes to stdout/stderr
+  - `logger.rs` is a std-only global file logger (`init`, lazy `debug!`/`info!`/`error!` macros used as `logger::debug!(...)`), it never writes to stdout/stderr; lines carry pid and a role tag (`main`, `tui`, `mcp`, `shim`)
 
 - `frontends/` — interfaces to AOT features
   - `tui/` terminal UI (app, event, icons, path, theme, ui)
