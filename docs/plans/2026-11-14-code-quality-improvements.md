@@ -131,7 +131,7 @@ checks, but only by convention.
 
 | Step | Status |
 |---|---|
-| 1. Panic gate | ✅ Done (2026-11-14, branch `chore/code-quality-plan`) |
+| 1. Panic gate | ✅ Done (2026-11-14, PR #72) |
 | 2. Robustness fixes | ⬜ Not started |
 | 3. MCP hardening | ⛔ Blocked (needs confirmation) |
 | 4. Architecture | ⬜ Not started |
@@ -154,7 +154,7 @@ How to update:
 
 ### 1. Panic gate (small)
 
-Status: ✅ Done (2026-11-14, branch `chore/code-quality-plan`)
+Status: ✅ Done (2026-11-14, PR #72)
 
 - Add `[lints.clippy]` to `Cargo.toml` denying `unwrap_used`, `expect_used`,
   `panic`, `todo`, `unimplemented`, `unreachable`, `string_slice` and
