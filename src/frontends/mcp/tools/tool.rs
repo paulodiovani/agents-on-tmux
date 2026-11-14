@@ -132,7 +132,7 @@ pub fn command_argument(arguments: &Value) -> Result<Option<Vec<String>>, ToolOu
         .iter()
         .map(|part| part.as_str().map(str::to_string).ok_or_else(invalid))
         .collect::<Result<Vec<String>, ToolOutput>>()?;
-    if parts[0].is_empty() {
+    if parts.first().is_some_and(|program| program.is_empty()) {
         return Err(invalid());
     }
     Ok(Some(parts))

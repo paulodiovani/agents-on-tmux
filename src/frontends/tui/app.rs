@@ -29,6 +29,12 @@ const HINTED_COMMANDS: [(&str, &str); 5] = [
     ),
 ];
 
+/// An instant old enough that a redraw with the given tick is already due.
+fn redraw_due(tick: Duration) -> Instant {
+    let now = Instant::now();
+    now.checked_sub(tick).unwrap_or(now)
+}
+
 /// Gets the start time of a pane process using sysinfo.
 /// Returns None if the process cannot be found.
 fn get_pane_start_time(pid: u32) -> Option<Instant> {
@@ -253,11 +259,11 @@ impl App {
         self.enforce_panel_width(initial_width);
 
         let redraw_tick = Duration::from_secs(1);
-        let mut last_draw = Instant::now() - redraw_tick;
+        let mut last_draw = redraw_due(redraw_tick);
         while self.running {
             if last_draw.elapsed() >= redraw_tick {
                 terminal.draw(|frame| ui::draw(frame, self, &theme))?;
-                last_draw = Instant::now() - redraw_tick;
+                last_draw = redraw_due(redraw_tick);
             }
 
             // Poll terminal events (100ms). A keypress or resize forces
@@ -266,20 +272,20 @@ impl App {
                 match event::read()? {
                     event::Event::Key(key) if key.kind == event::KeyEventKind::Press => {
                         self.handle_keyboard_action(key_to_action(key));
-                        last_draw = Instant::now() - redraw_tick;
+                        last_draw = redraw_due(redraw_tick);
                     }
 
                     event::Event::Resize(width, _) => {
                         self.enforce_panel_width(width);
                         self.invalidate_clickable_regions();
-                        last_draw = Instant::now() - redraw_tick;
+                        last_draw = redraw_due(redraw_tick);
                     }
 
                     event::Event::Mouse(mouse_event) => {
                         let size = terminal.size()?;
 
                         if self.handle_mouse_action(mouse_event.into(), size) {
-                            last_draw = Instant::now() - redraw_tick;
+                            last_draw = redraw_due(redraw_tick);
                         }
                     }
                     _ => {}
@@ -289,7 +295,7 @@ impl App {
             // Drain tmux events (non-blocking). A refresh forces an immediate redraw.
             if self.process_tmux_events() {
                 self.invalidate_clickable_regions();
-                last_draw = Instant::now() - redraw_tick;
+                last_draw = redraw_due(redraw_tick);
             }
 
             // Check for signals (SIGTERM, SIGINT, etc.). If received, shut down cleanly.
@@ -488,7 +494,7 @@ impl App {
                 let indices = self.current_tab_indices();
                 if let Some(pos) = indices
                     .iter()
-                    .position(|&i| self.windows[i].id == new_window.id)
+                    .position(|&i| self.window_id_at(i) == Some(new_window.id))
                 {
                     self.windows_selected = pos;
                     self.list_state.select(Some(self.windows_selected));
@@ -549,7 +555,11 @@ impl App {
             let target_pos = if !current_dir.is_empty() {
                 dest_indices
                     .iter()
-                    .position(|&i| self.windows[i].current_dir == current_dir)
+                    .position(|&i| {
+                        self.windows
+                            .get(i)
+                            .is_some_and(|w| w.current_dir == current_dir)
+                    })
                     .unwrap_or(0)
             } else {
                 0
@@ -607,7 +617,7 @@ impl App {
                 let indices = self.indices_for_tab(new_tab);
                 if let Some(pos) = indices
                     .iter()
-                    .position(|&i| self.windows[i].id == selected_id)
+                    .position(|&i| self.window_id_at(i) == Some(selected_id))
                 {
                     self.active_tab = new_tab;
                     self.set_selected_for_tab(new_tab, pos);
@@ -638,7 +648,7 @@ impl App {
                     let indices = self.indices_for_tab(target_tab);
                     if let Some(pos) = indices
                         .iter()
-                        .position(|&i| self.windows[i].id == active_id)
+                        .position(|&i| self.window_id_at(i) == Some(active_id))
                     {
                         self.active_tab = target_tab;
                         self.set_selected_for_tab(target_tab, pos);
@@ -668,10 +678,14 @@ impl App {
     /// Returns cached clickable regions for the given terminal size.
     /// Recomputes only if cache is empty (invalidated).
     fn clickable_regions(&mut self, size: Rect) -> Vec<ui::ClickableRegion> {
-        if self.regions.is_none() {
-            self.regions = Some(ui::clickable_regions(size, self));
+        match &self.regions {
+            Some(regions) => regions.clone(),
+            None => {
+                let regions = ui::clickable_regions(size, self);
+                self.regions = Some(regions.clone());
+                regions
+            }
         }
-        self.regions.as_ref().unwrap().clone()
     }
 
     /// Invalidates the cached clickable regions.
@@ -716,14 +730,19 @@ impl App {
     fn current_tab_window(&self) -> Option<&Window> {
         let indices = self.current_tab_indices();
         let selected = self.current_selected();
-        indices.get(selected).map(|&i| &self.windows[i])
+        indices.get(selected).and_then(|&i| self.windows.get(i))
+    }
+
+    /// Returns the id of the window at the given position in the full list.
+    fn window_id_at(&self, index: usize) -> Option<u32> {
+        self.windows.get(index).map(|window| window.id)
     }
 
     /// Returns the filtered windows for the current tab.
     pub fn current_tab_windows(&self) -> Vec<&Window> {
         self.current_tab_indices()
             .iter()
-            .map(|&i| &self.windows[i])
+            .filter_map(|&i| self.windows.get(i))
             .collect()
     }
 
@@ -1973,5 +1992,16 @@ mod tests {
     fn test_resolve_pane_start_time_invalid_pid() {
         let start_time = get_pane_start_time(999999999);
         assert!(start_time.is_none());
+    }
+
+    #[test]
+    fn test_redraw_due_is_one_tick_in_the_past() {
+        let tick = Duration::from_millis(10);
+        assert!(redraw_due(tick).elapsed() >= tick);
+    }
+
+    #[test]
+    fn test_redraw_due_survives_unrepresentable_tick() {
+        assert!(redraw_due(Duration::MAX).elapsed() < Duration::from_secs(60));
     }
 }

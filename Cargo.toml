@@ -23,3 +23,13 @@ sysinfo = "0.40"
 
 [dev-dependencies]
 mockall = "0.15"
+
+[lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"
+string_slice = "deny"
+indexing_slicing = "deny"

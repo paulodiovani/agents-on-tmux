@@ -63,7 +63,7 @@ fn pump(mut from: impl Read, to: &mut impl Write) -> io::Result<()> {
             Err(error) => return Err(error),
         };
 
-        to.write_all(&buffer[..read])?;
+        to.write_all(buffer.get(..read).unwrap_or_default())?;
         to.flush()?;
     }
 }

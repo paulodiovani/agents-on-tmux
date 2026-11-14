@@ -32,7 +32,7 @@ fn to_parts(path: &Path, home: Option<&Path>) -> Vec<String> {
     }
     // The filesystem root has no components of its own.
     if path.is_absolute() && parts == [""] {
-        parts[0] = "/".to_string();
+        parts = vec!["/".to_string()];
     }
     parts
 }
@@ -46,13 +46,16 @@ fn initial(part: &str) -> String {
 
 /// Collapses every ancestor to its initial, keeping the last component whole.
 fn abbreviate(parts: &[String]) -> Vec<String> {
-    let leaf = parts.len() - 1;
+    let ancestors = parts.len().saturating_sub(1);
     parts
         .iter()
         .enumerate()
-        .map(|(index, part)| match index {
-            index if index == leaf => part.clone(),
-            _ => initial(part),
+        .map(|(index, part)| {
+            if index < ancestors {
+                initial(part)
+            } else {
+                part.clone()
+            }
         })
         .collect()
 }
@@ -62,30 +65,31 @@ fn abbreviate(parts: &[String]) -> Vec<String> {
 fn candidates(path: &Path, home: Option<&Path>) -> Vec<String> {
     let parts = to_parts(path, home);
     let abbreviated = abbreviate(&parts);
-    let leaf = abbreviated.len() - 1;
+    let ancestors = abbreviated.len().saturating_sub(1);
+    let leaf = abbreviated.last().cloned().unwrap_or_default();
 
     let mut candidates = vec![
         path.to_string_lossy().into_owned(),
         parts.join("/"),
         abbreviated.join("/"),
     ];
-    candidates.extend((0..leaf).rev().map(|kept| {
-        let mut shortened = abbreviated[..kept].to_vec();
+    candidates.extend((0..ancestors).rev().map(|kept| {
+        let mut shortened: Vec<String> = abbreviated.iter().take(kept).cloned().collect();
         shortened.push(ELLIPSIS.to_string());
-        shortened.push(abbreviated[leaf].clone());
+        shortened.push(leaf.clone());
         shortened.join("/")
     }));
-    let full_leaf = &parts[parts.len() - 1];
+    let full_leaf = parts.last().cloned().unwrap_or_default();
     candidates.push(full_leaf.clone());
     let chars: Vec<char> = full_leaf.chars().collect();
     for suffix_len in (1..chars.len()).rev() {
-        let suffix: String = chars[chars.len() - suffix_len..].iter().collect();
+        let suffix: String = chars.iter().skip(chars.len() - suffix_len).collect();
         let truncated = format!("..{}", suffix);
         if truncated.width() > MIN_TRUNCATED_WIDTH {
             candidates.push(truncated);
         }
     }
-    let initial_char = initial(full_leaf);
+    let initial_char = initial(&full_leaf);
     candidates.push(initial_char.to_uppercase());
     candidates
 }

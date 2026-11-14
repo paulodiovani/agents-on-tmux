@@ -131,7 +131,7 @@ checks, but only by convention.
 
 | Step | Status |
 |---|---|
-| 1. Panic gate | ⬜ Not started |
+| 1. Panic gate | ✅ Done (2026-11-14, branch `chore/code-quality-plan`) |
 | 2. Robustness fixes | ⬜ Not started |
 | 3. MCP hardening | ⛔ Blocked (needs confirmation) |
 | 4. Architecture | ⬜ Not started |
@@ -154,7 +154,7 @@ How to update:
 
 ### 1. Panic gate (small)
 
-Status: ⬜ Not started
+Status: ✅ Done (2026-11-14, branch `chore/code-quality-plan`)
 
 - Add `[lints.clippy]` to `Cargo.toml` denying `unwrap_used`, `expect_used`,
   `panic`, `todo`, `unimplemented`, `unreachable`, `string_slice` and
@@ -167,6 +167,10 @@ Status: ⬜ Not started
   `first()`/`last()`.
 - Leave `arithmetic_side_effects` off as too noisy; use `saturating_*` in
   layout math where underflow is possible.
+
+Outcome: the remaining subtractions in production code are guarded by explicit
+checks. The one unguarded case was `Instant::now() - redraw_tick` in the TUI
+run loop, now behind `redraw_due` with `checked_sub`.
 
 ### 2. Robustness fixes (small)
 
@@ -209,6 +213,8 @@ Status: ⬜ Not started
 Status: ⬜ Not started
 
 - Replace the hand-written mocks with mockall's `MockTmux`.
+- Fix the `type_complexity` warning in the `app.rs` tests (`test_app`), the
+  only thing `clippy --all-targets -D warnings` currently reports.
 - Cover `main`, `signals` and `control_mode`.
 - Add `cargo llvm-cov --fail-under-lines`, `clippy --all-targets`,
   `cargo audit` or `cargo deny`, and SHA-pinned actions.

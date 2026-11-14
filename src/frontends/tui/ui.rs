@@ -62,18 +62,18 @@ fn padded(area: Rect) -> Rect {
 /// Renders the complete TUI layout: header, tab bar, window rows, and footer.
 pub fn draw(frame: &mut Frame, app: &mut App, theme: &Theme) {
     let footer_height = calculate_footer_height(padded(frame.area()).width, app, theme);
-    let chunks = Layout::vertical([
+    let [header, tab_bar, list, footer] = Layout::vertical([
         Constraint::Length(1),
         Constraint::Length(2),
         Constraint::Min(0),
         Constraint::Length(footer_height),
     ])
-    .split(frame.area());
+    .areas(frame.area());
 
-    draw_header(frame, chunks[0], theme);
-    draw_tab_bar(frame, app, chunks[1], theme);
-    draw_list(frame, app, chunks[2], theme);
-    draw_footer(frame, app, chunks[3], theme);
+    draw_header(frame, header, theme);
+    draw_tab_bar(frame, app, tab_bar, theme);
+    draw_list(frame, app, list, theme);
+    draw_footer(frame, app, footer, theme);
 }
 
 /// Renders the header bar with the session name.
@@ -126,9 +126,10 @@ fn draw_tab_bar(frame: &mut Frame, app: &App, area: Rect, theme: &Theme) {
         Span::styled(TAB_RULE.repeat(rest), theme.dim),
     ];
 
-    let rows = Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).split(area);
-    frame.render_widget(Paragraph::new(Line::from(labels)), padded(rows[0]));
-    frame.render_widget(Paragraph::new(Line::from(rule)), rows[1]);
+    let [labels_row, rule_row] =
+        Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).areas(area);
+    frame.render_widget(Paragraph::new(Line::from(labels)), padded(labels_row));
+    frame.render_widget(Paragraph::new(Line::from(rule)), rule_row);
 }
 
 /// Renders the windows of the active tab as two-line rows. The selection lives in
@@ -532,18 +533,17 @@ fn count_windows_for_tab(app: &App, tab: Tab) -> usize {
 pub fn clickable_regions(frame_area: Rect, app: &App) -> Vec<ClickableRegion> {
     let theme = Theme::default();
     let footer_height = calculate_footer_height(padded(frame_area).width, app, &theme);
-    let chunks = Layout::vertical([
+    let [_, tab_bar_area, list_area, _] = Layout::vertical([
         Constraint::Length(1),
         Constraint::Length(2),
         Constraint::Min(0),
         Constraint::Length(footer_height),
     ])
-    .split(frame_area);
+    .areas(frame_area);
 
     let mut regions = Vec::new();
 
     // Tab bar regions: mirror the label positions in draw_tab_bar.
-    let tab_bar_area = chunks[1];
     let padded_tab_x = tab_bar_area.x + PANEL_PADDING as u16;
 
     let mut cursor = 0u16;
@@ -568,7 +568,6 @@ pub fn clickable_regions(frame_area: Rect, app: &App) -> Vec<ClickableRegion> {
     }
 
     // List regions: one per visible window row.
-    let list_area = chunks[2];
     let tab_windows = app.current_tab_windows();
     if tab_windows.is_empty() {
         return regions;
