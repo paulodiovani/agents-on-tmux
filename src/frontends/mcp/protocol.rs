@@ -11,7 +11,13 @@ pub trait Protocol {
 const INSTRUCTIONS: &str = "AOT orchestrates windows and AI coding agents. A window is a terminal running a shell or a command; an agent is a window running an AI coding agent. Windows and agents are referenced by their index (e.g. 3), which can change when windows move. Prompts between agents are signed \"[from agent N]\" with the sender's index N.";
 const INVALID_PARAMS: i64 = -32602;
 const INVALID_REQUEST: i64 = -32600;
-const LEGACY_VERSIONS: [&str; 4] = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
+const LATEST_LEGACY_VERSION: &str = "2025-11-25";
+const LEGACY_VERSIONS: [&str; 4] = [
+    LATEST_LEGACY_VERSION,
+    "2025-06-18",
+    "2025-03-26",
+    "2024-11-05",
+];
 const META_CLIENT_CAPABILITIES: &str = "io.modelcontextprotocol/clientCapabilities";
 const META_PROTOCOL_VERSION: &str = "io.modelcontextprotocol/protocolVersion";
 const META_SERVER_INFO: &str = "io.modelcontextprotocol/serverInfo";
@@ -116,15 +122,17 @@ impl McpHandler {
         };
 
         let output = tool.call(&arguments, context);
-        let mut result = json!({
-            "content": [{ "type": "text", "text": output.text }],
-            "isError": output.is_error,
-        });
+        let mut result = Map::new();
+        result.insert(
+            "content".into(),
+            json!([{ "type": "text", "text": output.text }]),
+        );
+        result.insert("isError".into(), json!(output.is_error));
         if let Some(structured) = output.structured {
-            result["structuredContent"] = structured;
+            result.insert("structuredContent".into(), structured);
         }
 
-        Ok(result)
+        Ok(Value::Object(result))
     }
 }
 
@@ -222,7 +230,7 @@ fn initialize(params: &Map<String, Value>) -> Value {
     let requested = params.get("protocolVersion").and_then(Value::as_str);
     let version = requested
         .filter(|version| LEGACY_VERSIONS.contains(version))
-        .unwrap_or(LEGACY_VERSIONS[0]);
+        .unwrap_or(LATEST_LEGACY_VERSION);
     json!({
         "protocolVersion": version,
         "capabilities": { "tools": {} },
@@ -240,15 +248,19 @@ fn discover() -> Value {
 }
 
 fn success_response(id: &Value, mut result: Value) -> String {
-    result["resultType"] = json!("complete");
-    result["_meta"] = json!({ META_SERVER_INFO: server_info() });
+    if let Some(fields) = result.as_object_mut() {
+        fields.insert("resultType".into(), json!("complete"));
+        fields.insert("_meta".into(), json!({ META_SERVER_INFO: server_info() }));
+    }
     json!({ "jsonrpc": "2.0", "id": id, "result": result }).to_string()
 }
 
 fn error_response(id: &Value, error: RpcError) -> String {
-    let mut body = json!({ "code": error.code, "message": error.message });
+    let mut body = Map::new();
+    body.insert("code".into(), json!(error.code));
+    body.insert("message".into(), json!(error.message));
     if let Some(data) = error.data {
-        body["data"] = data;
+        body.insert("data".into(), data);
     }
     json!({ "jsonrpc": "2.0", "id": id, "error": body }).to_string()
 }

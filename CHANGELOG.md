@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Mouse support: click tabs to switch, click rows to select/focus, scroll to navigate long lists
 - MCP server (`aot mcp`) letting agents orchestrate windows and other agents
 
+### Changed
+- Forbid `unwrap`, `expect`, `panic!`, indexing and string slicing in non-test code through clippy lints
+
+### Fixed
+- Crash when logging a malformed tmux window line containing multibyte characters
+
 ## [1.0.0] - 2026-09-21
 
 ### Changed

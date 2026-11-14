@@ -97,7 +97,10 @@ fn last_lines(capture: &str, count: usize) -> String {
         .iter()
         .rposition(|line| !line.is_empty())
         .map_or(0, |last| last + 1);
-    lines[end.saturating_sub(count)..end].join("\n")
+    lines
+        .get(end.saturating_sub(count)..end)
+        .unwrap_or_default()
+        .join("\n")
 }
 
 #[cfg(test)]

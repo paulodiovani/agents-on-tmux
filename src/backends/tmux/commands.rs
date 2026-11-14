@@ -305,44 +305,7 @@ fn parse_window_line(line: &str) -> Option<Window> {
         return None;
     }
     let parts: Vec<&str> = line.split('\t').collect();
-    if parts.len() != 7 {
-        logger::debug(&format!(
-            "tmux: malformed window line (expected 7 fields, got {}): {}",
-            parts.len(),
-            truncate(line, 80)
-        ));
-        return None;
-    }
-
-    let id = match parts[0].parse::<u32>() {
-        Ok(id) => id,
-        Err(_) => {
-            logger::debug(&format!(
-                "tmux: malformed window id '{}': {}",
-                parts[0],
-                truncate(line, 80)
-            ));
-            return None;
-        }
-    };
-    let name = parts[1].to_string();
-    let pane_pid = match parts[2].parse::<u32>() {
-        Ok(pid) => pid,
-        Err(_) => {
-            logger::debug(&format!(
-                "tmux: malformed pane pid '{}': {}",
-                parts[2],
-                truncate(line, 80)
-            ));
-            return None;
-        }
-    };
-    let running_command = parts[3].to_string();
-    let current_dir = parts[4].to_string();
-    let is_active = parts[5] == "1";
-    let notification_pending = parts[6] == "1";
-
-    Some(Window {
+    let &[
         id,
         name,
         pane_pid,
@@ -350,6 +313,47 @@ fn parse_window_line(line: &str) -> Option<Window> {
         current_dir,
         is_active,
         notification_pending,
+    ] = parts.as_slice()
+    else {
+        logger::debug(&format!(
+            "tmux: malformed window line (expected 7 fields, got {}): {}",
+            parts.len(),
+            truncate(line, 80)
+        ));
+        return None;
+    };
+
+    let id = match id.parse::<u32>() {
+        Ok(id) => id,
+        Err(_) => {
+            logger::debug(&format!(
+                "tmux: malformed window id '{}': {}",
+                id,
+                truncate(line, 80)
+            ));
+            return None;
+        }
+    };
+    let pane_pid = match pane_pid.parse::<u32>() {
+        Ok(pid) => pid,
+        Err(_) => {
+            logger::debug(&format!(
+                "tmux: malformed pane pid '{}': {}",
+                pane_pid,
+                truncate(line, 80)
+            ));
+            return None;
+        }
+    };
+
+    Some(Window {
+        id,
+        name: name.to_string(),
+        pane_pid,
+        running_command: running_command.to_string(),
+        current_dir: current_dir.to_string(),
+        is_active: is_active == "1",
+        notification_pending: notification_pending == "1",
         started_at: None,
     })
 }
@@ -389,11 +393,13 @@ fn parse_key_line(line: &str) -> Option<KeyBinding> {
     })
 }
 
-fn truncate(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
+/// Shortens `s` to at most `max_chars` characters for log lines, marking the cut.
+fn truncate(s: &str, max_chars: usize) -> String {
+    if s.chars().count() <= max_chars {
         s.to_string()
     } else {
-        format!("{}...", &s[..max_len])
+        let kept: String = s.chars().take(max_chars).collect();
+        format!("{kept}...")
     }
 }
 
@@ -1555,5 +1561,21 @@ mod tests {
         };
         assert_eq!(binding.key, "n");
         assert_eq!(binding.command, "next-window");
+    }
+
+    #[test]
+    fn test_truncate_keeps_short_text() {
+        assert_eq!(truncate("héllo", 5), "héllo");
+    }
+
+    #[test]
+    fn test_truncate_cuts_between_multibyte_characters() {
+        assert_eq!(truncate("ééééé", 3), "ééé...");
+    }
+
+    #[test]
+    fn test_parse_window_line_malformed_multibyte_does_not_panic() {
+        let line = format!("{}é\textra", "a".repeat(79));
+        assert!(parse_window_line(&line).is_none());
     }
 }
