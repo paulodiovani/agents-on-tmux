@@ -40,6 +40,7 @@ Two top-level modules under `src/`:
   - `KeyBinding` struct represents a tmux key binding (key, command)
   - `TmuxError` enum for error handling
   - `agents.rs` identifies agents by name and command
+  - `shell.rs` builds shell-quoted command lines from argv
   - `logger.rs` is a std-only global file logger (`init`/`debug`/`error`), it never writes to stdout/stderr
 
 - `frontends/` — interfaces to AOT features

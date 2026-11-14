@@ -132,7 +132,7 @@ checks, but only by convention.
 | Step | Status |
 |---|---|
 | 1. Panic gate | ✅ Done (2026-11-14, PR #72) |
-| 2. Robustness fixes | ⬜ Not started |
+| 2. Robustness fixes | ✅ Done (2026-11-14, PR #73) |
 | 3. MCP hardening | ⛔ Blocked (needs confirmation) |
 | 4. Architecture | ⬜ Not started |
 | 5. Tests and CI | ⬜ Not started |
@@ -174,13 +174,19 @@ run loop, now behind `redraw_due` with `checked_sub`.
 
 ### 2. Robustness fixes (small)
 
-Status: ⬜ Not started
+Status: ✅ Done (2026-11-14, PR #73)
 
 - Add backoff after an EOF reconnect in control mode.
 - Add `TmuxError::UnexpectedOutput` for parse failures.
 - Add `deny_unknown_fields` and mark the env-only config fields
   `#[serde(skip)]`.
 - Build the split command from shell-quoted argv, reusing `shell_quote`.
+
+Outcome: a control-mode connection that ends without delivering any event now
+counts as a failed attempt (backoff and the retry cap apply), and every
+reconnect waits at least the first backoff step. `shell_quote` moved to
+`backends::shell::join`. The split command no longer forwards `--tui` and
+`--no-tui`, which clashed with the appended `--tui=true`.
 
 ### 3. MCP hardening (medium, needs confirmation)
 

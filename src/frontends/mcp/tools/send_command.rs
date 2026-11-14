@@ -3,6 +3,7 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 
 use super::tool::{CallContext, Tool, ToolOutput, command_argument, send_target};
+use crate::backends::shell;
 use crate::backends::tmux::Tmux;
 
 /// Runs a shell command in a non-agent window of the AOT session.
@@ -71,20 +72,7 @@ impl Tool for SendCommand {
 fn command_line(arguments: &Value) -> Result<String, ToolOutput> {
     let parts = command_argument(arguments)?
         .ok_or_else(|| ToolOutput::error("Missing required argument: command"))?;
-    let quoted: Vec<String> = parts.iter().map(|part| shell_quote(part)).collect();
-    Ok(quoted.join(" "))
-}
-
-fn shell_quote(word: &str) -> String {
-    let is_plain = !word.is_empty()
-        && word
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || "_@%+=:,./-".contains(c));
-    if is_plain {
-        word.to_string()
-    } else {
-        format!("'{}'", word.replace('\'', "'\\''"))
-    }
+    Ok(shell::join(&parts))
 }
 
 #[cfg(test)]
