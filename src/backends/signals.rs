@@ -24,21 +24,24 @@ pub fn install(policy: OnSignal) -> std::io::Result<()> {
 
     std::thread::spawn(move || {
         for signo in signals.forever() {
-            if let Some(name) = name_of(signo) {
-                logger::error!("signal: received {name} ({signo})");
-            }
-            RECEIVED.store(signo as usize, Ordering::SeqCst);
-
-            match policy {
-                OnSignal::Shutdown => {}
-                OnSignal::Exit => {
-                    std::process::exit(128 + signo);
-                }
-            }
+            handle(signo, &policy, |code| std::process::exit(code));
         }
     });
 
     Ok(())
+}
+
+/// Records a received signal and applies the policy, calling `exit` with the
+/// process exit code when the policy is `Exit`.
+fn handle(signo: i32, policy: &OnSignal, exit: impl FnOnce(i32)) {
+    if let Some(name) = name_of(signo) {
+        logger::error!("signal: received {name} ({signo})");
+    }
+    RECEIVED.store(signo as usize, Ordering::SeqCst);
+
+    if let OnSignal::Exit = policy {
+        exit(128 + signo);
+    }
 }
 
 /// Returns the signal number and name if a signal was received, or `None`.
@@ -63,18 +66,18 @@ fn name_of(signo: i32) -> Option<&'static str> {
 }
 
 #[cfg(test)]
-fn set_for_test(signo: i32) {
-    RECEIVED.store(signo as usize, Ordering::SeqCst);
-}
-
-#[cfg(test)]
-fn clear_for_test() {
-    RECEIVED.store(0, Ordering::SeqCst);
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, MutexGuard};
+
+    static RECEIVED_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Serializes tests that touch the received signal and starts them cleared.
+    fn cleared() -> MutexGuard<'static, ()> {
+        let guard = RECEIVED_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        RECEIVED.store(0, Ordering::SeqCst);
+        guard
+    }
 
     #[test]
     fn test_name_of_known_signals() {
@@ -87,15 +90,44 @@ mod tests {
 
     #[test]
     fn test_received_none_by_default() {
-        clear_for_test();
+        let _guard = cleared();
         assert_eq!(received(), None);
     }
 
     #[test]
-    fn test_received_after_set() {
-        clear_for_test();
-        set_for_test(SIGTERM);
+    fn test_received_ignores_unknown_signal() {
+        let _guard = cleared();
+        RECEIVED.store(999, Ordering::SeqCst);
+        assert_eq!(received(), None);
+    }
+
+    #[test]
+    fn test_shutdown_records_signal_without_exiting() {
+        let _guard = cleared();
+        let mut exited = None;
+        handle(SIGTERM, &OnSignal::Shutdown, |code| exited = Some(code));
         assert_eq!(received(), Some((SIGTERM, "SIGTERM")));
-        clear_for_test();
+        assert_eq!(exited, None);
+    }
+
+    #[test]
+    fn test_exit_records_signal_and_exits_with_shell_code() {
+        let _guard = cleared();
+        let mut exited = None;
+        handle(SIGINT, &OnSignal::Exit, |code| exited = Some(code));
+        assert_eq!(received(), Some((SIGINT, "SIGINT")));
+        assert_eq!(exited, Some(128 + SIGINT));
+    }
+
+    #[test]
+    fn test_handle_logs_received_signal() {
+        let path = logger::tests::temp_log_path();
+        let _log = logger::tests::init_for_test(&path);
+        let _guard = cleared();
+
+        handle(SIGHUP, &OnSignal::Shutdown, |_| {});
+
+        let log = std::fs::read_to_string(&path).unwrap();
+        assert!(log.contains("ERROR signal: received SIGHUP (1)"));
     }
 }

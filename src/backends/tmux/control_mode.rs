@@ -248,21 +248,35 @@ pub fn control_mode_thread(
     event_tx: mpsc::Sender<TmuxEvent>,
 ) {
     run_with_reconnect(
-        || spawn_control_mode(&session, socket.as_deref()),
+        || {
+            let mut command = Command::new("tmux");
+            command.args(control_mode_args(&session, socket.as_deref()));
+            spawn_reader(command)
+        },
         producer,
         &event_tx,
-        |n| Duration::from_secs(2u64.pow(n - 1)), // 1s, 2s, 4s, 8s
+        backoff,
     );
 }
 
-/// Spawns `tmux -C attach-session -t <session>` and returns a reader over its stdout.
-fn spawn_control_mode(session: &str, socket: Option<&str>) -> std::io::Result<ControlModeReader> {
-    let mut cmd = Command::new("tmux");
+/// Delay before reconnect attempt `attempt` (1-based), doubling from one second.
+fn backoff(attempt: u32) -> Duration {
+    Duration::from_secs(2u64.saturating_pow(attempt.saturating_sub(1)))
+}
+
+/// Arguments that attach a tmux control-mode client to the session.
+fn control_mode_args(session: &str, socket: Option<&str>) -> Vec<String> {
+    let mut args = Vec::new();
     if let Some(socket) = socket {
-        cmd.args(["-L", socket]);
+        args.extend(["-L".to_string(), socket.to_string()]);
     }
-    let mut child = cmd
-        .args(["-C", "attach-session", "-t", session])
+    args.extend(["-C", "attach-session", "-t", session].map(String::from));
+    args
+}
+
+/// Spawns the control-mode client and returns a reader over its stdout.
+fn spawn_reader(mut command: Command) -> std::io::Result<ControlModeReader> {
+    let mut child = command
         .stdin(Stdio::piped()) // must stay open; closing it detaches the client
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -299,7 +313,129 @@ fn spawn_control_mode(session: &str, socket: Option<&str>) -> std::io::Result<Co
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backends::logger::tests::{init_for_test, temp_log_path};
     use std::cell::RefCell;
+
+    fn shell(script: &str) -> Command {
+        let mut command = Command::new("sh");
+        command.args(["-c", script]);
+        command
+    }
+
+    #[test]
+    fn test_control_mode_args_without_socket() {
+        assert_eq!(
+            control_mode_args("aot", None),
+            ["-C", "attach-session", "-t", "aot"]
+        );
+    }
+
+    #[test]
+    fn test_control_mode_args_with_socket() {
+        assert_eq!(
+            control_mode_args("aot", Some("sock")),
+            ["-L", "sock", "-C", "attach-session", "-t", "aot"]
+        );
+    }
+
+    #[test]
+    fn test_spawned_reader_streams_stdout() {
+        let reader = spawn_reader(shell("printf '%s\\n' '%window-add @1' '%exit'")).unwrap();
+        let (tx, rx) = mpsc::channel();
+
+        let outcome = pump_events(reader, EventProducer::Nested, &tx);
+
+        assert_eq!(outcome, PumpOutcome::Exit);
+        assert_eq!(
+            rx.try_iter().collect::<Vec<_>>(),
+            [TmuxEvent::Refresh, TmuxEvent::Exit]
+        );
+    }
+
+    #[test]
+    fn test_dropping_reader_closes_stdin_and_reaps_child() {
+        let path = temp_log_path();
+        let _guard = init_for_test(&path);
+        let reader = spawn_reader(shell("cat >/dev/null; exit 3")).unwrap();
+
+        drop(reader);
+
+        let log = std::fs::read_to_string(&path).unwrap();
+        assert!(log.contains("control_mode: tmux exited with exit status: 3"));
+    }
+
+    #[test]
+    fn test_spawned_reader_logs_stderr_lines() {
+        let path = temp_log_path();
+        let _guard = init_for_test(&path);
+        let reader = spawn_reader(shell("echo 'no sessions' >&2; echo >&2")).unwrap();
+
+        drop(reader);
+
+        let log = std::fs::read_to_string(&path).unwrap();
+        assert!(log.contains("ERROR control_mode: tmux: no sessions"));
+        assert_eq!(log.matches("control_mode: tmux:").count(), 1);
+    }
+
+    #[test]
+    fn test_spawned_reader_reads_raw_bytes() {
+        let mut reader = spawn_reader(shell("printf ok")).unwrap();
+        let mut output = String::new();
+
+        reader.read_to_string(&mut output).unwrap();
+
+        assert_eq!(output, "ok");
+    }
+
+    #[test]
+    fn test_backoff_doubles_from_one_second() {
+        let delays: Vec<u64> = (1..=4).map(|attempt| backoff(attempt).as_secs()).collect();
+        assert_eq!(delays, [1, 2, 4, 8]);
+    }
+
+    #[test]
+    fn test_pump_read_error_reconnects() {
+        struct FailingReader;
+        impl Read for FailingReader {
+            fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
+                Err(std::io::Error::other("broken pipe"))
+            }
+        }
+        let (tx, _rx) = mpsc::channel();
+
+        let outcome = pump_events(BufReader::new(FailingReader), EventProducer::Nested, &tx);
+
+        assert_eq!(outcome, PumpOutcome::Reconnect { forwarded: false });
+    }
+
+    #[test]
+    fn test_pump_parent_stops_when_receiver_dropped() {
+        let (tx, rx) = mpsc::channel();
+        drop(rx);
+        let input = std::io::Cursor::new("%window-pane-changed @1 %2\n");
+        assert_eq!(
+            pump_events(input, EventProducer::Parent, &tx),
+            PumpOutcome::Exit
+        );
+    }
+
+    #[test]
+    fn test_exit_with_receiver_dropped_is_logged() {
+        let path = temp_log_path();
+        let _guard = init_for_test(&path);
+        let (tx, rx) = mpsc::channel();
+        drop(rx);
+
+        pump_events(std::io::Cursor::new("%exit\n"), EventProducer::Nested, &tx);
+
+        let log = std::fs::read_to_string(&path).unwrap();
+        assert!(log.contains("control_mode: failed to send exit"));
+    }
+
+    #[test]
+    fn test_spawn_failure_is_an_error() {
+        assert!(spawn_reader(Command::new("/nonexistent/aot-test-program")).is_err());
+    }
 
     #[test]
     fn test_parse_window_add() {

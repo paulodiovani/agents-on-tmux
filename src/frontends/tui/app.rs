@@ -853,226 +853,70 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backends::tmux::{KeyBinding, Tmux, TmuxError, Window};
-    use std::rc::Rc;
+    use crate::backends::tmux::{KeyBinding, Window};
+    use crate::frontends::tui::fake_tmux::{FakeTmux, default_key_bindings};
     use std::time::{Duration, Instant};
 
-    struct MockTmux {
-        calls: Rc<std::cell::RefCell<Vec<String>>>,
-        keys: Option<Vec<KeyBinding>>,
-        next_id: Rc<std::cell::RefCell<u32>>,
-        prefix: Option<String>,
-        windows: Rc<std::cell::RefCell<Vec<Window>>>,
-        resize_should_fail: bool,
-    }
-
-    impl MockTmux {
-        fn new() -> Self {
-            Self {
-                calls: Rc::new(std::cell::RefCell::new(Vec::new())),
-                keys: Some(default_key_bindings()),
-                next_id: Rc::new(std::cell::RefCell::new(5)),
-                prefix: Some("C-b".to_string()),
-                windows: Rc::new(std::cell::RefCell::new(vec![
-                    Window {
-                        id: 1,
-                        name: "agent-1".to_string(),
-                        pane_pid: 10001,
-                        running_command: "cargo build".to_string(),
-                        current_dir: "/home/user/project1".to_string(),
-                        is_active: false,
-                        notification_pending: false,
-                        started_at: Some(Instant::now() - Duration::from_secs(125)),
-                    },
-                    Window {
-                        id: 2,
-                        name: "agent-2".to_string(),
-                        pane_pid: 10002,
-                        running_command: "claude".to_string(),
-                        current_dir: "/home/user/project2".to_string(),
-                        is_active: true,
-                        notification_pending: true,
-                        started_at: Some(Instant::now() - Duration::from_secs(45)),
-                    },
-                    Window {
-                        id: 3,
-                        name: "agent-3".to_string(),
-                        pane_pid: 10003,
-                        running_command: "python main.py".to_string(),
-                        current_dir: "/home/user/project3".to_string(),
-                        is_active: false,
-                        notification_pending: false,
-                        started_at: Some(Instant::now() - Duration::from_secs(300)),
-                    },
-                    Window {
-                        id: 4,
-                        name: "agent-4".to_string(),
-                        pane_pid: 10004,
-                        running_command: "opencode".to_string(),
-                        current_dir: "/home/user/project4".to_string(),
-                        is_active: false,
-                        notification_pending: false,
-                        started_at: Some(Instant::now() - Duration::from_secs(10)),
-                    },
-                ])),
-                resize_should_fail: false,
-            }
-        }
-
-        fn windows_rc(&self) -> Rc<std::cell::RefCell<Vec<Window>>> {
-            self.windows.clone()
-        }
-
-        fn calls_rc(&self) -> Rc<std::cell::RefCell<Vec<String>>> {
-            self.calls.clone()
-        }
-    }
-
-    impl Tmux for MockTmux {
-        fn session_name(&self) -> &str {
-            "agents-on-tmux"
-        }
-
-        fn socket_name(&self) -> Option<&str> {
-            None
-        }
-
-        fn create_session_if_not_exists(&self, _tmux_env: Option<&str>) -> Result<(), TmuxError> {
-            Ok(())
-        }
-
-        fn attach_session(&self) -> Result<(), TmuxError> {
-            Ok(())
-        }
-
-        fn list_windows(&self) -> Result<Vec<Window>, TmuxError> {
-            self.calls.borrow_mut().push("list_windows".to_string());
-            Ok(self.windows.borrow().clone())
-        }
-
-        fn create_window(
-            &self,
-            name: Option<&str>,
-            _dir: Option<&str>,
-            _command: Option<&[String]>,
-            _detached: bool,
-        ) -> Result<Window, TmuxError> {
-            self.calls.borrow_mut().push("create_window".to_string());
-            let mut next_id = self.next_id.borrow_mut();
-            let window = Window {
-                id: *next_id,
-                name: name.unwrap_or_default().to_string(),
-                pane_pid: 12345,
-                running_command: String::new(),
-                current_dir: "/home/user".to_string(),
+    fn session() -> FakeTmux {
+        FakeTmux::with_windows(vec![
+            Window {
+                id: 1,
+                name: "agent-1".to_string(),
+                pane_pid: 10001,
+                running_command: "cargo build".to_string(),
+                current_dir: "/home/user/project1".to_string(),
                 is_active: false,
                 notification_pending: false,
-                started_at: None,
-            };
-            *next_id += 1;
-            self.windows.borrow_mut().push(window.clone());
-            Ok(window)
-        }
-
-        fn kill_window(&self, id: u32) -> Result<(), TmuxError> {
-            self.windows.borrow_mut().retain(|w| w.id != id);
-            Ok(())
-        }
-
-        fn select_window(&self, _id: u32) -> Result<(), TmuxError> {
-            self.calls.borrow_mut().push("select_window".to_string());
-            Ok(())
-        }
-
-        fn last_pane(&self) -> Result<(), TmuxError> {
-            self.calls.borrow_mut().push("last_pane".to_string());
-            Ok(())
-        }
-
-        fn split_window(&self, _command: &str, _width: u16) -> Result<String, TmuxError> {
-            Ok("%99".to_string())
-        }
-
-        fn resize_pane(&self, pane_id: &str, width: u16) -> Result<(), TmuxError> {
-            self.calls
-                .borrow_mut()
-                .push(format!("resize_pane {pane_id} {width}"));
-            if self.resize_should_fail {
-                Err(TmuxError::CommandFailed {
-                    message: "resize failed".to_string(),
-                    stderr: "mock error".to_string(),
-                    code: Some(1),
-                })
-            } else {
-                Ok(())
-            }
-        }
-
-        fn list_keys(&self, _table: &str) -> Result<Vec<KeyBinding>, TmuxError> {
-            self.keys.clone().ok_or_else(|| command_failed("list-keys"))
-        }
-
-        fn show_options(&self, name: &str, _global: bool) -> Result<String, TmuxError> {
-            match name {
-                "prefix" => self
-                    .prefix
-                    .clone()
-                    .ok_or_else(|| command_failed("show-options")),
-                _ => Err(command_failed("show-options")),
-            }
-        }
-
-        fn prompt_rename_window(&self, id: u32, name: &str) -> Result<(), TmuxError> {
-            self.calls
-                .borrow_mut()
-                .push(format!("prompt_rename_window {id} {name}"));
-            Ok(())
-        }
-
-        fn capture_pane(&self, _id: u32, _history: u32) -> Result<String, TmuxError> {
-            Ok(String::new())
-        }
-
-        fn window_for_pane(&self, _pane_id: &str) -> Result<u32, TmuxError> {
-            Err(TmuxError::WindowNotFound)
-        }
-
-        fn send_keys(&self, _id: u32, _text: &str, _enter: bool) -> Result<(), TmuxError> {
-            Ok(())
-        }
-
-        fn paste_buffer(&self, _id: u32, _text: &str) -> Result<(), TmuxError> {
-            Ok(())
-        }
-
-        fn rename_window(&self, _id: u32, _name: &str) -> Result<(), TmuxError> {
-            Ok(())
-        }
+                started_at: Some(Instant::now() - Duration::from_secs(125)),
+            },
+            Window {
+                id: 2,
+                name: "agent-2".to_string(),
+                pane_pid: 10002,
+                running_command: "claude".to_string(),
+                current_dir: "/home/user/project2".to_string(),
+                is_active: true,
+                notification_pending: true,
+                started_at: Some(Instant::now() - Duration::from_secs(45)),
+            },
+            Window {
+                id: 3,
+                name: "agent-3".to_string(),
+                pane_pid: 10003,
+                running_command: "python main.py".to_string(),
+                current_dir: "/home/user/project3".to_string(),
+                is_active: false,
+                notification_pending: false,
+                started_at: Some(Instant::now() - Duration::from_secs(300)),
+            },
+            Window {
+                id: 4,
+                name: "agent-4".to_string(),
+                pane_pid: 10004,
+                running_command: "opencode".to_string(),
+                current_dir: "/home/user/project4".to_string(),
+                is_active: false,
+                notification_pending: false,
+                started_at: Some(Instant::now() - Duration::from_secs(10)),
+            },
+        ])
     }
 
-    fn command_failed(command: &str) -> TmuxError {
-        TmuxError::CommandFailed {
-            message: format!("{command} failed"),
-            stderr: String::new(),
-            code: Some(1),
-        }
-    }
-
-    fn test_app() -> (
-        App,
-        Rc<std::cell::RefCell<Vec<Window>>>,
-        Rc<std::cell::RefCell<Vec<String>>>,
-    ) {
-        let driver = MockTmux::new();
-        let windows = driver.windows_rc();
-        let calls = driver.calls_rc();
-        let app = App::new(Box::new(driver), Box::new(MockTmux::new()), None, None).unwrap();
-        (app, windows, calls)
+    fn test_app() -> (App, FakeTmux) {
+        let tmux = session();
+        let app = App::new(
+            Box::new(tmux.mock()),
+            Box::new(session().mock()),
+            None,
+            None,
+        )
+        .unwrap();
+        (app, tmux)
     }
 
     #[test]
     fn test_new() {
-        let (app, _, _) = test_app();
+        let (app, _) = test_app();
         assert!(app.running);
         assert_eq!(app.active_tab(), Tab::Agents);
         assert_eq!(app.windows().len(), 4);
@@ -1080,25 +924,31 @@ mod tests {
 
     #[test]
     fn test_new_defaults_to_windows_when_no_agents() {
-        let driver = MockTmux::new();
-        driver.windows.borrow_mut()[0].is_active = true;
-        driver.windows.borrow_mut()[0].running_command = "bash".to_string();
-        driver.windows.borrow_mut()[1].running_command = "bash".to_string();
-        driver.windows.borrow_mut()[3].running_command = "zsh".to_string();
-        let app = App::new(Box::new(driver), Box::new(MockTmux::new()), None, None).unwrap();
+        let driver = session();
+        driver.windows.lock().unwrap()[0].is_active = true;
+        driver.windows.lock().unwrap()[0].running_command = "bash".to_string();
+        driver.windows.lock().unwrap()[1].running_command = "bash".to_string();
+        driver.windows.lock().unwrap()[3].running_command = "zsh".to_string();
+        let app = App::new(
+            Box::new(driver.mock()),
+            Box::new(session().mock()),
+            None,
+            None,
+        )
+        .unwrap();
         assert_eq!(app.active_tab(), Tab::Windows);
     }
 
     #[test]
     fn test_quit() {
-        let (mut app, _, _) = test_app();
+        let (mut app, _) = test_app();
         app.quit();
         assert!(!app.running);
     }
 
     #[test]
     fn test_navigate_down() {
-        let (mut app, _, _) = test_app();
+        let (mut app, _) = test_app();
         assert_eq!(app.active_tab(), Tab::Agents);
         assert_eq!(app.current_tab_len(), 2);
         assert_eq!(app.current_selected(), 0);
@@ -1110,7 +960,7 @@ mod tests {
 
     #[test]
     fn test_navigate_up() {
-        let (mut app, _, _) = test_app();
+        let (mut app, _) = test_app();
         app.navigate_down();
         assert_eq!(app.current_selected(), 1);
         app.navigate_up();
@@ -1121,14 +971,14 @@ mod tests {
 
     #[test]
     fn test_focus_window() {
-        let (mut app, _, _) = test_app();
+        let (mut app, _) = test_app();
         app.navigate_down();
         app.focus_window();
     }
 
     #[test]
     fn test_create_window() {
-        let (mut app, _, _) = test_app();
+        let (mut app, _) = test_app();
         let initial_len = app.windows().len();
         app.create_window();
         assert_eq!(app.windows().len(), initial_len + 1);
@@ -1136,14 +986,14 @@ mod tests {
 
     #[test]
     fn test_create_window_leaves_naming_to_tmux() {
-        let (mut app, windows, _) = test_app();
+        let (mut app, tmux) = test_app();
         app.create_window();
-        assert_eq!(windows.borrow().last().unwrap().name, "");
+        assert_eq!(tmux.windows.lock().unwrap().last().unwrap().name, "");
     }
 
     #[test]
     fn test_create_window_switches_to_windows_tab() {
-        let (mut app, _, _) = test_app();
+        let (mut app, _) = test_app();
         assert_eq!(app.active_tab(), Tab::Agents);
         app.create_window();
         assert_eq!(app.active_tab(), Tab::Windows);
@@ -1151,7 +1001,7 @@ mod tests {
 
     #[test]
     fn test_create_window_selects_new_window() {
-        let (mut app, _, _) = test_app();
+        let (mut app, _) = test_app();
         app.create_window();
         assert_eq!(app.active_tab(), Tab::Windows);
         let windows_tab_len = app.current_tab_len();
@@ -1160,22 +1010,29 @@ mod tests {
 
     #[test]
     fn test_create_window_calls_focus_window() {
-        let nested_driver = MockTmux::new();
-        let parent_driver = MockTmux::new();
-        let nested_calls = nested_driver.calls_rc();
-        let parent_calls = parent_driver.calls_rc();
-        let mut app =
-            App::new(Box::new(nested_driver), Box::new(parent_driver), None, None).unwrap();
+        let nested_driver = session();
+        let parent_driver = session();
+        let mut app = App::new(
+            Box::new(nested_driver.mock()),
+            Box::new(parent_driver.mock()),
+            None,
+            None,
+        )
+        .unwrap();
         app.create_window();
-        let nested_recorded = nested_calls.borrow();
-        assert!(nested_recorded.contains(&"select_window".to_string()));
-        let parent_recorded = parent_calls.borrow();
+        let nested_recorded = nested_driver.recorded();
+        assert!(
+            nested_recorded
+                .iter()
+                .any(|call| call.starts_with("select_window"))
+        );
+        let parent_recorded = parent_driver.recorded();
         assert!(parent_recorded.contains(&"last_pane".to_string()));
     }
 
     #[test]
     fn test_kill_window() {
-        let (mut app, _, _) = test_app();
+        let (mut app, _) = test_app();
         let initial_agents = app.current_tab_len();
         app.kill_window();
         assert_eq!(app.current_tab_len(), initial_agents - 1);
@@ -1183,7 +1040,7 @@ mod tests {
 
     #[test]
     fn test_kill_last_window_adjusts_selection() {
-        let (mut app, _, _) = test_app();
+        let (mut app, _) = test_app();
         app.navigate_down();
         assert_eq!(app.current_selected(), 1);
         app.kill_window();
@@ -1192,20 +1049,18 @@ mod tests {
 
     #[test]
     fn test_rename_window_prompts_for_selected_window() {
-        let nested = MockTmux::new();
-        let nested_calls = nested.calls_rc();
-        let parent = MockTmux::new();
-        let parent_calls = parent.calls_rc();
-        let app = App::new(Box::new(nested), Box::new(parent), None, None).unwrap();
+        let nested = session();
+        let parent = session();
+        let app = App::new(Box::new(nested.mock()), Box::new(parent.mock()), None, None).unwrap();
 
         // Agents tab, first selection: agent-2, the claude window (id 2).
         app.rename_window();
 
         assert_eq!(
-            nested_calls.borrow().last().unwrap(),
+            nested.recorded().last().unwrap(),
             "prompt_rename_window 2 agent-2"
         );
-        let parent_recorded = parent_calls.borrow();
+        let parent_recorded = parent.recorded();
         assert_eq!(parent_recorded.len(), 2);
         assert_eq!(parent_recorded[0], "last_pane");
         assert_eq!(parent_recorded[1], "last_pane");
@@ -1213,15 +1068,20 @@ mod tests {
 
     #[test]
     fn test_handle_action_triggers_rename() {
-        let nested = MockTmux::new();
-        let calls = nested.calls_rc();
-        let mut app = App::new(Box::new(nested), Box::new(MockTmux::new()), None, None).unwrap();
+        let nested = session();
+        let mut app = App::new(
+            Box::new(nested.mock()),
+            Box::new(session().mock()),
+            None,
+            None,
+        )
+        .unwrap();
 
         app.handle_keyboard_action(Action::RenameWindow);
 
         assert!(
-            calls
-                .borrow()
+            nested
+                .recorded()
                 .iter()
                 .any(|call| call.starts_with("prompt_rename_window"))
         );
@@ -1229,7 +1089,7 @@ mod tests {
 
     #[test]
     fn test_handle_action_quit() {
-        let (mut app, _, _) = test_app();
+        let (mut app, _) = test_app();
         app.handle_keyboard_action(Action::Quit);
         assert!(app.running);
         app.handle_keyboard_action(Action::Quit);
@@ -1238,7 +1098,7 @@ mod tests {
 
     #[test]
     fn test_handle_action_navigate() {
-        let (mut app, _, _) = test_app();
+        let (mut app, _) = test_app();
         app.handle_keyboard_action(Action::NavigateDown);
         assert_eq!(app.current_selected(), 1);
         app.handle_keyboard_action(Action::NavigateUp);
@@ -1247,7 +1107,7 @@ mod tests {
 
     #[test]
     fn test_kill_window_requires_double_press() {
-        let (mut app, _, _) = test_app();
+        let (mut app, _) = test_app();
         let initial_agents = app.current_tab_len();
         assert_eq!(app.pending_action(), None);
         app.handle_keyboard_action(Action::KillWindow);
@@ -1260,7 +1120,7 @@ mod tests {
 
     #[test]
     fn test_quit_requires_double_press() {
-        let (mut app, _, _) = test_app();
+        let (mut app, _) = test_app();
         assert!(app.running);
         assert_eq!(app.pending_action(), None);
         app.handle_keyboard_action(Action::Quit);
@@ -1273,7 +1133,7 @@ mod tests {
 
     #[test]
     fn test_other_action_cancels_pending_kill() {
-        let (mut app, _, _) = test_app();
+        let (mut app, _) = test_app();
         app.handle_keyboard_action(Action::KillWindow);
         assert_eq!(app.pending_action(), Some(PendingAction::KillWindow));
         app.handle_keyboard_action(Action::NavigateDown);
@@ -1282,7 +1142,7 @@ mod tests {
 
     #[test]
     fn test_other_action_cancels_pending_quit() {
-        let (mut app, _, _) = test_app();
+        let (mut app, _) = test_app();
         app.handle_keyboard_action(Action::Quit);
         assert_eq!(app.pending_action(), Some(PendingAction::Quit));
         app.handle_keyboard_action(Action::NavigateDown);
@@ -1292,7 +1152,7 @@ mod tests {
 
     #[test]
     fn test_none_action_clears_pending() {
-        let (mut app, _, _) = test_app();
+        let (mut app, _) = test_app();
         app.handle_keyboard_action(Action::KillWindow);
         assert_eq!(app.pending_action(), Some(PendingAction::KillWindow));
         app.handle_keyboard_action(Action::None);
@@ -1306,31 +1166,14 @@ mod tests {
 
     #[test]
     fn test_app_new_has_no_event_receiver() {
-        let (app, _, _) = test_app();
+        let (app, _) = test_app();
         assert!(app.event_rx.is_none());
     }
 
-    fn default_key_bindings() -> Vec<KeyBinding> {
-        [
-            ("C-b", "send-prefix"),
-            ("c", "new-window -c \"#{pane_current_path}\""),
-            ("n", "next-window"),
-            ("p", "previous-window"),
-            ("l", "last-window"),
-            (",", "command-prompt -I \"#W\" { rename-window \"%%\" }"),
-        ]
-        .into_iter()
-        .map(|(key, command)| KeyBinding {
-            key: key.to_string(),
-            command: command.to_string(),
-        })
-        .collect()
-    }
-
-    fn hints_app(nested: MockTmux, parent: MockTmux) -> App {
+    fn hints_app(nested: FakeTmux, parent: FakeTmux) -> App {
         App::new(
-            Box::new(nested),
-            Box::new(parent),
+            Box::new(nested.mock()),
+            Box::new(parent.mock()),
             Some("%7".to_string()),
             None,
         )
@@ -1339,7 +1182,7 @@ mod tests {
 
     #[test]
     fn test_tmux_hints_resolved_when_tracking() {
-        let app = hints_app(MockTmux::new(), MockTmux::new());
+        let app = hints_app(session(), session());
         assert_eq!(
             app.tmux_hints(),
             [
@@ -1355,29 +1198,29 @@ mod tests {
 
     #[test]
     fn test_tmux_hints_empty_without_pane_id() {
-        let (app, _, _) = test_app();
+        let (app, _) = test_app();
         assert!(app.tmux_hints().is_empty());
     }
 
     #[test]
     fn test_tmux_hints_skip_unbound_commands() {
-        let mut nested = MockTmux::new();
+        let mut nested = session();
         nested.keys = Some(
             default_key_bindings()
                 .into_iter()
                 .filter(|b| b.command != "last-window")
                 .collect(),
         );
-        let app = hints_app(nested, MockTmux::new());
+        let app = hints_app(nested, session());
         assert_eq!(app.tmux_hints().len(), 5);
         assert!(!app.tmux_hints().iter().any(|(_, label)| label == "last"));
     }
 
     #[test]
     fn test_tmux_hints_send_prefix_falls_back_to_prefix() {
-        let mut nested = MockTmux::new();
+        let mut nested = session();
         nested.prefix = Some("C-a".to_string());
-        let mut parent = MockTmux::new();
+        let mut parent = session();
         parent.prefix = Some("C-a".to_string());
         parent.keys = Some(
             default_key_bindings()
@@ -1399,11 +1242,11 @@ mod tests {
 
     #[test]
     fn test_tmux_hints_use_bound_send_prefix_key() {
-        let mut parent = MockTmux::new();
+        let mut parent = session();
         let mut keys = default_key_bindings();
         keys[0].key = "C-Space".to_string();
         parent.keys = Some(keys);
-        let app = hints_app(MockTmux::new(), parent);
+        let app = hints_app(session(), parent);
         assert_eq!(
             app.tmux_hints()[0],
             ("C-b C-Space".to_string(), "prefix".to_string())
@@ -1412,9 +1255,9 @@ mod tests {
 
     #[test]
     fn test_tmux_hints_bare_nested_prefix_when_prefixes_differ() {
-        let mut parent = MockTmux::new();
+        let mut parent = session();
         parent.prefix = Some("C-a".to_string());
-        let app = hints_app(MockTmux::new(), parent);
+        let app = hints_app(session(), parent);
         assert_eq!(
             app.tmux_hints()[0],
             ("C-b".to_string(), "prefix".to_string())
@@ -1424,7 +1267,7 @@ mod tests {
 
     #[test]
     fn test_tmux_hints_match_command_prompt_with_rename() {
-        let app = hints_app(MockTmux::new(), MockTmux::new());
+        let app = hints_app(session(), session());
         assert!(
             app.tmux_hints()
                 .iter()
@@ -1434,14 +1277,14 @@ mod tests {
 
     #[test]
     fn test_tmux_hints_do_not_match_menu_commands() {
-        let mut nested = MockTmux::new();
+        let mut nested = session();
         let mut keys = default_key_bindings();
         keys.push(KeyBinding {
             key: "<".to_string(),
             command: "display-menu -T \"Window menu\" #{window_index} rename-window".to_string(),
         });
         nested.keys = Some(keys);
-        let app = hints_app(nested, MockTmux::new());
+        let app = hints_app(nested, session());
         let rename_hint = app.tmux_hints().iter().find(|(_, label)| label == "rename");
         assert!(rename_hint.is_some());
         assert_ne!(rename_hint.unwrap().0, "<");
@@ -1449,56 +1292,62 @@ mod tests {
 
     #[test]
     fn test_tmux_hints_empty_when_nested_list_keys_fails() {
-        let mut nested = MockTmux::new();
+        let mut nested = session();
         nested.keys = None;
-        let app = hints_app(nested, MockTmux::new());
+        let app = hints_app(nested, session());
         assert!(app.tmux_hints().is_empty());
     }
 
     #[test]
     fn test_tmux_hints_empty_when_parent_list_keys_fails() {
-        let mut parent = MockTmux::new();
+        let mut parent = session();
         parent.keys = None;
-        let app = hints_app(MockTmux::new(), parent);
+        let app = hints_app(session(), parent);
         assert!(app.tmux_hints().is_empty());
     }
 
     #[test]
     fn test_tmux_hints_empty_when_nested_prefix_fails() {
-        let mut nested = MockTmux::new();
+        let mut nested = session();
         nested.prefix = None;
-        let app = hints_app(nested, MockTmux::new());
+        let app = hints_app(nested, session());
         assert!(app.tmux_hints().is_empty());
     }
 
     #[test]
     fn test_tmux_hints_empty_when_parent_prefix_fails() {
-        let mut parent = MockTmux::new();
+        let mut parent = session();
         parent.prefix = None;
-        let app = hints_app(MockTmux::new(), parent);
+        let app = hints_app(session(), parent);
         assert!(app.tmux_hints().is_empty());
     }
 
     #[test]
     fn test_tmux_hints_empty_when_parent_prefix_blank() {
-        let mut parent = MockTmux::new();
+        let mut parent = session();
         parent.prefix = Some(String::new());
-        let app = hints_app(MockTmux::new(), parent);
+        let app = hints_app(session(), parent);
         assert!(app.tmux_hints().is_empty());
     }
 
     #[test]
     fn test_new_without_panel_width_assumes_focused() {
-        let driver = MockTmux::new();
-        let app = App::new(Box::new(driver), Box::new(MockTmux::new()), None, None).unwrap();
+        let driver = session();
+        let app = App::new(
+            Box::new(driver.mock()),
+            Box::new(session().mock()),
+            None,
+            None,
+        )
+        .unwrap();
         assert!(app.pane_active());
     }
 
     #[test]
     fn test_set_pane_active_toggles() {
         let mut app = App::new(
-            Box::new(MockTmux::new()),
-            Box::new(MockTmux::new()),
+            Box::new(session().mock()),
+            Box::new(session().mock()),
             Some("%7".to_string()),
             None,
         )
@@ -1512,7 +1361,7 @@ mod tests {
 
     #[test]
     fn test_process_tmux_events_without_receiver_is_noop() {
-        let (mut app, _, _) = test_app();
+        let (mut app, _) = test_app();
         assert!(!app.process_tmux_events());
         assert!(app.running);
         assert_eq!(app.windows().len(), 4);
@@ -1520,12 +1369,12 @@ mod tests {
 
     #[test]
     fn test_refresh_event_reloads_windows() {
-        let (mut app, windows, _) = test_app();
+        let (mut app, tmux) = test_app();
         let (tx, rx) = mpsc::channel();
         app.event_rx = Some(rx);
 
         // A structural change happened externally; the event tells us to reload.
-        windows.borrow_mut().push(Window {
+        tmux.windows.lock().unwrap().push(Window {
             id: 99,
             name: "agent-5".to_string(),
             pane_pid: 10005,
@@ -1544,18 +1393,18 @@ mod tests {
     #[test]
     fn test_multiple_events_refresh_once() {
         // Coalescing: many events, but list_windows is re-read a single time.
-        let (mut app, _, calls) = test_app();
+        let (mut app, tmux) = test_app();
         let (tx, rx) = mpsc::channel();
         app.event_rx = Some(rx);
-        calls.borrow_mut().clear();
+        tmux.calls.lock().unwrap().clear();
 
         for _ in 0..10 {
             let _ = tx.send(TmuxEvent::Refresh);
         }
         app.process_tmux_events();
 
-        let list_calls = calls
-            .borrow()
+        let list_calls = tmux
+            .recorded()
             .iter()
             .filter(|c| *c == "list_windows")
             .count();
@@ -1565,7 +1414,7 @@ mod tests {
 
     #[test]
     fn test_exit_event_quits_app() {
-        let (mut app, _, _) = test_app();
+        let (mut app, _) = test_app();
         let (tx, rx) = mpsc::channel();
         app.event_rx = Some(rx);
 
@@ -1577,7 +1426,7 @@ mod tests {
 
     #[test]
     fn test_pane_changed_matching_own_pane_sets_active() {
-        let (mut app, _, _) = test_app();
+        let (mut app, _) = test_app();
         app.pane_id = Some("%5".to_string());
         app.set_pane_active(false);
         let (tx, rx) = mpsc::channel();
@@ -1590,7 +1439,7 @@ mod tests {
 
     #[test]
     fn test_pane_changed_not_matching_own_pane_sets_inactive() {
-        let (mut app, _, _) = test_app();
+        let (mut app, _) = test_app();
         app.pane_id = Some("%5".to_string());
         let (tx, rx) = mpsc::channel();
         app.event_rx = Some(rx);
@@ -1602,7 +1451,7 @@ mod tests {
 
     #[test]
     fn test_pane_changed_without_own_pane_id_keeps_active() {
-        let (mut app, _, _) = test_app();
+        let (mut app, _) = test_app();
         app.pane_id = None;
         let (tx, rx) = mpsc::channel();
         app.event_rx = Some(rx);
@@ -1614,13 +1463,13 @@ mod tests {
 
     #[test]
     fn test_refresh_windows_new_windows_get_start_time() {
-        let (app, _, _) = test_app();
+        let (app, _) = test_app();
         assert!(app.windows().iter().all(|w| w.started_at.is_some()));
     }
 
     #[test]
     fn test_refresh_windows_existing_windows_keep_time() {
-        let (mut app, _, _) = test_app();
+        let (mut app, _) = test_app();
         let first_times: Vec<Option<Instant>> =
             app.windows().iter().map(|w| w.started_at).collect();
         std::thread::sleep(std::time::Duration::from_millis(10));
@@ -1632,10 +1481,10 @@ mod tests {
 
     #[test]
     fn test_refresh_windows_removed_windows_cleaned_up() {
-        let (mut app, windows, _) = test_app();
+        let (mut app, tmux) = test_app();
         assert_eq!(app.windows().len(), 4);
         let window_id = app.windows()[0].id;
-        windows.borrow_mut().retain(|w| w.id != window_id);
+        tmux.windows.lock().unwrap().retain(|w| w.id != window_id);
         app.refresh_windows().unwrap();
         assert_eq!(app.windows().len(), 3);
         assert!(!app.windows().iter().any(|w| w.id == window_id));
@@ -1643,30 +1492,30 @@ mod tests {
 
     #[test]
     fn test_external_tmux_change_syncs_selection() {
-        let (mut app, windows, _) = test_app();
+        let (mut app, tmux) = test_app();
         app.set_pane_active(false);
         assert_eq!(app.current_selected(), 0);
 
-        windows.borrow_mut()[1].is_active = false;
-        windows.borrow_mut()[3].is_active = true;
+        tmux.windows.lock().unwrap()[1].is_active = false;
+        tmux.windows.lock().unwrap()[3].is_active = true;
         app.refresh_windows().unwrap();
         assert_eq!(app.current_selected(), 1);
     }
 
     #[test]
     fn test_external_tmux_change_switches_tab() {
-        let (mut app, windows, _) = test_app();
+        let (mut app, tmux) = test_app();
         app.set_pane_active(false);
         assert_eq!(app.active_tab(), Tab::Agents);
 
-        windows.borrow_mut()[0].is_active = true;
+        tmux.windows.lock().unwrap()[0].is_active = true;
         app.refresh_windows().unwrap();
         assert_eq!(app.active_tab(), Tab::Windows);
     }
 
     #[test]
     fn test_external_tmux_change_syncs_after_navigation() {
-        let (mut app, windows, _) = test_app();
+        let (mut app, tmux) = test_app();
         app.set_pane_active(false);
         assert_eq!(app.current_selected(), 0);
 
@@ -1674,7 +1523,7 @@ mod tests {
         assert_eq!(app.current_selected(), 1);
         assert_eq!(app.last_focused_id, Some(4));
 
-        windows.borrow_mut()[0].is_active = true;
+        tmux.windows.lock().unwrap()[0].is_active = true;
         app.refresh_windows().unwrap();
         assert_eq!(app.active_tab(), Tab::Windows);
         assert_eq!(app.current_selected(), 0);
@@ -1683,27 +1532,27 @@ mod tests {
 
     #[test]
     fn test_refresh_windows_does_not_override_selection_when_pane_active() {
-        let (mut app, windows, _) = test_app();
+        let (mut app, tmux) = test_app();
         assert_eq!(app.current_selected(), 0);
 
         app.navigate_down();
         assert_eq!(app.current_selected(), 1);
 
-        windows.borrow_mut()[0].is_active = true;
+        tmux.windows.lock().unwrap()[0].is_active = true;
         app.refresh_windows().unwrap();
         assert_eq!(app.current_selected(), 1);
     }
 
     #[test]
     fn test_selected_window_moving_to_other_tab_switches_tab() {
-        let (mut app, windows, _) = test_app();
+        let (mut app, tmux) = test_app();
         assert_eq!(app.active_tab(), Tab::Agents);
         assert_eq!(app.current_tab_len(), 2);
 
         let selected_id = app.current_tab_window().unwrap().id;
         assert_eq!(selected_id, 2);
 
-        windows.borrow_mut()[1].running_command = "bash".to_string();
+        tmux.windows.lock().unwrap()[1].running_command = "bash".to_string();
         app.refresh_windows().unwrap();
 
         assert_eq!(app.active_tab(), Tab::Windows);
@@ -1712,7 +1561,7 @@ mod tests {
 
     #[test]
     fn test_switch_tab() {
-        let (mut app, _, _) = test_app();
+        let (mut app, _) = test_app();
         assert_eq!(app.active_tab(), Tab::Agents);
         app.switch_tab(Tab::Windows);
         assert_eq!(app.active_tab(), Tab::Windows);
@@ -1722,10 +1571,16 @@ mod tests {
 
     #[test]
     fn test_switch_tab_blocked_when_empty() {
-        let driver = MockTmux::new();
-        driver.windows.borrow_mut()[1].running_command = "bash".to_string();
-        driver.windows.borrow_mut()[3].running_command = "zsh".to_string();
-        let mut app = App::new(Box::new(driver), Box::new(MockTmux::new()), None, None).unwrap();
+        let driver = session();
+        driver.windows.lock().unwrap()[1].running_command = "bash".to_string();
+        driver.windows.lock().unwrap()[3].running_command = "zsh".to_string();
+        let mut app = App::new(
+            Box::new(driver.mock()),
+            Box::new(session().mock()),
+            None,
+            None,
+        )
+        .unwrap();
         assert_eq!(app.active_tab(), Tab::Windows);
         assert!(app.is_tab_empty(Tab::Agents));
         app.switch_tab(Tab::Agents);
@@ -1734,7 +1589,7 @@ mod tests {
 
     #[test]
     fn test_switch_tab_selects_first_when_no_match() {
-        let (mut app, _, _) = test_app();
+        let (mut app, _) = test_app();
 
         app.navigate_down();
         assert_eq!(app.current_selected(), 1);
@@ -1751,10 +1606,16 @@ mod tests {
 
     #[test]
     fn test_switch_tab_selects_matching_current_dir() {
-        let driver = MockTmux::new();
-        driver.windows.borrow_mut()[1].current_dir = "/home/user/shared".to_string();
-        driver.windows.borrow_mut()[2].current_dir = "/home/user/shared".to_string();
-        let mut app = App::new(Box::new(driver), Box::new(MockTmux::new()), None, None).unwrap();
+        let driver = session();
+        driver.windows.lock().unwrap()[1].current_dir = "/home/user/shared".to_string();
+        driver.windows.lock().unwrap()[2].current_dir = "/home/user/shared".to_string();
+        let mut app = App::new(
+            Box::new(driver.mock()),
+            Box::new(session().mock()),
+            None,
+            None,
+        )
+        .unwrap();
 
         assert_eq!(app.active_tab(), Tab::Agents);
         assert_eq!(app.current_selected(), 0);
@@ -1765,11 +1626,17 @@ mod tests {
 
     #[test]
     fn test_switch_tab_selects_first_match_when_multiple() {
-        let driver = MockTmux::new();
-        driver.windows.borrow_mut()[1].current_dir = "/home/user/shared".to_string();
-        driver.windows.borrow_mut()[0].current_dir = "/home/user/shared".to_string();
-        driver.windows.borrow_mut()[2].current_dir = "/home/user/shared".to_string();
-        let mut app = App::new(Box::new(driver), Box::new(MockTmux::new()), None, None).unwrap();
+        let driver = session();
+        driver.windows.lock().unwrap()[1].current_dir = "/home/user/shared".to_string();
+        driver.windows.lock().unwrap()[0].current_dir = "/home/user/shared".to_string();
+        driver.windows.lock().unwrap()[2].current_dir = "/home/user/shared".to_string();
+        let mut app = App::new(
+            Box::new(driver.mock()),
+            Box::new(session().mock()),
+            None,
+            None,
+        )
+        .unwrap();
 
         assert_eq!(app.active_tab(), Tab::Agents);
         assert_eq!(app.current_selected(), 0);
@@ -1780,10 +1647,16 @@ mod tests {
 
     #[test]
     fn test_switch_tab_selects_first_when_current_dir_empty() {
-        let driver = MockTmux::new();
-        driver.windows.borrow_mut()[0].current_dir = String::new();
-        driver.windows.borrow_mut()[2].current_dir = "/home/user/project3".to_string();
-        let mut app = App::new(Box::new(driver), Box::new(MockTmux::new()), None, None).unwrap();
+        let driver = session();
+        driver.windows.lock().unwrap()[0].current_dir = String::new();
+        driver.windows.lock().unwrap()[2].current_dir = "/home/user/project3".to_string();
+        let mut app = App::new(
+            Box::new(driver.mock()),
+            Box::new(session().mock()),
+            None,
+            None,
+        )
+        .unwrap();
 
         assert_eq!(app.active_tab(), Tab::Agents);
         assert_eq!(app.current_selected(), 0);
@@ -1794,14 +1667,14 @@ mod tests {
 
     #[test]
     fn test_is_tab_empty() {
-        let (app, _, _) = test_app();
+        let (app, _) = test_app();
         assert!(!app.is_tab_empty(Tab::Agents));
         assert!(!app.is_tab_empty(Tab::Windows));
     }
 
     #[test]
     fn test_current_tab_windows() {
-        let (app, _, _) = test_app();
+        let (app, _) = test_app();
         let agent_windows = app.current_tab_windows();
         assert_eq!(agent_windows.len(), 2);
         assert!(is_agent(&agent_windows[0].running_command).is_some());
@@ -1810,7 +1683,7 @@ mod tests {
 
     #[test]
     fn test_ensure_visible_no_change_when_already_visible() {
-        let (mut app, _, _) = test_app();
+        let (mut app, _) = test_app();
         assert_eq!(app.list_state().offset(), 0);
 
         app.ensure_visible(3);
@@ -1819,7 +1692,7 @@ mod tests {
 
     #[test]
     fn test_ensure_visible_scrolls_down_when_selected_below_visible() {
-        let (mut app, _, _) = test_app();
+        let (mut app, _) = test_app();
         app.navigate_down();
         assert_eq!(app.current_selected(), 1);
 
@@ -1829,7 +1702,7 @@ mod tests {
 
     #[test]
     fn test_ensure_visible_scrolls_up_when_selected_above_visible() {
-        let (mut app, _, _) = test_app();
+        let (mut app, _) = test_app();
         app.navigate_down();
         *app.list_state.offset_mut() = 1;
 
@@ -1842,7 +1715,7 @@ mod tests {
 
     #[test]
     fn test_ensure_visible_no_scroll_when_zero_visible_count() {
-        let (mut app, _, _) = test_app();
+        let (mut app, _) = test_app();
         app.navigate_down();
 
         app.ensure_visible(0);
@@ -1851,11 +1724,10 @@ mod tests {
 
     #[test]
     fn test_enforce_panel_width_resizes_when_width_differs() {
-        let parent = MockTmux::new();
-        let parent_calls = parent.calls_rc();
+        let parent = session();
         let app = App::new(
-            Box::new(MockTmux::new()),
-            Box::new(parent),
+            Box::new(session().mock()),
+            Box::new(parent.mock()),
             Some("%5".to_string()),
             Some(35),
         )
@@ -1864,18 +1736,17 @@ mod tests {
         app.enforce_panel_width(50);
 
         assert_eq!(
-            parent_calls.borrow().as_slice(),
+            parent.recorded().as_slice(),
             ["resize_pane %5 35".to_string()]
         );
     }
 
     #[test]
     fn test_enforce_panel_width_noop_when_width_matches() {
-        let parent = MockTmux::new();
-        let parent_calls = parent.calls_rc();
+        let parent = session();
         let app = App::new(
-            Box::new(MockTmux::new()),
-            Box::new(parent),
+            Box::new(session().mock()),
+            Box::new(parent.mock()),
             Some("%5".to_string()),
             Some(35),
         )
@@ -1883,19 +1754,24 @@ mod tests {
 
         app.enforce_panel_width(35);
 
-        assert!(parent_calls.borrow().is_empty());
+        assert!(parent.recorded().is_empty());
     }
 
     #[test]
     fn test_enforce_panel_width_noop_without_panel_width() {
-        let parent = MockTmux::new();
-        let parent_calls = parent.calls_rc();
-        let app = App::new(Box::new(MockTmux::new()), Box::new(parent), None, None).unwrap();
+        let parent = session();
+        let app = App::new(
+            Box::new(session().mock()),
+            Box::new(parent.mock()),
+            None,
+            None,
+        )
+        .unwrap();
         assert_eq!(app.panel_width, None);
 
         app.enforce_panel_width(50);
 
-        assert!(parent_calls.borrow().is_empty());
+        assert!(parent.recorded().is_empty());
     }
 
     #[test]
@@ -1903,11 +1779,11 @@ mod tests {
         let path = crate::backends::logger::tests::temp_log_path();
         let _guard = crate::backends::logger::tests::init_for_test(&path);
 
-        let mut parent = MockTmux::new();
-        parent.resize_should_fail = true;
+        let mut parent = session();
+        parent.resize_fails = true;
         let app = App::new(
-            Box::new(MockTmux::new()),
-            Box::new(parent),
+            Box::new(session().mock()),
+            Box::new(parent.mock()),
             Some("%5".to_string()),
             Some(35),
         )
@@ -1921,7 +1797,7 @@ mod tests {
 
     #[test]
     fn test_cursor_follows_active_window_after_navigation_then_lose_focus() {
-        let (mut app, windows, _) = test_app();
+        let (mut app, tmux) = test_app();
 
         app.navigate_down();
         assert_eq!(app.current_selected(), 1);
@@ -1929,7 +1805,7 @@ mod tests {
 
         app.set_pane_active(false);
 
-        windows.borrow_mut()[0].is_active = true;
+        tmux.windows.lock().unwrap()[0].is_active = true;
         app.refresh_windows().unwrap();
 
         assert_eq!(app.active_tab(), Tab::Windows);
@@ -1941,7 +1817,7 @@ mod tests {
         // Scenario: User focuses window with keyboard, then hovers with mouse
         // (changing selection but not last_focused_id), then pane becomes inactive.
         // Selection should sync back to the active window, not stay at hover position.
-        let (mut app, windows, _) = test_app();
+        let (mut app, tmux) = test_app();
 
         // Initial state: Agents tab has 2 windows (id=2 at index 0, id=4 at index 1)
         // Active window is id=2
@@ -1955,8 +1831,8 @@ mod tests {
         assert_eq!(app.last_focused_id, Some(4));
 
         // Simulate that the active window is now id=4 (the one we focused)
-        windows.borrow_mut()[1].is_active = false; // id=2 is no longer active
-        windows.borrow_mut()[3].is_active = true; // id=4 is now active
+        tmux.windows.lock().unwrap()[1].is_active = false; // id=2 is no longer active
+        tmux.windows.lock().unwrap()[3].is_active = true; // id=4 is now active
 
         // User hovers back to selection 0 (id=2) with mouse
         app.set_current_selected(0);
