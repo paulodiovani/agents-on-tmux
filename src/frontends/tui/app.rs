@@ -469,12 +469,8 @@ impl App {
     /// Creates a new tmux window and adds it to the list.
     fn create_window(&mut self) {
         self.active_tab = Tab::Windows;
-        let name = format!("agent-{}", self.windows.len() + 1);
-        logger::debug!("app: create window {name}");
-        match self
-            .nested_driver
-            .create_window(Some(&name), None, None, false)
-        {
+        logger::debug!("app: create window");
+        match self.nested_driver.create_window(None, None, None, false) {
             Ok(new_window) => {
                 if let Err(error) = self.refresh_windows() {
                     logger::error!("app: refresh windows failed: {error}");
@@ -1136,6 +1132,13 @@ mod tests {
         let initial_len = app.windows().len();
         app.create_window();
         assert_eq!(app.windows().len(), initial_len + 1);
+    }
+
+    #[test]
+    fn test_create_window_leaves_naming_to_tmux() {
+        let (mut app, windows, _) = test_app();
+        app.create_window();
+        assert_eq!(windows.borrow().last().unwrap().name, "");
     }
 
     #[test]

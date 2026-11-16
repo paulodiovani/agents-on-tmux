@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `aot mcp` writes to the debug log when `AOT_DEBUG` or `--debug` is set
 
 ### Fixed
+- Windows created from the TUI were named `agent-N`; tmux now names them after the running command
 - Crash when logging a malformed tmux window line containing multibyte characters
 - Tight reconnect loop when the tmux control-mode connection ends without `%exit`
 - TUI side-panel failing to launch when the `aot` path contains spaces, or when `--tui`/`--no-tui` were passed explicitly
