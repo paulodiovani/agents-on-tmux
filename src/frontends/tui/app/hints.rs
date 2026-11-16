@@ -81,10 +81,10 @@ fn prefix_option(driver: &dyn Tmux, global: bool) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::fixtures::{new_app, session, test_app};
+    use super::super::test_fixtures::{new_app, session, test_app};
     use crate::backends::tmux::KeyBinding;
     use crate::frontends::tui::app::App;
-    use crate::frontends::tui::fake_tmux::{FakeTmux, default_key_bindings};
+    use crate::frontends::tui::test_fake_tmux::{FakeTmux, default_key_bindings};
 
     fn hints_app(nested: FakeTmux, parent: FakeTmux) -> App {
         new_app(&nested, &parent, Some("%7"), None)

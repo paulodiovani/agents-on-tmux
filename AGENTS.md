@@ -14,7 +14,8 @@
 ## Testing
 
 - Always write tests for new code; no untested logic should land.
-- Mock the `Tmux` trait with the mockall-generated `MockTmux` (`#[cfg_attr(test, mockall::automock)]`, exported from `backends::tmux` in test builds); set expectations per test. TUI tests use `FakeTmux` (`frontends/tui/fake_tmux.rs`), a `MockTmux` backed by shared window state.
+- Mock the `Tmux` trait with the mockall-generated `MockTmux` (`#[cfg_attr(test, mockall::automock)]`, exported from `backends::tmux` in test builds); set expectations per test. TUI tests use `FakeTmux` (`frontends/tui/test_fake_tmux.rs`), a `MockTmux` backed by shared window state.
+- Test-only support files are named `test_*.rs` and start with `#![cfg(test)]`.
 - Aim for 100% code coverage.
 - Never run the code (`cargo run`, the `aot` binary, or real tmux commands) during
   implementation — it would interact with existing tmux sessions. Only run tests with
@@ -47,7 +48,7 @@ Two top-level modules under `src/`:
 
 - `frontends/` — interfaces to AOT features
   - `tui/` terminal UI (app, event, icons, path, theme, ui)
-    - `app/` the `App`: `state.rs` (TUI state and user actions), `run_loop.rs` (event loop and input dispatch), `hints.rs` (nested-session key hints); `fixtures.rs` builds test apps
+    - `app/` the `App`: `state.rs` (TUI state and user actions), `run_loop.rs` (event loop and input dispatch), `hints.rs` (nested-session key hints); `test_fixtures.rs` builds test apps
     - `key_to_action` maps keyboard input to `Action` enum
     - `Theme` defines visual styles
     - `ui::draw` renders the interface

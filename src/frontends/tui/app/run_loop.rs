@@ -231,7 +231,7 @@ fn find_region_action(regions: &[ui::ClickableRegion], x: u16, y: u16) -> Option
 
 #[cfg(test)]
 mod tests {
-    use super::super::fixtures::{new_app, session, test_app};
+    use super::super::test_fixtures::{new_app, session, test_app};
     use super::*;
     use crate::backends::tmux::Window;
     use crate::frontends::tui::event::Tab;

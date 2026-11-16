@@ -493,10 +493,10 @@ impl App {
 
 #[cfg(test)]
 mod tests {
-    use super::super::fixtures::{new_app, session, test_app};
+    use super::super::test_fixtures::{new_app, session, test_app};
     use super::*;
     use crate::backends::process::MockProcesses;
-    use crate::frontends::tui::fake_tmux::FakeTmux;
+    use crate::frontends::tui::test_fake_tmux::FakeTmux;
     use mockall::predicate::eq;
     use std::time::Duration;
 

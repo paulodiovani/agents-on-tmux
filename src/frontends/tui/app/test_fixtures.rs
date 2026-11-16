@@ -1,9 +1,11 @@
+#![cfg(test)]
+
 use std::time::{Duration, Instant};
 
 use super::App;
 use crate::backends::process::MockProcesses;
 use crate::backends::tmux::Window;
-use crate::frontends::tui::fake_tmux::FakeTmux;
+use crate::frontends::tui::test_fake_tmux::FakeTmux;
 
 /// An app over the given sessions whose process lookups find nothing.
 pub fn new_app(

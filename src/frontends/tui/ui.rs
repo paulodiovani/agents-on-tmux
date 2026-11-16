@@ -601,8 +601,8 @@ pub fn clickable_regions(frame_area: Rect, app: &App) -> Vec<ClickableRegion> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::frontends::tui::app::fixtures::new_app;
-    use crate::frontends::tui::fake_tmux::FakeTmux;
+    use crate::frontends::tui::app::test_fixtures::new_app;
+    use crate::frontends::tui::test_fake_tmux::FakeTmux;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::buffer::Buffer;
