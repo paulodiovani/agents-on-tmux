@@ -9,7 +9,7 @@ pub enum LaunchMode {
 }
 
 /// Application configuration options
-#[derive(serde::Deserialize, Clone, Default)]
+#[derive(serde::Deserialize, Clone, Default, Debug)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
     #[serde(default)]

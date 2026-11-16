@@ -13,7 +13,4 @@ mod send_prompt;
 mod tool;
 
 pub use registry::all_tools;
-pub use tool::{CallContext, Tool};
-
-#[cfg(test)]
-pub use tool::ToolOutput;
+pub use tool::{CallContext, Tool, ToolOutput};

@@ -73,7 +73,10 @@ impl McpServer {
         std::fs::set_permissions(path, Permissions::from_mode(SOCKET_MODE))
             .map_err(socket_error)?;
 
-        thread::spawn(move || serve(listener, protocol));
+        thread::spawn(move || {
+            logger::set_thread_role("mcp");
+            serve(listener, protocol)
+        });
         Ok(Some(server))
     }
 }
@@ -103,13 +106,14 @@ fn serve(listener: UnixListener, protocol: Arc<dyn Protocol + Send + Sync>) {
             Ok(stream) => {
                 let protocol = Arc::clone(&protocol);
                 thread::spawn(move || {
+                    logger::set_thread_role("mcp");
                     if let Err(error) = handle_connection(stream, protocol.as_ref()) {
-                        logger::error(&format!("mcp: connection closed: {error}"));
+                        logger::error!("mcp: connection rejected: {error}");
                     }
                 });
             }
 
-            Err(error) => logger::error(&format!("mcp: accept failed: {error}")),
+            Err(error) => logger::error!("mcp: accept failed: {error}"),
         }
     }
 }
@@ -125,18 +129,32 @@ fn handle_connection(stream: UnixStream, protocol: &dyn Protocol) -> io::Result<
     let context = CallContext {
         pane: handshake.pane,
     };
-    logger::debug(&format!(
-        "mcp: agent connected from pane {:?}",
-        context.pane
-    ));
+    logger::info!("mcp: connection opened for pane {:?}", context.pane);
 
+    let result = relay(lines, &mut writer, protocol, &context);
+    match &result {
+        Ok(()) => logger::info!("mcp: connection closed for pane {:?}", context.pane),
+        Err(error) => logger::error!(
+            "mcp: connection for pane {:?} failed: {error}",
+            context.pane
+        ),
+    }
+    Ok(())
+}
+
+fn relay(
+    lines: impl Iterator<Item = io::Result<String>>,
+    writer: &mut impl Write,
+    protocol: &dyn Protocol,
+    context: &CallContext,
+) -> io::Result<()> {
     for line in lines {
         let line = line?;
         if line.trim().is_empty() {
             continue;
         }
 
-        if let Some(reply) = protocol.handle(&line, &context) {
+        if let Some(reply) = protocol.handle(&line, context) {
             writer.write_all(reply.as_bytes())?;
             writer.write_all(b"\n")?;
             writer.flush()?;

@@ -9,6 +9,8 @@ use std::thread;
 use serde_json::json;
 use thiserror::Error;
 
+use crate::backends::logger;
+
 #[derive(Debug, Error)]
 pub enum ShimError {
     #[error("AOT MCP not running (no server at {0}); start aot first")]
@@ -36,6 +38,7 @@ pub fn run(
     let handshake = json!({ "pane": pane }).to_string();
     socket.write_all(handshake.as_bytes())?;
     socket.write_all(b"\n")?;
+    logger::info!("shim: connected to {} for pane {pane:?}", path.display());
 
     let mut upstream = socket.try_clone()?;
     let client_closed = Arc::new(AtomicBool::new(false));
@@ -47,6 +50,7 @@ pub fn run(
     });
     pump(socket, output)?;
     if client_closed.load(Ordering::SeqCst) {
+        logger::info!("shim: agent closed the connection");
         Ok(())
     } else {
         Err(ShimError::Disconnected)

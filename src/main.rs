@@ -104,6 +104,23 @@ fn split_command(exe: &str, cli: &Cli, width: u16) -> String {
     backends::shell::join(&argv)
 }
 
+/// Role tag that identifies this process's lines in the shared log file.
+fn log_role(mode: LaunchMode) -> &'static str {
+    match mode {
+        LaunchMode::TuiOnly { .. } => "tui",
+        LaunchMode::Split { .. } | LaunchMode::NoTui => "main",
+    }
+}
+
+/// Starts file logging under the user cache dir.
+fn init_logging(role: &'static str) -> std::io::Result<()> {
+    let path = dirs::cache_dir()
+        .unwrap_or_else(std::env::temp_dir)
+        .join("aot");
+    std::fs::create_dir_all(&path)?;
+    logger::init(&path.join("aot.log"), role)
+}
+
 fn start_mcp_server() -> Option<McpServer> {
     let path = frontends::mcp::socket_path();
     let tmux = Arc::new(TmuxDriver::new_with_socket(SESSION_NAME, SOCKET_NAME));
@@ -111,15 +128,15 @@ fn start_mcp_server() -> Option<McpServer> {
     let handler = McpHandler::new(frontends::mcp::all_tools(tmux, default_dir));
     match McpServer::start(&path, Arc::new(handler)) {
         Ok(Some(server)) => {
-            logger::info(&format!("main: MCP server listening on {}", path.display()));
+            logger::info!("main: MCP server listening on {}", path.display());
             Some(server)
         }
         Ok(None) => {
-            logger::info("main: MCP socket owned by another aot instance; not starting");
+            logger::info!("main: MCP socket owned by another aot instance; not starting");
             None
         }
         Err(error) => {
-            logger::error(&format!("main: MCP server failed to start: {error}"));
+            logger::error!("main: MCP server failed to start: {error}");
             None
         }
     }
@@ -128,28 +145,34 @@ fn start_mcp_server() -> Option<McpServer> {
 fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     if cli.command == Some(Command::Mcp) {
+        // The shim must keep serving the agent even when the log is unusable.
+        if cli.debug.unwrap_or(false) {
+            let _ = init_logging("shim");
+        }
         let path = frontends::mcp::socket_path();
         let mut stdout = std::io::stdout();
-        frontends::mcp::run_shim(
+        let result = frontends::mcp::run_shim(
             &path,
             cli.tui_pane.as_deref(),
             std::io::stdin(),
             &mut stdout,
-        )?;
-        return Ok(());
+        );
+        if let Err(error) = &result {
+            logger::error!("shim: {error}");
+        }
+        return Ok(result?);
     }
 
     let config = Config::parse()?.merge(&cli);
+    let launch_mode = config.launch_mode();
 
     // Logger setup must precede any tmux session/thread creation, so a fatal
     // --debug failure leaves no server, session, or thread behind.
     if config.debug.unwrap_or(false) {
-        let path = dirs::cache_dir()
-            .unwrap_or_else(std::env::temp_dir)
-            .join("aot");
-        std::fs::create_dir_all(&path)?;
-        backends::logger::init(&path.join("aot.log"))?;
-        backends::logger::info("main: starting aot");
+        init_logging(log_role(launch_mode))?;
+        logger::info!("main: starting aot {}", env!("CARGO_PKG_VERSION"));
+        logger::info!("main: config {config:?}");
+        logger::info!("main: launch mode {launch_mode:?}");
     }
 
     // Install panic hook before ratatui::init() so panics are logged to the
@@ -157,7 +180,7 @@ fn main() -> anyhow::Result<()> {
     // restore hook and requires other hooks to be installed first.
     let previous_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        logger::error(&format!("panic: {info}"));
+        logger::error!("panic: {info}");
         previous_hook(info);
     }));
 
@@ -168,7 +191,7 @@ fn main() -> anyhow::Result<()> {
 
     let tmux_env = config.tmux_env.as_deref();
     let parent_session = detect_parent_session(tmux_env)?;
-    logger::debug(&format!("main: parent session: {}", parent_session));
+    logger::debug!("main: parent session: {}", parent_session);
 
     let parent_driver = TmuxDriver::new(&parent_session);
 
@@ -179,22 +202,22 @@ fn main() -> anyhow::Result<()> {
 
     let pane_id = config.tui_pane.clone();
     if pane_id.is_none() {
-        logger::debug("main: TMUX_PANE not set; focus tracking disabled");
+        logger::debug!("main: TMUX_PANE not set; focus tracking disabled");
     }
 
-    match config.launch_mode() {
+    match launch_mode {
         LaunchMode::NoTui => {
             // Blocking attach: signals must exit the process immediately.
             if let Err(error) = backends::signals::install(backends::signals::OnSignal::Exit) {
-                logger::error(&format!("main: signal install failed: {error}"));
+                logger::error!("main: signal install failed: {error}");
             }
             nested_driver.attach_session()?;
         }
         LaunchMode::TuiOnly { width } => {
-            backends::logger::info("main: starting tui");
+            logger::info!("main: starting tui");
             // TUI mode: signals set a flag; the run loop polls it.
             if let Err(error) = backends::signals::install(backends::signals::OnSignal::Shutdown) {
-                logger::error(&format!("main: signal install failed: {error}"));
+                logger::error!("main: signal install failed: {error}");
             }
             let terminal = ratatui::init();
             let _ = crossterm::execute!(std::io::stdout(), crossterm::event::EnableMouseCapture);
@@ -207,14 +230,14 @@ fn main() -> anyhow::Result<()> {
             let result = app.run(terminal);
             let _ = crossterm::execute!(std::io::stdout(), crossterm::event::DisableMouseCapture);
             if let Err(error) = ratatui::try_restore() {
-                logger::error(&format!("main: failed to restore terminal: {error}"));
+                logger::error!("main: failed to restore terminal: {error}");
             }
             result?;
         }
         LaunchMode::Split { width } => {
             // Blocking attach: signals must exit the process immediately.
             if let Err(error) = backends::signals::install(backends::signals::OnSignal::Exit) {
-                logger::error(&format!("main: signal install failed: {error}"));
+                logger::error!("main: signal install failed: {error}");
             }
             let exe = std::env::current_exe()?;
             let command = split_command(&exe.to_string_lossy(), &cli, width);
@@ -356,6 +379,13 @@ mod tests {
     fn test_no_subcommand_by_default() {
         let cli = Cli::parse_from(["aot", "--tui"]);
         assert_eq!(cli.command, None);
+    }
+
+    #[test]
+    fn test_log_role_by_launch_mode() {
+        assert_eq!(log_role(LaunchMode::TuiOnly { width: None }), "tui");
+        assert_eq!(log_role(LaunchMode::Split { width: 35 }), "main");
+        assert_eq!(log_role(LaunchMode::NoTui), "main");
     }
 
     #[test]
