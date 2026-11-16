@@ -40,7 +40,11 @@ impl NewAgent {
         if alive { Ok(()) } else { Err(exited(agent)) }
     }
 
-    fn agent(&self, arguments: &Value, context: &CallContext) -> Result<GenericAgent, ToolOutput> {
+    fn agent(
+        &self,
+        arguments: &Value,
+        context: &CallContext,
+    ) -> Result<&'static GenericAgent, ToolOutput> {
         match arguments.get("command") {
             None => {
                 let caller = caller_window(self.tmux.as_ref(), context)?;
@@ -135,10 +139,10 @@ impl Tool for NewAgent {
                 .create_window(name.as_deref(), Some(&dir), Some(&command), true)
             {
                 Ok(window) => window,
-                Err(TmuxError::WindowNotFound) => return exited(&agent),
+                Err(TmuxError::WindowNotFound) => return exited(agent),
                 Err(error) => return ToolOutput::error(format!("Failed to start agent: {error}")),
             };
-        if let Err(error) = self.check_still_running(&window, &agent) {
+        if let Err(error) = self.check_still_running(&window, agent) {
             return error;
         }
         ToolOutput::json(json!({

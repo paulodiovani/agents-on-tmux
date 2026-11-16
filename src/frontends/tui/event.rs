@@ -1,5 +1,26 @@
 use crossterm::event::{KeyCode, KeyEvent};
 
+/// User actions that can be triggered by keyboard input.
+pub enum Action {
+    CreateWindow,
+    FocusWindow,
+    KillWindow,
+    NavigateDown,
+    NavigateUp,
+    None,
+    Quit,
+    RenameWindow,
+    SwitchTabLeft,
+    SwitchTabRight,
+}
+
+/// Actions that require double-press confirmation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PendingAction {
+    KillWindow,
+    Quit,
+}
+
 /// Tab categories for the TUI.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
@@ -28,27 +49,6 @@ impl Tab {
             Tab::Windows => Tab::Windows,
         }
     }
-}
-
-/// User actions that can be triggered by keyboard input.
-pub enum Action {
-    CreateWindow,
-    FocusWindow,
-    KillWindow,
-    NavigateDown,
-    NavigateUp,
-    None,
-    Quit,
-    RenameWindow,
-    SwitchTabLeft,
-    SwitchTabRight,
-}
-
-/// Actions that require double-press confirmation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PendingAction {
-    KillWindow,
-    Quit,
 }
 
 /// Maps a key event to the corresponding application action.

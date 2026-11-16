@@ -1,49 +1,42 @@
-use std::sync::LazyLock;
-
 /// Contract for agent identification.
 pub trait Agent {
     fn name(&self) -> &str;
     fn command(&self) -> &str;
 }
 
+static AGENTS: [GenericAgent; 10] = [
+    GenericAgent::new("Aider", "aider"),
+    GenericAgent::new("Claude", "claude"),
+    GenericAgent::new("Codex", "codex"),
+    GenericAgent::new("Copilot", "copilot"),
+    GenericAgent::new("Cursor", "cursor"),
+    GenericAgent::new("Devin", "devin"),
+    GenericAgent::new("Hermes", "hermes"),
+    GenericAgent::new("OpenCode", "opencode"),
+    GenericAgent::new("Pi", "pi"),
+    GenericAgent::new("omp", "omp"),
+];
+
 /// Generic agent implementation with stored properties.
 #[derive(Debug, Clone)]
 pub struct GenericAgent {
-    command: String,
-    name: String,
+    command: &'static str,
+    name: &'static str,
 }
 
 impl GenericAgent {
-    fn new(name: &str, command: &str) -> Self {
-        Self {
-            command: command.to_string(),
-            name: name.to_string(),
-        }
+    const fn new(name: &'static str, command: &'static str) -> Self {
+        Self { command, name }
     }
 }
 
-static AGENTS: LazyLock<Vec<GenericAgent>> = LazyLock::new(|| {
-    vec![
-        GenericAgent::new("Aider", "aider"),
-        GenericAgent::new("Claude", "claude"),
-        GenericAgent::new("Codex", "codex"),
-        GenericAgent::new("Copilot", "copilot"),
-        GenericAgent::new("Cursor", "cursor"),
-        GenericAgent::new("Devin", "devin"),
-        GenericAgent::new("Hermes", "hermes"),
-        GenericAgent::new("OpenCode", "opencode"),
-        GenericAgent::new("Pi", "pi"),
-        GenericAgent::new("omp", "omp"),
-    ]
-});
-
 impl Agent for GenericAgent {
     fn name(&self) -> &str {
-        &self.name
+        self.name
     }
 
     fn command(&self) -> &str {
-        &self.command
+        self.command
     }
 }
 
@@ -52,8 +45,9 @@ pub fn agents() -> &'static [GenericAgent] {
     &AGENTS
 }
 
-pub fn is_agent(command: &str) -> Option<GenericAgent> {
-    AGENTS.iter().find(|a| a.command() == command).cloned()
+/// Returns the agent run by `command`, if it is one.
+pub fn is_agent(command: &str) -> Option<&'static GenericAgent> {
+    AGENTS.iter().find(|a| a.command() == command)
 }
 
 #[cfg(test)]

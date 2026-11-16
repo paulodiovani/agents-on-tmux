@@ -16,8 +16,6 @@ use crate::frontends::tui::icons::{agent_icon, notification_icon, window_icon};
 use crate::frontends::tui::path::shorten_path;
 use crate::frontends::tui::theme::Theme;
 
-/// Rows one list item occupies: two content lines plus a blank separator.
-pub const ROW_HEIGHT: u16 = 3;
 /// Columns of breathing room kept on both sides, so text never touches the pane
 /// border. Full-width decorations (the tab rule, the selection) ignore it.
 const PANEL_PADDING: usize = 1;
@@ -29,19 +27,32 @@ const HALF_BLOCK_LOWER: &str = "\u{2584}"; // ▄
 const HALF_BLOCK_UPPER: &str = "\u{2580}"; // ▀
 const TAB_RULE: &str = "\u{2594}"; // ▔
 const TAB_GAP: &str = "   ";
-
-/// Defines a clickable region in the TUI.
-#[derive(Debug, Clone)]
-pub struct ClickableRegion {
-    pub area: Rect,
-    pub action: RegionAction,
-}
+/// Rows one list item occupies: two content lines plus a blank separator.
+pub const ROW_HEIGHT: u16 = 3;
 
 /// Action to perform when a clickable region is clicked.
 #[derive(Debug, Clone)]
 pub enum RegionAction {
     SelectTab(Tab),
     SelectWindow(usize),
+}
+
+/// Styles of one row, resolved for its selection state. A selected row loses the
+/// dim tier and fills its full width, for a continuous background.
+struct RowStyles {
+    accent: Style,
+    dim: Style,
+    fill: Style,
+    normal: Style,
+    notification: Style,
+    title: Style,
+}
+
+/// Defines a clickable region in the TUI.
+#[derive(Debug, Clone)]
+pub struct ClickableRegion {
+    pub area: Rect,
+    pub action: RegionAction,
 }
 
 /// Checks whether a point (column, row) is within the given rectangle.
@@ -216,17 +227,6 @@ fn draw_selection_padding(frame: &mut Frame, bounds: Rect, first_line: u16, them
             },
         );
     }
-}
-
-/// Styles of one row, resolved for its selection state. A selected row loses the
-/// dim tier and fills its full width, for a continuous background.
-struct RowStyles {
-    accent: Style,
-    dim: Style,
-    fill: Style,
-    normal: Style,
-    notification: Style,
-    title: Style,
 }
 
 impl RowStyles {
@@ -543,9 +543,9 @@ pub fn clickable_regions(frame_area: Rect, app: &App) -> Vec<ClickableRegion> {
 
     let mut regions = Vec::new();
 
-    // Tab bar regions: mirror the label positions in draw_tab_bar.
     let padded_tab_x = tab_bar_area.x + PANEL_PADDING as u16;
 
+    // Must match the label layout in draw_tab_bar.
     let mut cursor = 0u16;
     for (index, tab) in [Tab::Agents, Tab::Windows].iter().enumerate() {
         if index > 0 {
@@ -567,7 +567,6 @@ pub fn clickable_regions(frame_area: Rect, app: &App) -> Vec<ClickableRegion> {
         cursor += label_width as u16;
     }
 
-    // List regions: one per visible window row.
     let tab_windows = app.current_tab_windows();
     if tab_windows.is_empty() {
         return regions;
@@ -602,6 +601,7 @@ pub fn clickable_regions(frame_area: Rect, app: &App) -> Vec<ClickableRegion> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::frontends::tui::app::fixtures::new_app;
     use crate::frontends::tui::fake_tmux::FakeTmux;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
@@ -637,13 +637,7 @@ mod tests {
     fn test_app() -> App {
         let nested_driver = session();
         let parent_driver = session();
-        App::new(
-            Box::new(nested_driver.mock()),
-            Box::new(parent_driver.mock()),
-            None,
-            None,
-        )
-        .unwrap()
+        new_app(&nested_driver, &parent_driver, None, None)
     }
 
     fn window(id: u32, name: &str, command: &str, dir: &str, seconds: u64) -> Window {
@@ -692,13 +686,7 @@ mod tests {
 
     fn app_with(windows: Vec<Window>) -> App {
         let driver = FakeTmux::with_windows(windows.clone());
-        App::new(
-            Box::new(driver.mock()),
-            Box::new(FakeTmux::with_windows(windows).mock()),
-            None,
-            None,
-        )
-        .unwrap()
+        new_app(&driver, &FakeTmux::with_windows(windows), None, None)
     }
 
     /// Column of the elapsed time's last digit. Start times are re-stamped on refresh,
@@ -792,13 +780,7 @@ mod tests {
     fn unfocused_app() -> App {
         let driver = session();
         let parent = session();
-        let mut app = App::new(
-            Box::new(driver.mock()),
-            Box::new(parent.mock()),
-            Some("%7".to_string()),
-            None,
-        )
-        .unwrap();
+        let mut app = new_app(&driver, &parent, Some("%7"), None);
         app.set_pane_active(false);
         app
     }
@@ -847,13 +829,7 @@ mod tests {
         let driver = session();
         let mut parent = session();
         parent.keys = None;
-        let mut app = App::new(
-            Box::new(driver.mock()),
-            Box::new(parent.mock()),
-            Some("%7".to_string()),
-            None,
-        )
-        .unwrap();
+        let mut app = new_app(&driver, &parent, Some("%7"), None);
 
         let buffer = render(&mut app, 35, 12);
         let rendered = all_text(&buffer);

@@ -3,8 +3,10 @@ use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 /// Semantic interpretation of a mouse event (click, hover, or scroll).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MouseAction {
-    Click(u16, u16), // x, y
-    Hover(u16, u16), // x, y
+    /// A click at the given column and row.
+    Click(u16, u16),
+    /// The pointer moved over the given column and row.
+    Hover(u16, u16),
     Scroll(i8),
     None,
 }
