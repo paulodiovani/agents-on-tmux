@@ -231,9 +231,13 @@ Status: ⬜ Not started
 
 Status: ✅ Done (2026-11-14, PR #74)
 
-- Trace every tmux command in the executor at debug level: argv, exit code,
+- ~~Trace every tmux command in the executor at debug level: argv, exit code,
   elapsed ms, and stderr on failure. Truncate `set-buffer` and `send-keys`
-  payloads so prompt text does not land in the log.
+  payloads so prompt text does not land in the log.~~ Only failed commands
+  are logged, at error level, with typed and pasted text replaced by its size:
+  per-command traces, mostly the periodic `list-windows` refresh, flood the log
+  without saying what triggered them. `has-session` failures are expected and
+  not logged.
 - Log each MCP `tools/call` in `McpHandler::call_tool`: caller pane, tool
   name, target index, ok or error, and duration. Log connection open and close
   in `server.rs`. Argument values stay out, only their sizes.
@@ -247,8 +251,7 @@ Status: ✅ Done (2026-11-14, PR #74)
 - Log the resolved config and launch mode once at startup.
 
 Outcome: the role is per process (`main`, `tui`, `shim`), and MCP server
-threads override it with `mcp`. Typed and pasted text is replaced by its byte
-count instead of truncated. The size cap is 5 MiB. Converting the call sites to
+threads override it with `mcp`. The size cap is 5 MiB. Converting the call sites to
 `logger::debug!`/`info!`/`error!` also unified the mixed logger paths listed
 under step 4.
 
