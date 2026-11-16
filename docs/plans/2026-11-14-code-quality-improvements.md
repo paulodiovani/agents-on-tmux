@@ -135,7 +135,7 @@ checks, but only by convention.
 | 2. Robustness fixes | ✅ Done (2026-11-14, PR #73) |
 | 3. MCP hardening | ⛔ Blocked (needs confirmation) |
 | 4. Architecture | ⬜ Not started |
-| 5. Tests and CI | ✅ Done (2026-11-16, branch `chore/tests-and-ci`) |
+| 5. Tests and CI | ✅ Done (2026-11-16, PR #79) |
 | 6. Logging | ✅ Done (2026-11-14, PR #74) |
 
 Statuses: `⬜ Not started`, `🔄 In progress`, `⛔ Blocked (<reason>)`, `✅ Done (<date>, <commit or PR>)`.
@@ -216,7 +216,7 @@ Status: ⬜ Not started
 
 ### 5. Tests and CI (small to medium)
 
-Status: ✅ Done (2026-11-16, branch `chore/tests-and-ci`)
+Status: ✅ Done (2026-11-16, PR #79)
 
 - Replace the hand-written mocks with mockall's `MockTmux`.
 - Fix the `type_complexity` warning in the `app.rs` tests (`test_app`), the
