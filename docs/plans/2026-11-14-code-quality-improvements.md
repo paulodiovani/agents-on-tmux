@@ -134,7 +134,7 @@ checks, but only by convention.
 | 1. Panic gate | ✅ Done (2026-11-14, PR #72) |
 | 2. Robustness fixes | ✅ Done (2026-11-14, PR #73) |
 | 3. MCP hardening | ⛔ Blocked (needs confirmation) |
-| 4. Architecture | ✅ Done (2026-11-16, `refactor/architecture`) |
+| 4. Architecture | ✅ Done (2026-11-16, PR #81) |
 | 5. Tests and CI | ✅ Done (2026-11-16, PR #79) |
 | 6. Logging | ✅ Done (2026-11-14, PR #74) |
 
@@ -204,7 +204,7 @@ starts.
 
 ### 4. Architecture (medium)
 
-Status: ✅ Done (2026-11-16, `refactor/architecture`)
+Status: ✅ Done (2026-11-16, PR #81)
 
 - Route `detect_parent_session` and control-mode spawning through
   `CommandExecutor` or a spawner trait.
