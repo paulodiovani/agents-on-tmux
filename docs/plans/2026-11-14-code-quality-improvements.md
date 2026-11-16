@@ -233,9 +233,11 @@ Status: ✅ Done (2026-11-14, PR #74)
 
 - ~~Trace every tmux command in the executor at debug level: argv, exit code,
   elapsed ms, and stderr on failure. Truncate `set-buffer` and `send-keys`
-  payloads so prompt text does not land in the log.~~ Dropped: per-command
-  traces, mostly the periodic `list-windows` refresh, flood the log without
-  saying what triggered them. Failures are logged by their callers.
+  payloads so prompt text does not land in the log.~~ Only failed commands
+  are logged, at error level, with typed and pasted text replaced by its size:
+  per-command traces, mostly the periodic `list-windows` refresh, flood the log
+  without saying what triggered them. `has-session` failures are expected and
+  not logged.
 - Log each MCP `tools/call` in `McpHandler::call_tool`: caller pane, tool
   name, target index, ok or error, and duration. Log connection open and close
   in `server.rs`. Argument values stay out, only their sizes.

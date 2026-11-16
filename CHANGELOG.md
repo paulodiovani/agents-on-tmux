@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Forbid `unwrap`, `expect`, `panic!`, indexing and string slicing in non-test code through clippy lints
 - Reject unknown keys in the config file, and the env-only `tmux_env`/`tui_pane` keys
 - Report unparsable tmux output as its own error instead of "window not found"
-- Debug log: trace every MCP tool call, tag lines with pid, role and millisecond timestamps, log the resolved config, and set aside `aot.log` as `aot.log.old` once it exceeds 5 MiB
+- Debug log: trace every MCP tool call and failed tmux command, tag lines with pid, role and millisecond timestamps, log the resolved config, and set aside `aot.log` as `aot.log.old` once it exceeds 5 MiB
 - `aot mcp` writes to the debug log when `AOT_DEBUG` or `--debug` is set
 
 ### Fixed

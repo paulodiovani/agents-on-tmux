@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 use thiserror::Error;
 
-use crate::backends::logger;
+use crate::backends::{logger, shell};
 
 /// Contract for executing tmux commands.
 pub trait CommandExecutor {
@@ -73,6 +73,8 @@ pub trait Tmux {
 }
 
 const PASTE_BUFFER_PREFIX: &str = "aot-paste";
+/// Commands whose failure is an expected answer rather than an error.
+const PROBE_COMMANDS: [&str; 1] = ["has-session"];
 
 static PASTE_BUFFER_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -187,8 +189,8 @@ impl ShellCommandExecutor {
     }
 }
 
-impl CommandExecutor for ShellCommandExecutor {
-    fn execute(&self, args: &[&str]) -> Result<String, TmuxError> {
+impl ShellCommandExecutor {
+    fn output(&self, args: &[&str]) -> Result<String, TmuxError> {
         let mut cmd = Command::new("tmux");
         if let Some(ref socket) = self.socket {
             cmd.args(["-L", socket]);
@@ -213,7 +215,7 @@ impl CommandExecutor for ShellCommandExecutor {
         }
     }
 
-    fn execute_inherit_stdio(&self, args: &[&str]) -> Result<(), TmuxError> {
+    fn status(&self, args: &[&str]) -> Result<(), TmuxError> {
         let mut cmd = Command::new("tmux");
         if let Some(ref socket) = self.socket {
             cmd.args(["-L", socket]);
@@ -240,6 +242,64 @@ impl CommandExecutor for ShellCommandExecutor {
             })
         }
     }
+}
+
+impl CommandExecutor for ShellCommandExecutor {
+    fn execute(&self, args: &[&str]) -> Result<String, TmuxError> {
+        let result = self.output(args);
+        if let Err(error) = &result {
+            log_failure(self.socket.as_deref(), args, error);
+        }
+        result
+    }
+
+    fn execute_inherit_stdio(&self, args: &[&str]) -> Result<(), TmuxError> {
+        let result = self.status(args);
+        if let Err(error) = &result {
+            log_failure(self.socket.as_deref(), args, error);
+        }
+        result
+    }
+}
+
+fn log_failure(socket: Option<&str>, args: &[&str], error: &TmuxError) {
+    if !matches!(args.first(), Some(command) if PROBE_COMMANDS.contains(command)) {
+        logger::error!("{}", failure_message(socket, args, error));
+    }
+}
+
+/// Log line describing a failed tmux invocation, without the text it types or pastes.
+fn failure_message(socket: Option<&str>, args: &[&str], error: &TmuxError) -> String {
+    let mut argv: Vec<String> = Vec::new();
+    if let Some(socket) = socket {
+        argv.extend(["-L".to_string(), socket.to_string()]);
+    }
+    argv.extend(redacted_args(args));
+    let reason = match error {
+        TmuxError::CommandFailed {
+            stderr,
+            code: Some(code),
+            ..
+        } => format!("exit {code}: {}", stderr.trim()),
+        error => error.to_string(),
+    };
+    format!("tmux: {} failed: {reason}", shell::join(&argv))
+}
+
+/// Arguments with the typed or pasted payload replaced by its size.
+fn redacted_args(args: &[&str]) -> Vec<String> {
+    let carries_text = matches!(args.first(), Some(&"set-buffer" | &"send-keys"));
+    let payload_start = args
+        .iter()
+        .position(|arg| *arg == "--")
+        .filter(|_| carries_text)
+        .map_or(args.len(), |index| index + 1);
+    let (plain, payload) = args.split_at(payload_start);
+    plain
+        .iter()
+        .map(|arg| arg.to_string())
+        .chain(payload.iter().map(|arg| format!("<{} bytes>", arg.len())))
+        .collect()
 }
 
 /// tmux driver that communicates with the tmux server.
@@ -819,6 +879,82 @@ mod tests {
                 .push(args.iter().map(|s| s.to_string()).collect());
             Ok(())
         }
+    }
+
+    #[test]
+    fn test_failure_message_shows_exit_code_and_stderr() {
+        let error = TmuxError::CommandFailed {
+            message: "tmux kill-window failed".to_string(),
+            stderr: "can't find window: 9\n".to_string(),
+            code: Some(1),
+        };
+        assert_eq!(
+            failure_message(
+                Some("agents-on-tmux"),
+                &["kill-window", "-t", "s:9"],
+                &error
+            ),
+            "tmux: -L agents-on-tmux kill-window -t s:9 failed: exit 1: can't find window: 9"
+        );
+    }
+
+    #[test]
+    fn test_failure_message_without_exit_code() {
+        let error = TmuxError::CommandFailed {
+            message: "Failed to execute tmux: not found".to_string(),
+            stderr: String::new(),
+            code: None,
+        };
+        assert_eq!(
+            failure_message(None, &["ls"], &error),
+            "tmux: ls failed: Command failed: Failed to execute tmux: not found"
+        );
+    }
+
+    #[test]
+    fn test_failure_message_hides_pasted_text() {
+        let error = TmuxError::NotInsideTmux;
+        let message = failure_message(None, &["set-buffer", "-b", "b", "--", "secret"], &error);
+        assert!(message.contains("'<6 bytes>'"));
+        assert!(!message.contains("secret"));
+    }
+
+    #[test]
+    fn test_log_failure_skips_probe_commands() {
+        let path = crate::backends::logger::tests::temp_log_path();
+        let _guard = crate::backends::logger::tests::init_for_test(&path);
+        let error = TmuxError::NotInsideTmux;
+
+        log_failure(None, &["has-session", "-t", "s"], &error);
+        log_failure(None, &["kill-window", "-t", "s:1"], &error);
+
+        let log = std::fs::read_to_string(&path).unwrap();
+        assert!(!log.contains("has-session"));
+        assert!(log.contains("ERROR tmux: kill-window -t s:1 failed"));
+    }
+
+    #[test]
+    fn test_redacted_args_hides_typed_and_pasted_text() {
+        assert_eq!(
+            redacted_args(&["send-keys", "-t", "s:1", "-l", "--", "secret prompt"]),
+            ["send-keys", "-t", "s:1", "-l", "--", "<13 bytes>"]
+        );
+        assert_eq!(
+            redacted_args(&["set-buffer", "-b", "buf", "--", "abc"]),
+            ["set-buffer", "-b", "buf", "--", "<3 bytes>"]
+        );
+    }
+
+    #[test]
+    fn test_redacted_args_keeps_other_commands() {
+        assert_eq!(
+            redacted_args(&["send-keys", "-t", "s:1", "Enter"]),
+            ["send-keys", "-t", "s:1", "Enter"]
+        );
+        assert_eq!(
+            redacted_args(&["new-window", "--", "claude", "--resume"]),
+            ["new-window", "--", "claude", "--resume"]
+        );
     }
 
     #[test]
