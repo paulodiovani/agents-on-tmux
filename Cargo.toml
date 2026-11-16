@@ -2,6 +2,7 @@
 name = "agents-on-tmux"
 version = "1.0.0"
 edition = "2024"
+rust-version = "1.95"
 
 [[bin]]
 name = "aot"
@@ -23,6 +24,11 @@ sysinfo = "0.40"
 
 [dev-dependencies]
 mockall = "0.15"
+
+[profile.release]
+lto = true
+strip = true
+codegen-units = 1
 
 [lints.clippy]
 unwrap_used = "deny"

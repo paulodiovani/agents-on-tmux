@@ -135,7 +135,7 @@ checks, but only by convention.
 | 2. Robustness fixes | ✅ Done (2026-11-14, PR #73) |
 | 3. MCP hardening | ⛔ Blocked (needs confirmation) |
 | 4. Architecture | ⬜ Not started |
-| 5. Tests and CI | ⬜ Not started |
+| 5. Tests and CI | ✅ Done (2026-11-16, branch `chore/tests-and-ci`) |
 | 6. Logging | ✅ Done (2026-11-14, PR #74) |
 
 Statuses: `⬜ Not started`, `🔄 In progress`, `⛔ Blocked (<reason>)`, `✅ Done (<date>, <commit or PR>)`.
@@ -211,17 +211,19 @@ Status: ⬜ Not started
 - Move the process start-time lookup into `backends/` behind a trait, and
   consider replacing `sysinfo` with a `/proc/<pid>` read to shrink the binary.
 - Split `app.rs` into state, run loop and hints.
-- Extract `main()` into a testable `run(config, deps)`.
+- Extract `main()` into a testable `run(config, deps)` and cover it.
 - Reorder items and remove the what-comments.
 
 ### 5. Tests and CI (small to medium)
 
-Status: ⬜ Not started
+Status: ✅ Done (2026-11-16, branch `chore/tests-and-ci`)
 
 - Replace the hand-written mocks with mockall's `MockTmux`.
 - Fix the `type_complexity` warning in the `app.rs` tests (`test_app`), the
   only thing `clippy --all-targets -D warnings` currently reports.
-- Cover `main`, `signals` and `control_mode`.
+- Cover ~~`main`,~~ `signals` and `control_mode`. `main` needs the `run()`
+  extraction from step 4 first. `signals::install` and `control_mode_thread`
+  stay untested: one installs process-wide handlers, the other starts tmux.
 - Add `cargo llvm-cov --fail-under-lines`, `clippy --all-targets`,
   `cargo audit` or `cargo deny`, and SHA-pinned actions.
 - Add `[profile.release]` (`lto`, `strip`, `codegen-units = 1`) and

@@ -7,14 +7,14 @@
 - `cargo run -- --tui` — run with the TUI frontend
 - `cargo test` — run all tests
 - `cargo test <name>` — run a single test or filter by name
-- `cargo clippy -- -D warnings` — lint
+- `cargo clippy --all-targets -- -D warnings` — lint, tests included
 - `cargo fmt --check` — format check
-- Verify order: `cargo fmt --check && cargo clippy -- -D warnings && cargo test`
+- Verify order: `cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test`
 
 ## Testing
 
 - Always write tests for new code; no untested logic should land.
-- Mock the `Tmux` trait with the mockall-generated `MockTmux` (`#[cfg_attr(test, mockall::automock)]`, exported from `backends::tmux` in test builds); set expectations per test.
+- Mock the `Tmux` trait with the mockall-generated `MockTmux` (`#[cfg_attr(test, mockall::automock)]`, exported from `backends::tmux` in test builds); set expectations per test. TUI tests use `FakeTmux` (`frontends/tui/fake_tmux.rs`), a `MockTmux` backed by shared window state.
 - Aim for 100% code coverage.
 - Never run the code (`cargo run`, the `aot` binary, or real tmux commands) during
   implementation — it would interact with existing tmux sessions. Only run tests with

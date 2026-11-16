@@ -602,178 +602,48 @@ pub fn clickable_regions(frame_area: Rect, app: &App) -> Vec<ClickableRegion> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backends::tmux::{KeyBinding, Tmux, TmuxError};
+    use crate::frontends::tui::fake_tmux::FakeTmux;
     use ratatui::Terminal;
     use ratatui::backend::TestBackend;
     use ratatui::buffer::Buffer;
     use ratatui::style::Color;
     use std::time::Duration;
 
-    struct MockTmux {
-        keys: Option<Vec<KeyBinding>>,
-        next_id: std::cell::RefCell<u32>,
-        prefix: Option<String>,
-        windows: std::cell::RefCell<Vec<Window>>,
-    }
-
-    impl MockTmux {
-        fn new() -> Self {
-            Self::with_windows(vec![
-                Window {
-                    id: 1,
-                    name: "w1".to_string(),
-                    pane_pid: 10001,
-                    running_command: "bash".to_string(),
-                    current_dir: "/home/user".to_string(),
-                    is_active: false,
-                    notification_pending: false,
-                    started_at: Some(Instant::now() - Duration::from_secs(125)),
-                },
-                Window {
-                    id: 2,
-                    name: "w2".to_string(),
-                    pane_pid: 10002,
-                    running_command: "claude".to_string(),
-                    current_dir: "/home/user".to_string(),
-                    is_active: true,
-                    notification_pending: false,
-                    started_at: Some(Instant::now() - Duration::from_secs(45)),
-                },
-            ])
-        }
-
-        fn with_windows(windows: Vec<Window>) -> Self {
-            Self {
-                keys: Some(default_key_bindings()),
-                next_id: std::cell::RefCell::new(90),
-                prefix: Some("C-b".to_string()),
-                windows: std::cell::RefCell::new(windows),
-            }
-        }
-    }
-
-    fn default_key_bindings() -> Vec<KeyBinding> {
-        [
-            ("C-b", "send-prefix"),
-            ("c", "new-window -c \"#{pane_current_path}\""),
-            ("n", "next-window"),
-            ("p", "previous-window"),
-            ("l", "last-window"),
-            (",", "command-prompt -I \"#W\" { rename-window \"%%\" }"),
-        ]
-        .into_iter()
-        .map(|(key, command)| KeyBinding {
-            key: key.to_string(),
-            command: command.to_string(),
-        })
-        .collect()
-    }
-
-    impl Tmux for MockTmux {
-        fn session_name(&self) -> &str {
-            "agents-on-tmux"
-        }
-
-        fn socket_name(&self) -> Option<&str> {
-            None
-        }
-
-        fn create_session_if_not_exists(&self, _tmux_env: Option<&str>) -> Result<(), TmuxError> {
-            Ok(())
-        }
-        fn attach_session(&self) -> Result<(), TmuxError> {
-            Ok(())
-        }
-        fn list_windows(&self) -> Result<Vec<Window>, TmuxError> {
-            Ok(self.windows.borrow().clone())
-        }
-        fn create_window(
-            &self,
-            name: Option<&str>,
-            _dir: Option<&str>,
-            _command: Option<&[String]>,
-            _detached: bool,
-        ) -> Result<Window, TmuxError> {
-            let mut next_id = self.next_id.borrow_mut();
-            let window = Window {
-                id: *next_id,
-                name: name.unwrap_or_default().to_string(),
-                pane_pid: 12345,
-                running_command: String::new(),
+    fn session() -> FakeTmux {
+        FakeTmux::with_windows(vec![
+            Window {
+                id: 1,
+                name: "w1".to_string(),
+                pane_pid: 10001,
+                running_command: "bash".to_string(),
                 current_dir: "/home/user".to_string(),
                 is_active: false,
                 notification_pending: false,
-                started_at: None,
-            };
-            *next_id += 1;
-            self.windows.borrow_mut().push(window.clone());
-            Ok(window)
-        }
-        fn kill_window(&self, id: u32) -> Result<(), TmuxError> {
-            self.windows.borrow_mut().retain(|w| w.id != id);
-            Ok(())
-        }
-        fn select_window(&self, _id: u32) -> Result<(), TmuxError> {
-            Ok(())
-        }
-        fn last_pane(&self) -> Result<(), TmuxError> {
-            Ok(())
-        }
-        fn split_window(&self, _command: &str, _width: u16) -> Result<String, TmuxError> {
-            Ok("%99".to_string())
-        }
-        fn resize_pane(&self, _pane_id: &str, _width: u16) -> Result<(), TmuxError> {
-            Ok(())
-        }
-        fn list_keys(&self, _table: &str) -> Result<Vec<KeyBinding>, TmuxError> {
-            self.keys.clone().ok_or_else(|| command_failed("list-keys"))
-        }
-        fn show_options(&self, name: &str, _global: bool) -> Result<String, TmuxError> {
-            match name {
-                "prefix" => self
-                    .prefix
-                    .clone()
-                    .ok_or_else(|| command_failed("show-options")),
-                _ => Err(command_failed("show-options")),
-            }
-        }
-        fn prompt_rename_window(&self, _id: u32, _name: &str) -> Result<(), TmuxError> {
-            Ok(())
-        }
-
-        fn capture_pane(&self, _id: u32, _history: u32) -> Result<String, TmuxError> {
-            Ok(String::new())
-        }
-
-        fn window_for_pane(&self, _pane_id: &str) -> Result<u32, TmuxError> {
-            Err(TmuxError::WindowNotFound)
-        }
-
-        fn send_keys(&self, _id: u32, _text: &str, _enter: bool) -> Result<(), TmuxError> {
-            Ok(())
-        }
-
-        fn paste_buffer(&self, _id: u32, _text: &str) -> Result<(), TmuxError> {
-            Ok(())
-        }
-
-        fn rename_window(&self, _id: u32, _name: &str) -> Result<(), TmuxError> {
-            Ok(())
-        }
-    }
-
-    fn command_failed(command: &str) -> TmuxError {
-        TmuxError::CommandFailed {
-            message: format!("{command} failed"),
-            stderr: String::new(),
-            code: Some(1),
-        }
+                started_at: Some(Instant::now() - Duration::from_secs(125)),
+            },
+            Window {
+                id: 2,
+                name: "w2".to_string(),
+                pane_pid: 10002,
+                running_command: "claude".to_string(),
+                current_dir: "/home/user".to_string(),
+                is_active: true,
+                notification_pending: false,
+                started_at: Some(Instant::now() - Duration::from_secs(45)),
+            },
+        ])
     }
 
     fn test_app() -> App {
-        let nested_driver = MockTmux::new();
-        let parent_driver = MockTmux::new();
-        App::new(Box::new(nested_driver), Box::new(parent_driver), None, None).unwrap()
+        let nested_driver = session();
+        let parent_driver = session();
+        App::new(
+            Box::new(nested_driver.mock()),
+            Box::new(parent_driver.mock()),
+            None,
+            None,
+        )
+        .unwrap()
     }
 
     fn window(id: u32, name: &str, command: &str, dir: &str, seconds: u64) -> Window {
@@ -821,10 +691,10 @@ mod tests {
     }
 
     fn app_with(windows: Vec<Window>) -> App {
-        let driver = MockTmux::with_windows(windows.clone());
+        let driver = FakeTmux::with_windows(windows.clone());
         App::new(
-            Box::new(driver),
-            Box::new(MockTmux::with_windows(windows)),
+            Box::new(driver.mock()),
+            Box::new(FakeTmux::with_windows(windows).mock()),
             None,
             None,
         )
@@ -920,11 +790,11 @@ mod tests {
 
     /// An app whose pane is unfocused while tmux bindings were resolved.
     fn unfocused_app() -> App {
-        let driver = MockTmux::new();
-        let parent = MockTmux::new();
+        let driver = session();
+        let parent = session();
         let mut app = App::new(
-            Box::new(driver),
-            Box::new(parent),
+            Box::new(driver.mock()),
+            Box::new(parent.mock()),
             Some("%7".to_string()),
             None,
         )
@@ -974,12 +844,12 @@ mod tests {
 
     #[test]
     fn test_footer_falls_back_to_tui_keys_without_hints() {
-        let driver = MockTmux::new();
-        let mut parent = MockTmux::new();
+        let driver = session();
+        let mut parent = session();
         parent.keys = None;
         let mut app = App::new(
-            Box::new(driver),
-            Box::new(parent),
+            Box::new(driver.mock()),
+            Box::new(parent.mock()),
             Some("%7".to_string()),
             None,
         )
@@ -1439,7 +1309,7 @@ mod tests {
 
     #[test]
     fn test_clickable_regions_returns_tab_and_list_regions() {
-        // Default MockTmux::new: w1=bash (Windows), w2=claude (Agents, active)
+        // Default session(): w1=bash (Windows), w2=claude (Agents, active)
         // After refresh: active_tab=Agents, 1 agent + 1 regular window
         let app = app_with(vec![
             Window {
