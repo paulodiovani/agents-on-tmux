@@ -1,9 +1,9 @@
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use thiserror::Error;
 
-use crate::backends::{logger, shell};
+use crate::backends::logger;
 
 /// Contract for executing tmux commands.
 pub trait CommandExecutor {
@@ -187,8 +187,8 @@ impl ShellCommandExecutor {
     }
 }
 
-impl ShellCommandExecutor {
-    fn output(&self, args: &[&str]) -> Result<String, TmuxError> {
+impl CommandExecutor for ShellCommandExecutor {
+    fn execute(&self, args: &[&str]) -> Result<String, TmuxError> {
         let mut cmd = Command::new("tmux");
         if let Some(ref socket) = self.socket {
             cmd.args(["-L", socket]);
@@ -213,7 +213,7 @@ impl ShellCommandExecutor {
         }
     }
 
-    fn status(&self, args: &[&str]) -> Result<(), TmuxError> {
+    fn execute_inherit_stdio(&self, args: &[&str]) -> Result<(), TmuxError> {
         let mut cmd = Command::new("tmux");
         if let Some(ref socket) = self.socket {
             cmd.args(["-L", socket]);
@@ -240,71 +240,6 @@ impl ShellCommandExecutor {
             })
         }
     }
-}
-
-impl CommandExecutor for ShellCommandExecutor {
-    fn execute(&self, args: &[&str]) -> Result<String, TmuxError> {
-        let started = Instant::now();
-        let result = self.output(args);
-        logger::debug!(
-            "{}",
-            trace_message(self.socket.as_deref(), args, &result, started.elapsed())
-        );
-        result
-    }
-
-    fn execute_inherit_stdio(&self, args: &[&str]) -> Result<(), TmuxError> {
-        let started = Instant::now();
-        let result = self.status(args);
-        logger::debug!(
-            "{}",
-            trace_message(self.socket.as_deref(), args, &result, started.elapsed())
-        );
-        result
-    }
-}
-
-/// Log line describing one tmux invocation, without the text it types or pastes.
-fn trace_message<T>(
-    socket: Option<&str>,
-    args: &[&str],
-    result: &Result<T, TmuxError>,
-    elapsed: Duration,
-) -> String {
-    let mut argv: Vec<String> = Vec::new();
-    if let Some(socket) = socket {
-        argv.extend(["-L".to_string(), socket.to_string()]);
-    }
-    argv.extend(redacted_args(args));
-    let outcome = match result {
-        Ok(_) => "ok".to_string(),
-        Err(TmuxError::CommandFailed { stderr, code, .. }) => {
-            let code = code.map_or_else(|| "none".to_string(), |code| code.to_string());
-            format!("failed (exit {code}): {}", stderr.trim())
-        }
-        Err(error) => format!("failed: {error}"),
-    };
-    format!(
-        "tmux: {} -> {outcome} in {}ms",
-        shell::join(&argv),
-        elapsed.as_millis()
-    )
-}
-
-/// Arguments with the typed or pasted payload replaced by its size.
-fn redacted_args(args: &[&str]) -> Vec<String> {
-    let carries_text = matches!(args.first(), Some(&"set-buffer" | &"send-keys"));
-    let payload_start = args
-        .iter()
-        .position(|arg| *arg == "--")
-        .filter(|_| carries_text)
-        .map_or(args.len(), |index| index + 1);
-    let (plain, payload) = args.split_at(payload_start);
-    plain
-        .iter()
-        .map(|arg| arg.to_string())
-        .chain(payload.iter().map(|arg| format!("<{} bytes>", arg.len())))
-        .collect()
 }
 
 /// tmux driver that communicates with the tmux server.
@@ -884,74 +819,6 @@ mod tests {
                 .push(args.iter().map(|s| s.to_string()).collect());
             Ok(())
         }
-    }
-
-    #[test]
-    fn test_trace_message_ok_with_socket() {
-        let result: Result<String, TmuxError> = Ok("1\n".to_string());
-        assert_eq!(
-            trace_message(
-                Some("agents-on-tmux"),
-                &["new-window", "-n", "my win"],
-                &result,
-                Duration::from_millis(7)
-            ),
-            "tmux: -L agents-on-tmux new-window -n 'my win' -> ok in 7ms"
-        );
-    }
-
-    #[test]
-    fn test_trace_message_failure_shows_exit_code_and_stderr() {
-        let result: Result<(), TmuxError> = Err(TmuxError::CommandFailed {
-            message: "tmux has-session failed".to_string(),
-            stderr: "can't find session\n".to_string(),
-            code: Some(1),
-        });
-        assert_eq!(
-            trace_message(None, &["has-session"], &result, Duration::ZERO),
-            "tmux: has-session -> failed (exit 1): can't find session in 0ms"
-        );
-    }
-
-    #[test]
-    fn test_trace_message_spawn_failure() {
-        let result: Result<(), TmuxError> = Err(TmuxError::CommandFailed {
-            message: "Failed to execute tmux".to_string(),
-            stderr: String::new(),
-            code: None,
-        });
-        assert!(
-            trace_message(None, &["ls"], &result, Duration::ZERO).contains("failed (exit none)")
-        );
-        let other: Result<(), TmuxError> = Err(TmuxError::NotInsideTmux);
-        assert!(
-            trace_message(None, &["ls"], &other, Duration::ZERO)
-                .contains("failed: Not running inside a tmux session")
-        );
-    }
-
-    #[test]
-    fn test_redacted_args_hides_typed_and_pasted_text() {
-        assert_eq!(
-            redacted_args(&["send-keys", "-t", "s:1", "-l", "--", "secret prompt"]),
-            ["send-keys", "-t", "s:1", "-l", "--", "<13 bytes>"]
-        );
-        assert_eq!(
-            redacted_args(&["set-buffer", "-b", "buf", "--", "abc"]),
-            ["set-buffer", "-b", "buf", "--", "<3 bytes>"]
-        );
-    }
-
-    #[test]
-    fn test_redacted_args_keeps_other_commands() {
-        assert_eq!(
-            redacted_args(&["send-keys", "-t", "s:1", "Enter"]),
-            ["send-keys", "-t", "s:1", "Enter"]
-        );
-        assert_eq!(
-            redacted_args(&["new-window", "--", "claude", "--resume"]),
-            ["new-window", "--", "claude", "--resume"]
-        );
     }
 
     #[test]
