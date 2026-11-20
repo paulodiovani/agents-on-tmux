@@ -226,6 +226,10 @@ real tmux. `is_agent` returns a reference, and `AGENTS` and the signal flag
 are plain statics. The `needless_lifetimes` allows stay: automock needs the
 explicit lifetimes.
 
+Other modules now reach agents and delegate tools only through the `Agent`
+and `Tool` traits. `ui` still takes the concrete `App`; a trait for what
+rendering needs is left for later.
+
 ### 5. Tests and CI (small to medium)
 
 Status: ✅ Done (2026-11-16, PR #79)

@@ -8,14 +8,14 @@ use crate::backends::tmux::Tmux;
 
 /// Reads the recent output of an agent window; an alias of `read_window` named for agents.
 pub struct ReadAgent {
-    read_window: ReadWindow,
+    read_window: Box<dyn Tool>,
 }
 
 impl ReadAgent {
     /// Creates the tool over the nested AOT tmux session.
     pub fn new(tmux: Arc<dyn Tmux + Send + Sync>) -> Self {
         Self {
-            read_window: ReadWindow::new(tmux),
+            read_window: Box::new(ReadWindow::new(tmux)),
         }
     }
 }

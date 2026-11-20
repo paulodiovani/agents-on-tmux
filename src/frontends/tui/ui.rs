@@ -8,7 +8,7 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{List, ListItem, Paragraph};
 use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
-use crate::backends::agents::{Agent, is_agent};
+use crate::backends::agents::is_agent;
 use crate::backends::tmux::{SESSION_NAME, Window};
 use crate::frontends::tui::app::App;
 use crate::frontends::tui::event::{PendingAction, Tab};
