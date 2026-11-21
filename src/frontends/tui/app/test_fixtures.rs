@@ -38,7 +38,7 @@ pub fn session() -> FakeTmux {
     FakeTmux::with_windows(vec![
         Window {
             id: 1,
-            name: "agent-1".to_string(),
+            name: "window-1".to_string(),
             pane_pid: 10001,
             running_command: "cargo build".to_string(),
             current_dir: "/home/user/project1".to_string(),
@@ -58,7 +58,7 @@ pub fn session() -> FakeTmux {
         },
         Window {
             id: 3,
-            name: "agent-3".to_string(),
+            name: "window-3".to_string(),
             pane_pid: 10003,
             running_command: "python main.py".to_string(),
             current_dir: "/home/user/project3".to_string(),

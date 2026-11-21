@@ -421,7 +421,7 @@ mod tests {
         // A structural change happened externally; the event tells us to reload.
         tmux.windows.lock().unwrap().push(Window {
             id: 99,
-            name: "agent-5".to_string(),
+            name: "window-5".to_string(),
             pane_pid: 10005,
             running_command: "bash".to_string(),
             current_dir: "/home/user/project5".to_string(),
