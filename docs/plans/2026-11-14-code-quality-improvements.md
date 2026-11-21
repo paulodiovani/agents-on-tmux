@@ -134,7 +134,7 @@ checks, but only by convention.
 | 1. Panic gate | ✅ Done (2026-11-14, PR #72) |
 | 2. Robustness fixes | ✅ Done (2026-11-14, PR #73) |
 | 3. MCP hardening | ⛔ Blocked (needs confirmation) |
-| 4. Architecture | ⬜ Not started |
+| 4. Architecture | ✅ Done (2026-11-16, PR #81) |
 | 5. Tests and CI | ✅ Done (2026-11-16, PR #79) |
 | 6. Logging | ✅ Done (2026-11-14, PR #74) |
 
@@ -204,15 +204,33 @@ starts.
 
 ### 4. Architecture (medium)
 
-Status: ⬜ Not started
+Status: ✅ Done (2026-11-16, PR #81)
 
 - Route `detect_parent_session` and control-mode spawning through
   `CommandExecutor` or a spawner trait.
-- Move the process start-time lookup into `backends/` behind a trait, and
-  consider replacing `sysinfo` with a `/proc/<pid>` read to shrink the binary.
+- Move the process start-time lookup into `backends/` behind a trait~~, and
+  consider replacing `sysinfo` with a `/proc/<pid>` read to shrink the binary~~.
+  `/proc` exists only on Linux, and aot also runs on macOS.
 - Split `app.rs` into state, run loop and hints.
 - Extract `main()` into a testable `run(config, deps)` and cover it.
 - Reorder items and remove the what-comments.
+
+Outcome: `CommandExecutor::command` builds every tmux process. The parent
+session is found by `TmuxDriver::for_current_session`, and control mode starts
+through `Tmux::watch_events`, so `session_name`, `socket_name`,
+`TmuxDriver::new` and `Default for TmuxDriver` are gone. The start-time lookup
+is `backends::process::Processes`, and it now refreshes only the pid it looks
+up. `run` takes a `Launcher` trait for its process-wide effects; `main()` and
+`SystemLauncher` stay untested, since they touch the terminal, signals and
+real tmux. `is_agent` returns a reference, and `AGENTS` and the signal flag
+are plain statics. The `needless_lifetimes` allows stay: automock needs the
+explicit lifetimes.
+
+Other modules now reach agents and delegate tools only through the `Agent`
+and `Tool` traits. `ui` still takes the concrete `App`; a trait for what
+rendering needs is left for later. `Window.started_at` is still filled in by
+the TUI, which keeps each window's start time while its pane pid is unchanged;
+the lookup itself is the backend's `Processes`.
 
 ### 5. Tests and CI (small to medium)
 

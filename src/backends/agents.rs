@@ -1,59 +1,55 @@
-use std::sync::LazyLock;
-
 /// Contract for agent identification.
-pub trait Agent {
+pub trait Agent: Sync {
+    /// Display name of the agent.
     fn name(&self) -> &str;
+    /// Program that runs the agent.
     fn command(&self) -> &str;
 }
 
+static AGENTS: [GenericAgent; 10] = [
+    GenericAgent::new("Aider", "aider"),
+    GenericAgent::new("Claude", "claude"),
+    GenericAgent::new("Codex", "codex"),
+    GenericAgent::new("Copilot", "copilot"),
+    GenericAgent::new("Cursor", "cursor"),
+    GenericAgent::new("Devin", "devin"),
+    GenericAgent::new("Hermes", "hermes"),
+    GenericAgent::new("OpenCode", "opencode"),
+    GenericAgent::new("Pi", "pi"),
+    GenericAgent::new("omp", "omp"),
+];
+
 /// Generic agent implementation with stored properties.
 #[derive(Debug, Clone)]
-pub struct GenericAgent {
-    command: String,
-    name: String,
+struct GenericAgent {
+    command: &'static str,
+    name: &'static str,
 }
 
 impl GenericAgent {
-    fn new(name: &str, command: &str) -> Self {
-        Self {
-            command: command.to_string(),
-            name: name.to_string(),
-        }
+    const fn new(name: &'static str, command: &'static str) -> Self {
+        Self { command, name }
     }
 }
 
-static AGENTS: LazyLock<Vec<GenericAgent>> = LazyLock::new(|| {
-    vec![
-        GenericAgent::new("Aider", "aider"),
-        GenericAgent::new("Claude", "claude"),
-        GenericAgent::new("Codex", "codex"),
-        GenericAgent::new("Copilot", "copilot"),
-        GenericAgent::new("Cursor", "cursor"),
-        GenericAgent::new("Devin", "devin"),
-        GenericAgent::new("Hermes", "hermes"),
-        GenericAgent::new("OpenCode", "opencode"),
-        GenericAgent::new("Pi", "pi"),
-        GenericAgent::new("omp", "omp"),
-    ]
-});
-
 impl Agent for GenericAgent {
     fn name(&self) -> &str {
-        &self.name
+        self.name
     }
 
     fn command(&self) -> &str {
-        &self.command
+        self.command
     }
 }
 
 /// Returns every known agent.
-pub fn agents() -> &'static [GenericAgent] {
-    &AGENTS
+pub fn agents() -> impl Iterator<Item = &'static dyn Agent> {
+    AGENTS.iter().map(|agent| agent as &dyn Agent)
 }
 
-pub fn is_agent(command: &str) -> Option<GenericAgent> {
-    AGENTS.iter().find(|a| a.command() == command).cloned()
+/// Returns the agent run by `command`, if it is one.
+pub fn is_agent(command: &str) -> Option<&'static dyn Agent> {
+    agents().find(|agent| agent.command() == command)
 }
 
 #[cfg(test)]
@@ -97,13 +93,13 @@ mod tests {
 
     #[test]
     fn test_agents_lists_every_agent() {
-        assert_eq!(agents().len(), AGENTS.len());
-        assert!(agents().iter().any(|agent| agent.command() == "claude"));
+        assert_eq!(agents().count(), AGENTS.len());
+        assert!(agents().any(|agent| agent.command() == "claude"));
     }
 
     #[test]
     fn test_agent_commands_are_unique() {
-        let mut commands: Vec<&str> = agents().iter().map(|agent| agent.command()).collect();
+        let mut commands: Vec<&str> = agents().map(|agent| agent.command()).collect();
         commands.sort();
         let count = commands.len();
         commands.dedup();

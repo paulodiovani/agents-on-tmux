@@ -1,20 +1,20 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, LazyLock};
 
 use signal_hook::consts::{SIGHUP, SIGINT, SIGQUIT, SIGTERM};
 use signal_hook::iterator::Signals;
 
 use crate::backends::logger;
 
+static RECEIVED: AtomicUsize = AtomicUsize::new(0);
+
 /// What to do when a signal is received.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OnSignal {
     /// Set the flag only; the caller polls `received()` and shuts down cleanly.
     Shutdown,
     /// Log the signal and call `process::exit(128 + signo)` immediately.
     Exit,
 }
-
-static RECEIVED: LazyLock<Arc<AtomicUsize>> = LazyLock::new(|| Arc::new(AtomicUsize::new(0)));
 
 /// Registers handlers for SIGTERM, SIGINT, SIGHUP, and SIGQUIT.
 /// Returns `Ok(())` on success; on failure, logs the error and returns it

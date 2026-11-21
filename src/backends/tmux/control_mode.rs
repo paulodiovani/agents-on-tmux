@@ -8,6 +8,16 @@ use crate::backends::logger;
 
 const MAX_RETRIES: usize = 5;
 
+/// Outcome of pumping events from a control-mode connection.
+#[derive(Debug, PartialEq, Eq)]
+enum PumpOutcome {
+    /// Stop reconnecting (exit received or receiver dropped).
+    Exit,
+    /// Connection lost, should reconnect. `forwarded` tells whether the
+    /// connection delivered any event before it ended.
+    Reconnect { forwarded: bool },
+}
+
 /// Events emitted by the tmux control-mode client.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TmuxEvent {
@@ -27,16 +37,6 @@ pub enum EventProducer {
     Parent,
     /// The nested tmux server — all events except pane focus.
     Nested,
-}
-
-/// Outcome of pumping events from a control-mode connection.
-#[derive(Debug, PartialEq, Eq)]
-enum PumpOutcome {
-    /// Stop reconnecting (exit received or receiver dropped).
-    Exit,
-    /// Connection lost, should reconnect. `forwarded` tells whether the
-    /// connection delivered any event before it ended.
-    Reconnect { forwarded: bool },
 }
 
 /// Owns the control-mode child process. Reading delegates to the child's stdout;
@@ -94,12 +94,10 @@ fn parse_event(line: &str) -> Option<TmuxEvent> {
             logger::debug!("control_mode: {command}");
             Some(TmuxEvent::Exit)
         }
-        // Activity changes: keep the active window live.
         "%session-changed" | "%session-window-changed" => {
             logger::debug!("control_mode: {command}");
             Some(TmuxEvent::Refresh)
         }
-        // Structural changes: validate the id so malformed lines are ignored.
         "%window-add" | "%window-close" | "%window-renamed" => {
             logger::debug!("control_mode: {command}");
             let raw = parts.next()?;
@@ -112,11 +110,9 @@ fn parse_event(line: &str) -> Option<TmuxEvent> {
                 }
             }
         }
-        // Pane focus changes: extract the pane-id so the TUI can compare it.
         "%window-pane-changed" => {
             logger::debug!("control_mode: {command}");
-            let id = parts.nth(1); // skip window id and pick pane id
-            let id = id.filter(|id| id.starts_with("%"));
+            let id = parts.nth(1).filter(|id| id.starts_with("%"));
             match id {
                 Some(id) => Some(TmuxEvent::PaneChanged(id.to_string())),
                 None => {
@@ -154,16 +150,13 @@ fn pump_events(
         let line = String::from_utf8_lossy(&buf).trim_end().to_string();
 
         match (producer, parse_event(&line)) {
-            // No event parsed, continue to next line
             (_, None) => continue,
 
-            // Exit event: always forward and stop
             (_, Some(TmuxEvent::Exit)) => {
                 send_exit(event_tx);
                 return PumpOutcome::Exit;
             }
 
-            // Parent producer: only forward pane focus changes
             (EventProducer::Parent, Some(event @ TmuxEvent::PaneChanged(_))) => {
                 if let Err(error) = event_tx.send(event) {
                     logger::error!("control_mode: failed to send event: {error}");
@@ -172,7 +165,6 @@ fn pump_events(
                 forwarded = true;
             }
 
-            // Nested producer: forward everything except pane focus changes
             (EventProducer::Nested, Some(event)) if !matches!(event, TmuxEvent::PaneChanged(_)) => {
                 if let Err(error) = event_tx.send(event) {
                     logger::error!("control_mode: failed to send event: {error}");
@@ -181,7 +173,6 @@ fn pump_events(
                 forwarded = true;
             }
 
-            // All other combinations: skip (filtered out by producer)
             _ => continue,
         }
     }
@@ -238,25 +229,16 @@ fn send_exit(event_tx: &mpsc::Sender<TmuxEvent>) {
     }
 }
 
-/// Runs the control-mode client for the given session, sending events on the channel.
-/// Reconnects with exponential backoff; sends `Exit` and returns when the connection
-/// ends cleanly or retries are exhausted.
+/// Runs a control-mode client, sending its events on the channel. `command`
+/// builds the client process for each connection attempt. Reconnects with
+/// exponential backoff; sends `Exit` and returns when the connection ends
+/// cleanly or retries are exhausted.
 pub fn control_mode_thread(
-    session: String,
-    socket: Option<String>,
+    command: impl Fn() -> Command,
     producer: EventProducer,
     event_tx: mpsc::Sender<TmuxEvent>,
 ) {
-    run_with_reconnect(
-        || {
-            let mut command = Command::new("tmux");
-            command.args(control_mode_args(&session, socket.as_deref()));
-            spawn_reader(command)
-        },
-        producer,
-        &event_tx,
-        backoff,
-    );
+    run_with_reconnect(|| spawn_reader(command()), producer, &event_tx, backoff);
 }
 
 /// Delay before reconnect attempt `attempt` (1-based), doubling from one second.
@@ -264,20 +246,11 @@ fn backoff(attempt: u32) -> Duration {
     Duration::from_secs(2u64.saturating_pow(attempt.saturating_sub(1)))
 }
 
-/// Arguments that attach a tmux control-mode client to the session.
-fn control_mode_args(session: &str, socket: Option<&str>) -> Vec<String> {
-    let mut args = Vec::new();
-    if let Some(socket) = socket {
-        args.extend(["-L".to_string(), socket.to_string()]);
-    }
-    args.extend(["-C", "attach-session", "-t", session].map(String::from));
-    args
-}
-
 /// Spawns the control-mode client and returns a reader over its stdout.
 fn spawn_reader(mut command: Command) -> std::io::Result<ControlModeReader> {
     let mut child = command
-        .stdin(Stdio::piped()) // must stay open; closing it detaches the client
+        // Closing stdin detaches the client.
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;
@@ -323,19 +296,18 @@ mod tests {
     }
 
     #[test]
-    fn test_control_mode_args_without_socket() {
-        assert_eq!(
-            control_mode_args("aot", None),
-            ["-C", "attach-session", "-t", "aot"]
-        );
-    }
+    fn test_control_mode_thread_forwards_events_until_exit() {
+        let (tx, rx) = mpsc::channel();
 
-    #[test]
-    fn test_control_mode_args_with_socket() {
-        assert_eq!(
-            control_mode_args("aot", Some("sock")),
-            ["-L", "sock", "-C", "attach-session", "-t", "aot"]
+        control_mode_thread(
+            || shell("printf '%s\\n' '%window-add @1' '%exit'"),
+            EventProducer::Nested,
+            tx,
         );
+
+        let events: Vec<TmuxEvent> = rx.try_iter().collect();
+        assert_eq!(events.first(), Some(&TmuxEvent::Refresh));
+        assert_eq!(events.get(1), Some(&TmuxEvent::Exit));
     }
 
     #[test]

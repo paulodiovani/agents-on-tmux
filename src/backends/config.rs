@@ -8,6 +8,17 @@ pub enum LaunchMode {
     NoTui,
 }
 
+/// Possible errors when reading config file
+#[derive(thiserror::Error, Debug)]
+pub enum ConfigError {
+    #[error("could not determine config directory")]
+    ConfigDirNotFound,
+    #[error("failed to read config file: {0}")]
+    ReadError(#[from] std::io::Error),
+    #[error("failed to parse config file: {0}")]
+    ParseError(#[from] toml::de::Error),
+}
+
 /// Application configuration options
 #[derive(serde::Deserialize, Clone, Default, Debug)]
 #[serde(deny_unknown_fields)]
@@ -28,17 +39,6 @@ pub struct Config {
     pub tmux_env: Option<String>,
     #[serde(skip)]
     pub tui_pane: Option<String>,
-}
-
-/// Possible errors when reading config file
-#[derive(thiserror::Error, Debug)]
-pub enum ConfigError {
-    #[error("could not determine config directory")]
-    ConfigDirNotFound,
-    #[error("failed to read config file: {0}")]
-    ReadError(#[from] std::io::Error),
-    #[error("failed to parse config file: {0}")]
-    ParseError(#[from] toml::de::Error),
 }
 
 impl Config {

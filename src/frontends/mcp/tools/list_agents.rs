@@ -3,7 +3,7 @@ use std::sync::Arc;
 use serde_json::{Value, json};
 
 use super::tool::{CallContext, Tool, ToolOutput};
-use crate::backends::agents::{self, Agent};
+use crate::backends::agents;
 use crate::backends::tmux::Tmux;
 
 /// Lists the agent windows of the AOT session.

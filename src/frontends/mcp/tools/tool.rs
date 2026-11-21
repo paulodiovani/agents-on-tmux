@@ -2,7 +2,7 @@ use std::path::Path;
 
 use serde_json::Value;
 
-use crate::backends::agents::{self, Agent};
+use crate::backends::agents;
 use crate::backends::tmux::{Tmux, Window};
 
 /// An MCP tool exposed to agents through the AOT MCP server.

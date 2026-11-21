@@ -112,7 +112,7 @@ fn with_icon_fonts<T>(nerd_font: bool, font_awesome: bool, test: impl FnOnce() -
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backends::agents::{Agent, agents};
+    use crate::backends::agents::agents;
 
     /// A custom icon in both fonts.
     fn custom() -> Icon {
@@ -187,7 +187,6 @@ mod tests {
     fn test_agent_icons_have_unique_text_fallbacks() {
         let mut tags: Vec<String> = with_icon_fonts(false, false, || {
             agents()
-                .iter()
                 .map(|agent| agent_icon(agent.command()).to_string())
                 .collect()
         });

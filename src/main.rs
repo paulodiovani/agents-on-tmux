@@ -1,14 +1,48 @@
 mod backends;
 mod frontends;
 
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use backends::config::{Config, LaunchMode};
-use backends::tmux::{SESSION_NAME, SOCKET_NAME, Tmux, TmuxDriver, detect_parent_session};
+use backends::process::SystemProcesses;
+use backends::signals::OnSignal;
+use backends::tmux::{SESSION_NAME, SOCKET_NAME, Tmux, TmuxDriver, TmuxError};
 use clap::{Parser, Subcommand};
 use frontends::mcp::{McpHandler, McpServer};
+use frontends::tui::app::App;
 
 use crate::backends::logger;
+
+/// Process-wide effects of launching aot, so the launch flow can run against fakes.
+#[cfg_attr(test, mockall::automock)]
+trait Launcher {
+    /// Driver for the tmux session aot was started from.
+    #[allow(clippy::needless_lifetimes)]
+    fn parent_session<'a>(&self, tmux_env: Option<&'a str>) -> Result<Box<dyn Tmux>, TmuxError>;
+    /// Driver for aot's own session, on its own tmux server.
+    fn nested_session(&self) -> Box<dyn Tmux>;
+    /// Starts the MCP server; `None` when another aot owns it or it failed.
+    fn start_mcp_server(&self) -> Option<McpServer>;
+    /// Installs the signal handlers; failures are logged.
+    fn install_signals(&self, policy: OnSignal);
+    /// Runs the TUI in this terminal until it quits.
+    fn run_tui(
+        &self,
+        nested: Box<dyn Tmux>,
+        parent: Box<dyn Tmux>,
+        pane_id: Option<String>,
+        panel_width: Option<u16>,
+    ) -> anyhow::Result<()>;
+    /// Path of the running aot executable.
+    fn current_exe(&self) -> std::io::Result<PathBuf>;
+}
+
+#[derive(Subcommand, Debug, PartialEq)]
+enum Command {
+    /// Run the MCP stdio server for agents (connects to the running aot)
+    Mcp,
+}
 
 #[derive(Parser)]
 #[command(name = "aot", about = "Agents on tmux", version)]
@@ -49,11 +83,8 @@ struct Cli {
     command: Option<Command>,
 }
 
-#[derive(Subcommand, Debug, PartialEq)]
-enum Command {
-    /// Run the MCP stdio server for agents (connects to the running aot)
-    Mcp,
-}
+/// Launches aot against the real tmux, terminal and process.
+struct SystemLauncher;
 
 impl Cli {
     /// Options the TUI side-panel child must inherit from this invocation.
@@ -85,6 +116,163 @@ impl From<&Cli> for Config {
             tui_pane: cli.tui_pane.clone(),
         }
     }
+}
+
+impl Launcher for SystemLauncher {
+    fn parent_session(&self, tmux_env: Option<&str>) -> Result<Box<dyn Tmux>, TmuxError> {
+        Ok(Box::new(TmuxDriver::for_current_session(tmux_env)?))
+    }
+
+    fn nested_session(&self) -> Box<dyn Tmux> {
+        Box::new(TmuxDriver::new_with_socket(SESSION_NAME, SOCKET_NAME))
+    }
+
+    fn start_mcp_server(&self) -> Option<McpServer> {
+        let path = frontends::mcp::socket_path();
+        let tmux = Arc::new(TmuxDriver::new_with_socket(SESSION_NAME, SOCKET_NAME));
+        let default_dir = std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir());
+        let handler = McpHandler::new(frontends::mcp::all_tools(tmux, default_dir));
+        match McpServer::start(&path, Arc::new(handler)) {
+            Ok(Some(server)) => {
+                logger::info!("main: MCP server listening on {}", path.display());
+                Some(server)
+            }
+            Ok(None) => {
+                logger::info!("main: MCP socket owned by another aot instance; not starting");
+                None
+            }
+            Err(error) => {
+                logger::error!("main: MCP server failed to start: {error}");
+                None
+            }
+        }
+    }
+
+    fn install_signals(&self, policy: OnSignal) {
+        if let Err(error) = backends::signals::install(policy) {
+            logger::error!("main: signal install failed: {error}");
+        }
+    }
+
+    fn run_tui(
+        &self,
+        nested: Box<dyn Tmux>,
+        parent: Box<dyn Tmux>,
+        pane_id: Option<String>,
+        panel_width: Option<u16>,
+    ) -> anyhow::Result<()> {
+        let mut app = App::new(
+            nested,
+            parent,
+            Box::new(SystemProcesses),
+            pane_id,
+            panel_width,
+        )?;
+        let terminal = ratatui::init();
+        let _ = crossterm::execute!(std::io::stdout(), crossterm::event::EnableMouseCapture);
+        let result = app.run(terminal);
+        let _ = crossterm::execute!(std::io::stdout(), crossterm::event::DisableMouseCapture);
+        if let Err(error) = ratatui::try_restore() {
+            logger::error!("main: failed to restore terminal: {error}");
+        }
+        result
+    }
+
+    fn current_exe(&self) -> std::io::Result<PathBuf> {
+        std::env::current_exe()
+    }
+}
+
+fn main() -> anyhow::Result<()> {
+    let cli = Cli::parse();
+    if cli.command == Some(Command::Mcp) {
+        // The shim must keep serving the agent even when the log is unusable.
+        if cli.debug.unwrap_or(false) {
+            let _ = init_logging("shim");
+        }
+        let path = frontends::mcp::socket_path();
+        let mut stdout = std::io::stdout();
+        let result = frontends::mcp::run_shim(
+            &path,
+            cli.tui_pane.as_deref(),
+            std::io::stdin(),
+            &mut stdout,
+        );
+        if let Err(error) = &result {
+            logger::error!("shim: {error}");
+        }
+        return Ok(result?);
+    }
+
+    let config = Config::parse()?.merge(&cli);
+
+    // Logger setup must precede any tmux session/thread creation, so a fatal
+    // --debug failure leaves no server, session, or thread behind.
+    if config.debug.unwrap_or(false) {
+        init_logging(log_role(config.launch_mode()))?;
+        logger::info!("main: starting aot {}", env!("CARGO_PKG_VERSION"));
+        logger::info!("main: config {config:?}");
+        logger::info!("main: launch mode {:?}", config.launch_mode());
+    }
+
+    // ratatui::init() installs its own terminal-restoring panic hook and
+    // requires other hooks to be installed first.
+    let previous_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        logger::error!("panic: {info}");
+        previous_hook(info);
+    }));
+
+    frontends::tui::icons::set_icon_fonts(
+        config.nerd_font.unwrap_or(false),
+        config.font_awesome.unwrap_or(false),
+    );
+
+    run(&cli, &config, &SystemLauncher)?;
+
+    if let Some((signo, _name)) = backends::signals::received() {
+        std::process::exit(128 + signo);
+    }
+
+    Ok(())
+}
+
+/// Ensures aot's session exists, starts the MCP server and launches the
+/// interface the config asks for, returning when it ends.
+fn run(cli: &Cli, config: &Config, launcher: &dyn Launcher) -> anyhow::Result<()> {
+    let tmux_env = config.tmux_env.as_deref();
+    let parent = launcher.parent_session(tmux_env)?;
+    let nested = launcher.nested_session();
+    nested.create_session_if_not_exists(tmux_env)?;
+
+    let _mcp_server = launcher.start_mcp_server();
+
+    let pane_id = config.tui_pane.clone();
+    if pane_id.is_none() {
+        logger::debug!("main: TMUX_PANE not set; focus tracking disabled");
+    }
+
+    match config.launch_mode() {
+        LaunchMode::NoTui => {
+            // Attaching blocks, so signals must end the process right away.
+            launcher.install_signals(OnSignal::Exit);
+            nested.attach_session()?;
+        }
+        LaunchMode::TuiOnly { width } => {
+            logger::info!("main: starting tui");
+            launcher.install_signals(OnSignal::Shutdown);
+            launcher.run_tui(nested, parent, pane_id, width)?;
+        }
+        LaunchMode::Split { width } => {
+            launcher.install_signals(OnSignal::Exit);
+            let exe = launcher.current_exe()?;
+            let command = split_command(&exe.to_string_lossy(), cli, width);
+            parent.split_window(&command, width)?;
+            nested.attach_session()?;
+        }
+    }
+
+    Ok(())
 }
 
 fn parse_bool(value: &str) -> Result<bool, String> {
@@ -121,144 +309,168 @@ fn init_logging(role: &'static str) -> std::io::Result<()> {
     logger::init(&path.join("aot.log"), role)
 }
 
-fn start_mcp_server() -> Option<McpServer> {
-    let path = frontends::mcp::socket_path();
-    let tmux = Arc::new(TmuxDriver::new_with_socket(SESSION_NAME, SOCKET_NAME));
-    let default_dir = std::env::current_dir().unwrap_or_else(|_| std::env::temp_dir());
-    let handler = McpHandler::new(frontends::mcp::all_tools(tmux, default_dir));
-    match McpServer::start(&path, Arc::new(handler)) {
-        Ok(Some(server)) => {
-            logger::info!("main: MCP server listening on {}", path.display());
-            Some(server)
-        }
-        Ok(None) => {
-            logger::info!("main: MCP socket owned by another aot instance; not starting");
-            None
-        }
-        Err(error) => {
-            logger::error!("main: MCP server failed to start: {error}");
-            None
-        }
-    }
-}
-
-fn main() -> anyhow::Result<()> {
-    let cli = Cli::parse();
-    if cli.command == Some(Command::Mcp) {
-        // The shim must keep serving the agent even when the log is unusable.
-        if cli.debug.unwrap_or(false) {
-            let _ = init_logging("shim");
-        }
-        let path = frontends::mcp::socket_path();
-        let mut stdout = std::io::stdout();
-        let result = frontends::mcp::run_shim(
-            &path,
-            cli.tui_pane.as_deref(),
-            std::io::stdin(),
-            &mut stdout,
-        );
-        if let Err(error) = &result {
-            logger::error!("shim: {error}");
-        }
-        return Ok(result?);
-    }
-
-    let config = Config::parse()?.merge(&cli);
-    let launch_mode = config.launch_mode();
-
-    // Logger setup must precede any tmux session/thread creation, so a fatal
-    // --debug failure leaves no server, session, or thread behind.
-    if config.debug.unwrap_or(false) {
-        init_logging(log_role(launch_mode))?;
-        logger::info!("main: starting aot {}", env!("CARGO_PKG_VERSION"));
-        logger::info!("main: config {config:?}");
-        logger::info!("main: launch mode {launch_mode:?}");
-    }
-
-    // Install panic hook before ratatui::init() so panics are logged to the
-    // file and the terminal is restored. ratatui::init() installs its own
-    // restore hook and requires other hooks to be installed first.
-    let previous_hook = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
-        logger::error!("panic: {info}");
-        previous_hook(info);
-    }));
-
-    frontends::tui::icons::set_icon_fonts(
-        config.nerd_font.unwrap_or(false),
-        config.font_awesome.unwrap_or(false),
-    );
-
-    let tmux_env = config.tmux_env.as_deref();
-    let parent_session = detect_parent_session(tmux_env)?;
-    logger::debug!("main: parent session: {}", parent_session);
-
-    let parent_driver = TmuxDriver::new(&parent_session);
-
-    let nested_driver = TmuxDriver::new_with_socket(SESSION_NAME, SOCKET_NAME);
-    nested_driver.create_session_if_not_exists(tmux_env)?;
-
-    let mcp_server = start_mcp_server();
-
-    let pane_id = config.tui_pane.clone();
-    if pane_id.is_none() {
-        logger::debug!("main: TMUX_PANE not set; focus tracking disabled");
-    }
-
-    match launch_mode {
-        LaunchMode::NoTui => {
-            // Blocking attach: signals must exit the process immediately.
-            if let Err(error) = backends::signals::install(backends::signals::OnSignal::Exit) {
-                logger::error!("main: signal install failed: {error}");
-            }
-            nested_driver.attach_session()?;
-        }
-        LaunchMode::TuiOnly { width } => {
-            logger::info!("main: starting tui");
-            // TUI mode: signals set a flag; the run loop polls it.
-            if let Err(error) = backends::signals::install(backends::signals::OnSignal::Shutdown) {
-                logger::error!("main: signal install failed: {error}");
-            }
-            let terminal = ratatui::init();
-            let _ = crossterm::execute!(std::io::stdout(), crossterm::event::EnableMouseCapture);
-            let mut app = frontends::tui::app::App::new(
-                Box::new(nested_driver),
-                Box::new(parent_driver),
-                pane_id,
-                width,
-            )?;
-            let result = app.run(terminal);
-            let _ = crossterm::execute!(std::io::stdout(), crossterm::event::DisableMouseCapture);
-            if let Err(error) = ratatui::try_restore() {
-                logger::error!("main: failed to restore terminal: {error}");
-            }
-            result?;
-        }
-        LaunchMode::Split { width } => {
-            // Blocking attach: signals must exit the process immediately.
-            if let Err(error) = backends::signals::install(backends::signals::OnSignal::Exit) {
-                logger::error!("main: signal install failed: {error}");
-            }
-            let exe = std::env::current_exe()?;
-            let command = split_command(&exe.to_string_lossy(), &cli, width);
-            parent_driver.split_window(&command, width)?;
-            nested_driver.attach_session()?;
-        }
-    }
-
-    drop(mcp_server);
-
-    // If a signal was received (TUI mode), exit with 128 + signo.
-    if let Some((signo, _name)) = backends::signals::received() {
-        std::process::exit(128 + signo);
-    }
-
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backends::tmux::MockTmux;
+    use mockall::predicate::eq;
+
+    const TMUX_ENV: &str = "/tmp/tmux-1000/default,1,0";
+
+    fn config(args: &[&str]) -> (Cli, Config) {
+        let cli = Cli::parse_from(args);
+        let mut config: Config = (&cli).into();
+        config.tmux_env = Some(TMUX_ENV.to_string());
+        (cli, config)
+    }
+
+    /// A nested session that gets created, then optionally attached.
+    fn nested_session(attaches: bool) -> MockTmux {
+        let mut nested = MockTmux::new();
+        nested
+            .expect_create_session_if_not_exists()
+            .withf(|env| *env == Some(TMUX_ENV))
+            .times(1)
+            .returning(|_| Ok(()));
+        nested
+            .expect_attach_session()
+            .times(usize::from(attaches))
+            .returning(|| Ok(()));
+        nested
+    }
+
+    fn launcher(parent: MockTmux, nested: MockTmux) -> MockLauncher {
+        let mut launcher = MockLauncher::new();
+        launcher
+            .expect_parent_session()
+            .withf(|env| *env == Some(TMUX_ENV))
+            .times(1)
+            .return_once(move |_| Ok(Box::new(parent)));
+        launcher
+            .expect_nested_session()
+            .times(1)
+            .return_once(move || Box::new(nested));
+        launcher
+            .expect_start_mcp_server()
+            .times(1)
+            .returning(|| None);
+        launcher
+    }
+
+    #[test]
+    fn test_run_without_tui_attaches_nested_session() {
+        let (cli, config) = config(&["aot", "--no-tui"]);
+        let mut launcher = launcher(MockTmux::new(), nested_session(true));
+        launcher
+            .expect_install_signals()
+            .with(eq(OnSignal::Exit))
+            .times(1)
+            .return_const(());
+
+        run(&cli, &config, &launcher).unwrap();
+    }
+
+    #[test]
+    fn test_run_tui_only_runs_tui_in_this_pane() {
+        let (cli, mut config) = config(&["aot", "--tui", "--tui-width=40"]);
+        config.tui_pane = Some("%3".to_string());
+        let mut launcher = launcher(MockTmux::new(), nested_session(false));
+        launcher
+            .expect_install_signals()
+            .with(eq(OnSignal::Shutdown))
+            .times(1)
+            .return_const(());
+        launcher
+            .expect_run_tui()
+            .withf(|_, _, pane_id, width| pane_id.as_deref() == Some("%3") && *width == Some(40))
+            .times(1)
+            .returning(|_, _, _, _| Ok(()));
+
+        run(&cli, &config, &launcher).unwrap();
+    }
+
+    #[test]
+    fn test_run_split_launches_tui_beside_and_attaches() {
+        let (cli, config) = config(&["aot", "--nerd-font"]);
+        let mut parent = MockTmux::new();
+        parent
+            .expect_split_window()
+            .with(
+                eq("/usr/bin/aot --nerd-font=true --tui=true --tui-width=35"),
+                eq(35),
+            )
+            .times(1)
+            .returning(|_, _| Ok("%9".to_string()));
+        let mut launcher = launcher(parent, nested_session(true));
+        launcher
+            .expect_install_signals()
+            .with(eq(OnSignal::Exit))
+            .times(1)
+            .return_const(());
+        launcher
+            .expect_current_exe()
+            .returning(|| Ok(PathBuf::from("/usr/bin/aot")));
+
+        run(&cli, &config, &launcher).unwrap();
+    }
+
+    #[test]
+    fn test_run_fails_outside_tmux() {
+        let (cli, mut config) = config(&["aot"]);
+        config.tmux_env = None;
+        let mut launcher = MockLauncher::new();
+        launcher
+            .expect_parent_session()
+            .returning(|_| Err(TmuxError::NotInsideTmux));
+        launcher.expect_nested_session().never();
+
+        let error = run(&cli, &config, &launcher).unwrap_err();
+
+        assert!(matches!(
+            error.downcast_ref::<TmuxError>(),
+            Some(TmuxError::NotInsideTmux)
+        ));
+    }
+
+    #[test]
+    fn test_run_stops_when_session_cannot_be_created() {
+        let (cli, config) = config(&["aot"]);
+        let mut nested = MockTmux::new();
+        nested
+            .expect_create_session_if_not_exists()
+            .returning(|_| Err(TmuxError::InsideOwnServer(SOCKET_NAME.to_string())));
+        let mut launcher = MockLauncher::new();
+        launcher
+            .expect_parent_session()
+            .return_once(|_| Ok(Box::new(MockTmux::new())));
+        launcher
+            .expect_nested_session()
+            .return_once(move || Box::new(nested));
+        launcher.expect_start_mcp_server().never();
+        launcher.expect_install_signals().never();
+
+        assert!(run(&cli, &config, &launcher).is_err());
+    }
+
+    #[test]
+    fn test_run_reports_split_failure() {
+        let (cli, config) = config(&["aot"]);
+        let mut parent = MockTmux::new();
+        parent.expect_split_window().returning(|_, _| {
+            Err(TmuxError::CommandFailed {
+                message: "split-window failed".to_string(),
+                stderr: String::new(),
+                code: Some(1),
+            })
+        });
+        let mut launcher = launcher(parent, nested_session(false));
+        launcher.expect_install_signals().return_const(());
+        launcher
+            .expect_current_exe()
+            .returning(|| Ok(PathBuf::from("aot")));
+
+        assert!(run(&cli, &config, &launcher).is_err());
+    }
 
     #[test]
     fn test_cli_display_without_icon_flags() {

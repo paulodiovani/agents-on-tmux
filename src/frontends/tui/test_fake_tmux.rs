@@ -1,3 +1,5 @@
+#![cfg(test)]
+
 use std::sync::{Arc, Mutex};
 
 use crate::backends::tmux::{KeyBinding, MockTmux, TmuxError, Window};

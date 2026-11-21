@@ -14,7 +14,8 @@
 ## Testing
 
 - Always write tests for new code; no untested logic should land.
-- Mock the `Tmux` trait with the mockall-generated `MockTmux` (`#[cfg_attr(test, mockall::automock)]`, exported from `backends::tmux` in test builds); set expectations per test. TUI tests use `FakeTmux` (`frontends/tui/fake_tmux.rs`), a `MockTmux` backed by shared window state.
+- Mock the `Tmux` trait with the mockall-generated `MockTmux` (`#[cfg_attr(test, mockall::automock)]`, exported from `backends::tmux` in test builds); set expectations per test. TUI tests use `FakeTmux` (`frontends/tui/test_fake_tmux.rs`), a `MockTmux` backed by shared window state.
+- Test-only support files are named `test_*.rs` and start with `#![cfg(test)]`.
 - Aim for 100% code coverage.
 - Never run the code (`cargo run`, the `aot` binary, or real tmux commands) during
   implementation — it would interact with existing tmux sessions. Only run tests with
@@ -32,20 +33,22 @@ Binary crate (`aot`, package name `agents-on-tmux`).
 Two top-level modules under `src/`:
 
 - `backends/` — tmux communication interface
-  - `Tmux` trait defines the contract (session management, window CRUD, split_window, resize_pane, list_keys, show_options, prompt_rename_window, capture_pane, window_for_pane, send_keys, paste_buffer, rename_window)
+  - `Tmux` trait defines the contract (session management, watch_events, window CRUD, split_window, resize_pane, list_keys, show_options, prompt_rename_window, capture_pane, window_for_pane, send_keys, paste_buffer, rename_window)
   - Methods that run a single tmux command are named after it
   - `TmuxDriver<E: CommandExecutor>` implements `Tmux` with dependency injection
-  - `CommandExecutor` trait abstracts tmux command execution (real `ShellCommandExecutor` + mock for tests)
+  - `CommandExecutor` trait abstracts tmux command execution (real `ShellCommandExecutor` + mock for tests); every tmux process, control mode included, is built by it
+  - `watch_events` streams a session's control-mode events (`TmuxEvent`) from a background thread
   - `Window` struct represents tmux window state (id, name, running_command, started_at, notification_pending, is_active, current_dir)
   - `KeyBinding` struct represents a tmux key binding (key, command)
   - `TmuxError` enum for error handling
   - `agents.rs` identifies agents by name and command
   - `shell.rs` builds shell-quoted command lines from argv
+  - `process.rs` `Processes` trait looks up process start times (`SystemProcesses`, via sysinfo)
   - `logger.rs` is a std-only global file logger (`init`, lazy `debug!`/`info!`/`error!` macros used as `logger::debug!(...)`), it never writes to stdout/stderr; lines carry pid and a role tag (`main`, `tui`, `mcp`, `shim`)
 
 - `frontends/` — interfaces to AOT features
   - `tui/` terminal UI (app, event, icons, path, theme, ui)
-    - `App` manages TUI state and user actions
+    - `app/` the `App`: `state.rs` (TUI state and user actions), `run_loop.rs` (event loop and input dispatch), `hints.rs` (nested-session key hints); `test_fixtures.rs` builds test apps
     - `key_to_action` maps keyboard input to `Action` enum
     - `Theme` defines visual styles
     - `ui::draw` renders the interface
@@ -68,14 +71,14 @@ The nested `agents-on-tmux` session runs on its own isolated tmux server using t
 - `SESSION_NAME` constant: `"agents-on-tmux"` (the session name)
 - `SOCKET_NAME` constant: `"agents-on-tmux"` (the socket/server name)
 - `ShellCommandExecutor` stores `socket: Option<String>` and prepends `-L <socket>` to all tmux commands when set
-- `TmuxDriver::new(session)` creates a driver for the default tmux server (used for parent session)
+- `TmuxDriver::for_current_session(tmux_env)` creates a driver for the session aot was started from, on the default tmux server
 - `TmuxDriver::new_with_socket(session, socket)` creates a driver for a specific tmux server (used for nested session)
 - `detect_parent_socket()` parses the `TMUX` environment variable to extract the current socket name
 - `create_session_if_not_exists()` checks if we're already running on the same socket to prevent nested execution, returning `TmuxError::InsideOwnServer` if detected
 
 This architecture is similar to how `overmind` works and prevents issues #20 (server freeze) and #31 (session detection failure).
 
-Entry point: `main.rs` parses CLI args with clap (`aot mcp` runs only the MCP bridge and returns), detects the parent tmux session, creates a parent `TmuxDriver` (default server) and a nested `TmuxDriver` with socket (isolated server), ensures the nested session exists, and starts the MCP server. Without `--tui`, it splits a pane in the parent session to launch the TUI and attaches to the nested session. With `--tui`, it runs the TUI directly.
+Entry point: `main.rs` parses CLI args with clap (`aot mcp` runs only the MCP bridge and returns), sets up logging, then calls `run`. `run` gets its process-wide effects from a `Launcher` (`SystemLauncher` for real, `MockLauncher` in tests): it gets the parent session driver (default server) and the nested driver (isolated server), ensures the nested session exists, and starts the MCP server. Without `--tui`, it splits a pane in the parent session to launch the TUI and attaches to the nested session. With `--tui`, it runs the TUI directly.
 
 ## Rust conventions (non-default — follow strictly)
 

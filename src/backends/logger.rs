@@ -11,6 +11,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 /// Size above which the log file is set aside at startup.
 const MAX_LOG_BYTES: u64 = 5 * 1024 * 1024;
 
+static SINK: Mutex<Option<Box<dyn Write + Send>>> = Mutex::new(None);
+static PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
+static ROLE: Mutex<&str> = Mutex::new("main");
+static ENABLED: AtomicBool = AtomicBool::new(false);
+static BROKEN: AtomicBool = AtomicBool::new(false);
+
 /// Severity of a log line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Level {
@@ -18,12 +24,6 @@ pub enum Level {
     Info,
     Error,
 }
-
-static SINK: Mutex<Option<Box<dyn Write + Send>>> = Mutex::new(None);
-static PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
-static ROLE: Mutex<&str> = Mutex::new("main");
-static ENABLED: AtomicBool = AtomicBool::new(false);
-static BROKEN: AtomicBool = AtomicBool::new(false);
 
 thread_local! {
     static THREAD_ROLE: Cell<Option<&'static str>> = const { Cell::new(None) };

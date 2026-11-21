@@ -6,7 +6,7 @@ use std::time::Duration;
 use serde_json::{Value, json};
 
 use super::tool::{CallContext, Tool, ToolOutput, caller_window, dir_argument, name_argument};
-use crate::backends::agents::{self, Agent, GenericAgent};
+use crate::backends::agents::{self, Agent};
 use crate::backends::tmux::{Tmux, TmuxError, Window};
 
 const STARTUP_WAIT: Duration = Duration::from_millis(500);
@@ -29,7 +29,7 @@ impl NewAgent {
         }
     }
 
-    fn check_still_running(&self, window: &Window, agent: &GenericAgent) -> Result<(), ToolOutput> {
+    fn check_still_running(&self, window: &Window, agent: &dyn Agent) -> Result<(), ToolOutput> {
         thread::sleep(self.startup_wait);
         let windows = self.tmux.list_windows().map_err(|error| {
             ToolOutput::error(format!("Failed to check the agent window: {error}"))
@@ -40,7 +40,11 @@ impl NewAgent {
         if alive { Ok(()) } else { Err(exited(agent)) }
     }
 
-    fn agent(&self, arguments: &Value, context: &CallContext) -> Result<GenericAgent, ToolOutput> {
+    fn agent(
+        &self,
+        arguments: &Value,
+        context: &CallContext,
+    ) -> Result<&'static dyn Agent, ToolOutput> {
         match arguments.get("command") {
             None => {
                 let caller = caller_window(self.tmux.as_ref(), context)?;
@@ -76,10 +80,7 @@ impl Tool for NewAgent {
     }
 
     fn input_schema(&self) -> Value {
-        let commands: Vec<&str> = agents::agents()
-            .iter()
-            .map(|agent| agent.command())
-            .collect();
+        let commands: Vec<&str> = agents::agents().map(|agent| agent.command()).collect();
         json!({
             "type": "object",
             "properties": {
@@ -135,10 +136,10 @@ impl Tool for NewAgent {
                 .create_window(name.as_deref(), Some(&dir), Some(&command), true)
             {
                 Ok(window) => window,
-                Err(TmuxError::WindowNotFound) => return exited(&agent),
+                Err(TmuxError::WindowNotFound) => return exited(agent),
                 Err(error) => return ToolOutput::error(format!("Failed to start agent: {error}")),
             };
-        if let Err(error) = self.check_still_running(&window, &agent) {
+        if let Err(error) = self.check_still_running(&window, agent) {
             return error;
         }
         ToolOutput::json(json!({
@@ -163,7 +164,7 @@ fn args_argument(arguments: &Value) -> Result<Vec<String>, ToolOutput> {
         .collect()
 }
 
-fn exited(agent: &GenericAgent) -> ToolOutput {
+fn exited(agent: &dyn Agent) -> ToolOutput {
     ToolOutput::error(format!(
         "'{}' exited right after starting: it may not be installed, or it failed on startup (check its args)",
         agent.command()
@@ -171,10 +172,7 @@ fn exited(agent: &GenericAgent) -> ToolOutput {
 }
 
 fn known_commands() -> String {
-    let commands: Vec<&str> = agents::agents()
-        .iter()
-        .map(|agent| agent.command())
-        .collect();
+    let commands: Vec<&str> = agents::agents().map(|agent| agent.command()).collect();
     format!("known agent commands: {}", commands.join(", "))
 }
 
@@ -472,7 +470,7 @@ mod tests {
         assert!(!tool.read_only());
         assert!(tool.description().contains("index"));
         let schema = tool.input_schema();
-        let commands: Vec<&str> = agents::agents().iter().map(|a| a.command()).collect();
+        let commands: Vec<&str> = agents::agents().map(|a| a.command()).collect();
         assert_eq!(schema["properties"]["command"]["enum"], json!(commands));
         assert_eq!(schema["properties"]["args"]["items"]["type"], "string");
     }

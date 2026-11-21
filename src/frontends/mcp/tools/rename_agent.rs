@@ -8,14 +8,14 @@ use crate::backends::tmux::Tmux;
 
 /// Renames an agent managed by AOT; an alias of `rename_window` named for agents.
 pub struct RenameAgent {
-    rename_window: RenameWindow,
+    rename_window: Box<dyn Tool>,
 }
 
 impl RenameAgent {
     /// Creates the tool over the nested AOT tmux session.
     pub fn new(tmux: Arc<dyn Tmux + Send + Sync>) -> Self {
         Self {
-            rename_window: RenameWindow::new(tmux),
+            rename_window: Box::new(RenameWindow::new(tmux)),
         }
     }
 }

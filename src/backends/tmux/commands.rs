@@ -1,12 +1,17 @@
-use std::process::Command;
+use std::ffi::OsString;
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc;
 use std::time::Instant;
 use thiserror::Error;
 
+use crate::backends::tmux::control_mode::{self, EventProducer, TmuxEvent};
 use crate::backends::{logger, shell};
 
 /// Contract for executing tmux commands.
 pub trait CommandExecutor {
+    /// Builds the tmux command for the given arguments without running it.
+    fn command(&self, args: &[&str]) -> Command;
     /// Executes a tmux command and returns stdout on success.
     fn execute(&self, args: &[&str]) -> Result<String, TmuxError>;
     /// Executes a tmux command with inherited stdio (for attach).
@@ -16,16 +21,14 @@ pub trait CommandExecutor {
 /// Contract for interacting with tmux sessions and windows.
 #[cfg_attr(test, mockall::automock)]
 pub trait Tmux {
-    /// Returns the session name this driver targets.
-    fn session_name(&self) -> &str;
-    /// Returns the socket name this driver targets, if any.
-    #[allow(clippy::needless_lifetimes)]
-    fn socket_name<'a>(&'a self) -> Option<&'a str>;
     /// Ensures the tmux session exists, creating it if necessary.
     #[allow(clippy::needless_lifetimes)]
     fn create_session_if_not_exists<'a>(&self, tmux_env: Option<&'a str>) -> Result<(), TmuxError>;
     /// Attaches to the tmux session, inheriting stdio. Blocks until detached.
     fn attach_session(&self) -> Result<(), TmuxError>;
+    /// Streams the session's events to `events` from a background thread,
+    /// until the session ends.
+    fn watch_events(&self, producer: EventProducer, events: mpsc::Sender<TmuxEvent>);
     /// Lists all windows in the session.
     fn list_windows(&self) -> Result<Vec<Window>, TmuxError>;
     /// Creates a new window and returns it. `name` (automatic when unset), `dir`,
@@ -103,6 +106,26 @@ pub enum TmuxError {
     WindowNotFound,
 }
 
+/// A tmux key binding: the bound key and the command it runs.
+#[derive(Debug, Clone, PartialEq)]
+pub struct KeyBinding {
+    pub command: String,
+    pub key: String,
+}
+
+/// Real tmux command executor that calls the tmux binary.
+#[derive(Debug)]
+pub struct ShellCommandExecutor {
+    socket: Option<String>,
+}
+
+/// tmux driver that communicates with the tmux server.
+pub struct TmuxDriver<E: CommandExecutor = ShellCommandExecutor> {
+    executor: E,
+    session: String,
+    socket: Option<String>,
+}
+
 /// Represents a tmux window and its runtime state.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Window {
@@ -114,65 +137,6 @@ pub struct Window {
     pub is_active: bool,
     pub notification_pending: bool,
     pub started_at: Option<Instant>,
-}
-
-/// A tmux key binding: the bound key and the command it runs.
-#[derive(Debug, Clone, PartialEq)]
-pub struct KeyBinding {
-    pub command: String,
-    pub key: String,
-}
-
-fn check_inside_tmux(tmux_env: Option<&str>) -> Result<(), TmuxError> {
-    if tmux_env.is_none() {
-        Err(TmuxError::NotInsideTmux)
-    } else {
-        Ok(())
-    }
-}
-
-/// Detects the parent tmux session by querying tmux for the current session name.
-pub fn detect_parent_session(tmux_env: Option<&str>) -> Result<String, TmuxError> {
-    check_inside_tmux(tmux_env)?;
-
-    let output = Command::new("tmux")
-        .args(["display-message", "-p", "#S"])
-        .output()
-        .map_err(|e| TmuxError::CommandFailed {
-            message: format!("Failed to execute tmux: {}", e),
-            stderr: String::new(),
-            code: None,
-        })?;
-
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-    } else {
-        Err(TmuxError::CommandFailed {
-            message: "tmux display-message -p #S failed".to_string(),
-            stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-            code: output.status.code(),
-        })
-    }
-}
-
-/// Extracts the parent tmux server socket name by parsing the TMUX environment variable value.
-/// Returns the socket name (e.g., "default", "agents-on-tmux").
-fn detect_parent_socket(tmux_env: Option<&str>) -> Result<String, TmuxError> {
-    let tmux_env = tmux_env.ok_or(TmuxError::NotInsideTmux)?;
-
-    // TMUX format: <socket-path>,<server-pid>,<session-id>
-    // Example: /tmp/tmux-1000/agents-on-tmux,12345,0
-    let socket_path = tmux_env.split(',').next().ok_or(TmuxError::NotInsideTmux)?;
-
-    // Extract socket name from path (last component)
-    let socket_name = socket_path.rsplit('/').next().unwrap_or("default");
-
-    Ok(socket_name.to_string())
-}
-
-/// Real tmux command executor that calls the tmux binary.
-pub struct ShellCommandExecutor {
-    socket: Option<String>,
 }
 
 impl ShellCommandExecutor {
@@ -187,16 +151,10 @@ impl ShellCommandExecutor {
             socket: Some(socket.to_string()),
         }
     }
-}
 
-impl ShellCommandExecutor {
     fn output(&self, args: &[&str]) -> Result<String, TmuxError> {
-        let mut cmd = Command::new("tmux");
-        if let Some(ref socket) = self.socket {
-            cmd.args(["-L", socket]);
-        }
-        let output = cmd
-            .args(args)
+        let output = self
+            .command(args)
             .output()
             .map_err(|e| TmuxError::CommandFailed {
                 message: format!("Failed to execute tmux: {}", e),
@@ -216,15 +174,11 @@ impl ShellCommandExecutor {
     }
 
     fn status(&self, args: &[&str]) -> Result<(), TmuxError> {
-        let mut cmd = Command::new("tmux");
-        if let Some(ref socket) = self.socket {
-            cmd.args(["-L", socket]);
-        }
-        let status = cmd
-            .args(args)
-            .stdin(std::process::Stdio::inherit())
-            .stdout(std::process::Stdio::inherit())
-            .stderr(std::process::Stdio::inherit())
+        let status = self
+            .command(args)
+            .stdin(Stdio::inherit())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
             .status()
             .map_err(|e| TmuxError::CommandFailed {
                 message: format!("Failed to execute tmux: {}", e),
@@ -245,6 +199,15 @@ impl ShellCommandExecutor {
 }
 
 impl CommandExecutor for ShellCommandExecutor {
+    fn command(&self, args: &[&str]) -> Command {
+        let mut command = Command::new("tmux");
+        if let Some(socket) = &self.socket {
+            command.args(["-L", socket]);
+        }
+        command.args(args);
+        command
+    }
+
     fn execute(&self, args: &[&str]) -> Result<String, TmuxError> {
         let result = self.output(args);
         if let Err(error) = &result {
@@ -260,6 +223,298 @@ impl CommandExecutor for ShellCommandExecutor {
         }
         result
     }
+}
+
+impl TmuxDriver<ShellCommandExecutor> {
+    /// Creates a new TmuxDriver with the real command executor targeting a specific tmux server.
+    pub fn new_with_socket(session: &str, socket: &str) -> Self {
+        Self {
+            executor: ShellCommandExecutor::new_with_socket(socket),
+            session: session.to_string(),
+            socket: Some(socket.to_string()),
+        }
+    }
+
+    /// Creates a driver for the session of the tmux client aot runs in, on
+    /// the default tmux server.
+    pub fn for_current_session(tmux_env: Option<&str>) -> Result<Self, TmuxError> {
+        Self::for_client_session(ShellCommandExecutor::new(), tmux_env)
+    }
+}
+
+impl<E: CommandExecutor> TmuxDriver<E> {
+    /// Creates a driver for the session of the tmux client aot runs in.
+    fn for_client_session(executor: E, tmux_env: Option<&str>) -> Result<Self, TmuxError> {
+        if tmux_env.is_none() {
+            return Err(TmuxError::NotInsideTmux);
+        }
+        let session = executor
+            .execute(&["display-message", "-p", "#S"])?
+            .trim()
+            .to_string();
+        Ok(Self {
+            executor,
+            session,
+            socket: None,
+        })
+    }
+
+    /// Creates a new TmuxDriver with a custom command executor.
+    #[cfg(test)]
+    fn with_executor(executor: E) -> Self {
+        Self {
+            executor,
+            session: SESSION_NAME.to_string(),
+            socket: None,
+        }
+    }
+}
+
+impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
+    /// Also refuses to run when aot is already inside this driver's own server.
+    fn create_session_if_not_exists(&self, tmux_env: Option<&str>) -> Result<(), TmuxError> {
+        if let Some(driver_socket) = &self.socket {
+            match detect_parent_socket(tmux_env) {
+                Ok(parent_socket) => {
+                    logger::debug!(
+                        "tmux: parent socket: {}, driver socket: {}",
+                        parent_socket,
+                        driver_socket
+                    );
+                    if parent_socket == *driver_socket {
+                        return Err(TmuxError::InsideOwnServer(parent_socket));
+                    }
+                }
+                Err(error) => {
+                    logger::debug!(
+                        "tmux: could not detect parent socket (skipping own-server check): {error}"
+                    );
+                }
+            }
+        }
+
+        if let Err(error) = self.executor.execute(&["has-session", "-t", &self.session]) {
+            logger::debug!("tmux: has-session failed (will create): {error}");
+            logger::debug!(
+                "tmux: creating session '{}' on socket {:?}",
+                self.session,
+                self.socket
+            );
+            self.executor
+                .execute(&["new-session", "-d", "-s", &self.session])?;
+            self.executor
+                .execute(&["set-option", "-t", &self.session, "status", "off"])?;
+        }
+
+        Ok(())
+    }
+
+    fn attach_session(&self) -> Result<(), TmuxError> {
+        self.executor
+            .execute_inherit_stdio(&["attach-session", "-t", &self.session])
+    }
+
+    fn watch_events(&self, producer: EventProducer, events: mpsc::Sender<TmuxEvent>) {
+        let template = self
+            .executor
+            .command(&["-C", "attach-session", "-t", &self.session]);
+        let program = template.get_program().to_owned();
+        let args: Vec<OsString> = template.get_args().map(ToOwned::to_owned).collect();
+        logger::info!("tmux: watching session {} ({producer:?})", self.session);
+        std::thread::spawn(move || {
+            control_mode::control_mode_thread(
+                || {
+                    let mut command = Command::new(&program);
+                    command.args(&args);
+                    command
+                },
+                producer,
+                events,
+            );
+        });
+    }
+
+    fn list_windows(&self) -> Result<Vec<Window>, TmuxError> {
+        let output = self.executor.execute(&[
+            "list-windows",
+            "-t",
+            &target(&self.session, None, None),
+            "-F",
+            "#{window_index}\t#{window_name}\t#{pane_pid}\t#{pane_current_command}\t#{pane_current_path}\t#{window_active}\t#{window_activity_flag}",
+        ])?;
+
+        Ok(output.lines().filter_map(parse_window_line).collect())
+    }
+
+    fn create_window<'a>(
+        &self,
+        name: Option<&'a str>,
+        dir: Option<&'a str>,
+        command: Option<&'a [String]>,
+        detached: bool,
+    ) -> Result<Window, TmuxError> {
+        let session = target(&self.session, None, None);
+        let name = name.map(escape_formats);
+        let mut args = vec!["new-window", "-t", &session, "-P", "-F", "#{window_index}"];
+
+        if detached {
+            args.push("-d");
+        }
+        if let Some(name) = &name {
+            args.extend(["-n", name.as_str()]);
+        }
+        if let Some(dir) = dir {
+            args.extend(["-c", dir]);
+        }
+        if let Some(command) = command {
+            args.push("--");
+            args.extend(command.iter().map(String::as_str));
+        }
+
+        let output = self.executor.execute(&args)?;
+        let id = output
+            .trim()
+            .parse::<u32>()
+            .map_err(|_| TmuxError::UnexpectedOutput(output))?;
+
+        self.list_windows()?
+            .into_iter()
+            .find(|w| w.id == id)
+            .ok_or(TmuxError::WindowNotFound)
+    }
+
+    fn kill_window(&self, id: u32) -> Result<(), TmuxError> {
+        let id_str = id.to_string();
+        let target = target(&self.session, Some(&id_str), None);
+        self.executor.execute(&["kill-window", "-t", &target])?;
+        Ok(())
+    }
+
+    fn select_window(&self, id: u32) -> Result<(), TmuxError> {
+        let id_str = id.to_string();
+        let target = target(&self.session, Some(&id_str), None);
+        self.executor.execute(&["select-window", "-t", &target])?;
+        Ok(())
+    }
+
+    fn last_pane(&self) -> Result<(), TmuxError> {
+        self.executor
+            .execute(&["last-pane", "-t", &target(&self.session, None, None)])?;
+        Ok(())
+    }
+
+    fn split_window(&self, command: &str, width: u16) -> Result<String, TmuxError> {
+        let width = width.to_string();
+        self.executor
+            .execute(&[
+                "split-window",
+                "-h",
+                "-b",
+                "-l",
+                &width,
+                "-d",
+                "-P",
+                "-F",
+                "#{pane_id}",
+                "-t",
+                &target(&self.session, None, None),
+                command,
+            ])
+            .map(|s| s.trim().to_string())
+    }
+
+    fn resize_pane(&self, pane_id: &str, width: u16) -> Result<(), TmuxError> {
+        let width = width.to_string();
+        // Without -t, tmux resizes the active pane instead.
+        self.executor
+            .execute(&["resize-pane", "-t", pane_id, "-x", &width])?;
+        Ok(())
+    }
+
+    fn list_keys(&self, table: &str) -> Result<Vec<KeyBinding>, TmuxError> {
+        let output = self.executor.execute(&["list-keys", "-T", table])?;
+        Ok(output.lines().filter_map(parse_key_line).collect())
+    }
+
+    fn show_options(&self, name: &str, global: bool) -> Result<String, TmuxError> {
+        let args = if global {
+            vec!["show-options", "-gv", name]
+        } else {
+            vec!["show-options", "-v", "-t", self.session.as_str(), name]
+        };
+        self.executor.execute(&args).map(|s| s.trim().to_string())
+    }
+
+    fn prompt_rename_window(&self, id: u32, name: &str) -> Result<(), TmuxError> {
+        let target = format!("{}:{}", self.session, id);
+        let template = format!("rename-window -t \"{target}\" \"%%\"");
+        self.executor
+            .execute(&["command-prompt", "-I", name, &template])
+            .map(|_| ())
+    }
+
+    fn capture_pane(&self, id: u32, history: u32) -> Result<String, TmuxError> {
+        let target = target(&self.session, Some(&id.to_string()), None);
+        let start = format!("-{history}");
+        self.executor
+            .execute(&["capture-pane", "-p", "-J", "-t", &target, "-S", &start])
+    }
+
+    fn window_for_pane(&self, pane_id: &str) -> Result<u32, TmuxError> {
+        let output =
+            self.executor
+                .execute(&["display-message", "-p", "-t", pane_id, "#{window_index}"])?;
+        output
+            .trim()
+            .parse::<u32>()
+            .map_err(|_| TmuxError::UnexpectedOutput(output))
+    }
+
+    fn send_keys(&self, id: u32, text: &str, enter: bool) -> Result<(), TmuxError> {
+        let target = target(&self.session, Some(&id.to_string()), None);
+        if !text.is_empty() {
+            self.executor
+                .execute(&["send-keys", "-t", &target, "-l", "--", text])?;
+        }
+
+        if enter {
+            self.executor
+                .execute(&["send-keys", "-t", &target, "Enter"])?;
+        }
+
+        Ok(())
+    }
+
+    fn paste_buffer(&self, id: u32, text: &str) -> Result<(), TmuxError> {
+        let target = target(&self.session, Some(&id.to_string()), None);
+        let buffer = format!(
+            "{PASTE_BUFFER_PREFIX}-{}-{}",
+            std::process::id(),
+            PASTE_BUFFER_COUNTER.fetch_add(1, Ordering::Relaxed)
+        );
+        self.executor
+            .execute(&["set-buffer", "-b", &buffer, "--", text])?;
+        self.executor
+            .execute(&["paste-buffer", "-b", &buffer, "-p", "-d", "-t", &target])?;
+        Ok(())
+    }
+
+    fn rename_window(&self, id: u32, name: &str) -> Result<(), TmuxError> {
+        let target = target(&self.session, Some(&id.to_string()), None);
+        self.executor
+            .execute(&["rename-window", "-t", &target, "--", &escape_formats(name)])
+            .map(|_| ())
+    }
+}
+
+/// Extracts the socket name (e.g. "default", "agents-on-tmux") of the tmux
+/// server aot runs in, from a `TMUX` value shaped
+/// `<socket-path>,<server-pid>,<session-id>`.
+fn detect_parent_socket(tmux_env: Option<&str>) -> Result<String, TmuxError> {
+    let tmux_env = tmux_env.ok_or(TmuxError::NotInsideTmux)?;
+    let socket_path = tmux_env.split(',').next().ok_or(TmuxError::NotInsideTmux)?;
+    let socket_name = socket_path.rsplit('/').next().unwrap_or("default");
+    Ok(socket_name.to_string())
 }
 
 fn log_failure(socket: Option<&str>, args: &[&str], error: &TmuxError) {
@@ -300,51 +555,6 @@ fn redacted_args(args: &[&str]) -> Vec<String> {
         .map(|arg| arg.to_string())
         .chain(payload.iter().map(|arg| format!("<{} bytes>", arg.len())))
         .collect()
-}
-
-/// tmux driver that communicates with the tmux server.
-pub struct TmuxDriver<E: CommandExecutor = ShellCommandExecutor> {
-    executor: E,
-    session: String,
-    socket: Option<String>,
-}
-
-impl TmuxDriver<ShellCommandExecutor> {
-    /// Creates a new TmuxDriver with the real command executor targeting the default tmux server.
-    pub fn new(session: &str) -> Self {
-        Self {
-            executor: ShellCommandExecutor::new(),
-            session: session.to_string(),
-            socket: None,
-        }
-    }
-
-    /// Creates a new TmuxDriver with the real command executor targeting a specific tmux server.
-    pub fn new_with_socket(session: &str, socket: &str) -> Self {
-        Self {
-            executor: ShellCommandExecutor::new_with_socket(socket),
-            session: session.to_string(),
-            socket: Some(socket.to_string()),
-        }
-    }
-}
-
-impl Default for TmuxDriver<ShellCommandExecutor> {
-    fn default() -> Self {
-        Self::new(SESSION_NAME)
-    }
-}
-
-impl<E: CommandExecutor> TmuxDriver<E> {
-    /// Creates a new TmuxDriver with a custom command executor.
-    #[cfg(test)]
-    fn with_executor(executor: E) -> Self {
-        Self {
-            executor,
-            session: SESSION_NAME.to_string(),
-            socket: None,
-        }
-    }
 }
 
 /// Keeps a window name literal, so tmux does not expand formats in it.
@@ -458,263 +668,6 @@ fn truncate(s: &str, max_chars: usize) -> String {
     }
 }
 
-impl<E: CommandExecutor> Tmux for TmuxDriver<E> {
-    /// Returns the session name this driver targets.
-    fn session_name(&self) -> &str {
-        &self.session
-    }
-
-    /// Returns the socket name this driver targets, if any.
-    fn socket_name(&self) -> Option<&str> {
-        self.socket.as_deref()
-    }
-
-    /// Ensures the tmux session exists, creating it if necessary.
-    /// Also checks if we're already running on the same socket to prevent nested execution.
-    fn create_session_if_not_exists(&self, tmux_env: Option<&str>) -> Result<(), TmuxError> {
-        // Check if we're already running on the same socket
-        if let Some(ref driver_socket) = self.socket {
-            match detect_parent_socket(tmux_env) {
-                Ok(parent_socket) => {
-                    logger::debug!(
-                        "tmux: parent socket: {}, driver socket: {}",
-                        parent_socket,
-                        driver_socket
-                    );
-                    if parent_socket == *driver_socket {
-                        return Err(TmuxError::InsideOwnServer(parent_socket));
-                    }
-                }
-                Err(error) => {
-                    logger::debug!(
-                        "tmux: could not detect parent socket (skipping own-server check): {error}"
-                    );
-                }
-            }
-        }
-
-        let has_session = self.executor.execute(&["has-session", "-t", &self.session]);
-
-        if let Err(error) = &has_session {
-            logger::debug!("tmux: has-session failed (will create): {error}");
-        }
-
-        if has_session.is_err() {
-            logger::debug!(
-                "tmux: creating session '{}' on socket {:?}",
-                self.session,
-                self.socket
-            );
-            self.executor
-                .execute(&["new-session", "-d", "-s", &self.session])?;
-            self.executor
-                .execute(&["set-option", "-t", &self.session, "status", "off"])?;
-        }
-
-        Ok(())
-    }
-
-    /// Attaches to the tmux session, inheriting stdio. Blocks until detached.
-    fn attach_session(&self) -> Result<(), TmuxError> {
-        self.executor
-            .execute_inherit_stdio(&["attach-session", "-t", &self.session])
-    }
-
-    /// Lists all windows in the session.
-    fn list_windows(&self) -> Result<Vec<Window>, TmuxError> {
-        let output = self.executor.execute(&[
-            "list-windows",
-            "-t",
-            &target(&self.session, None, None),
-            "-F",
-            "#{window_index}\t#{window_name}\t#{pane_pid}\t#{pane_current_command}\t#{pane_current_path}\t#{window_active}\t#{window_activity_flag}",
-        ])?;
-
-        let windows: Vec<Window> = output.lines().filter_map(parse_window_line).collect();
-
-        Ok(windows)
-    }
-
-    /// Creates a new window and returns it.
-    fn create_window<'a>(
-        &self,
-        name: Option<&'a str>,
-        dir: Option<&'a str>,
-        command: Option<&'a [String]>,
-        detached: bool,
-    ) -> Result<Window, TmuxError> {
-        let session = target(&self.session, None, None);
-        let name = name.map(escape_formats);
-        let mut args = vec!["new-window", "-t", &session, "-P", "-F", "#{window_index}"];
-
-        if detached {
-            args.push("-d");
-        }
-        if let Some(name) = &name {
-            args.extend(["-n", name.as_str()]);
-        }
-        if let Some(dir) = dir {
-            args.extend(["-c", dir]);
-        }
-        if let Some(command) = command {
-            args.push("--");
-            args.extend(command.iter().map(String::as_str));
-        }
-
-        let output = self.executor.execute(&args)?;
-        let id = output
-            .trim()
-            .parse::<u32>()
-            .map_err(|_| TmuxError::UnexpectedOutput(output))?;
-
-        self.list_windows()?
-            .into_iter()
-            .find(|w| w.id == id)
-            .ok_or(TmuxError::WindowNotFound)
-    }
-
-    /// Kills the window with the given id.
-    fn kill_window(&self, id: u32) -> Result<(), TmuxError> {
-        let id_str = id.to_string();
-        let target = target(&self.session, Some(&id_str), None);
-        self.executor.execute(&["kill-window", "-t", &target])?;
-        Ok(())
-    }
-
-    /// Selects (focuses) the window with the given id.
-    fn select_window(&self, id: u32) -> Result<(), TmuxError> {
-        let id_str = id.to_string();
-        let target = target(&self.session, Some(&id_str), None);
-        self.executor.execute(&["select-window", "-t", &target])?;
-        Ok(())
-    }
-
-    /// Switches to the last-active pane in the session.
-    fn last_pane(&self) -> Result<(), TmuxError> {
-        self.executor
-            .execute(&["last-pane", "-t", &target(&self.session, None, None)])?;
-        Ok(())
-    }
-
-    /// Splits the current window horizontally, creating a side pane.
-    fn split_window(&self, command: &str, width: u16) -> Result<String, TmuxError> {
-        let width = width.to_string();
-        self.executor
-            .execute(&[
-                "split-window",
-                "-h",
-                "-b",
-                "-l",
-                &width,
-                "-d",
-                "-P",
-                "-F",
-                "#{pane_id}",
-                "-t",
-                &target(&self.session, None, None),
-                command,
-            ])
-            .map(|s| s.trim().to_string())
-    }
-
-    /// Resizes the given pane to an absolute width in columns. The target must
-    /// be explicit: without -t tmux resolves the default to the active pane.
-    fn resize_pane(&self, pane_id: &str, width: u16) -> Result<(), TmuxError> {
-        let width = width.to_string();
-        self.executor
-            .execute(&["resize-pane", "-t", pane_id, "-x", &width])?;
-        Ok(())
-    }
-
-    /// Lists the key bindings of the given key table (e.g. "prefix"), as
-    /// `bind-key [-r] -T <table> <key> <command>` lines.
-    fn list_keys(&self, table: &str) -> Result<Vec<KeyBinding>, TmuxError> {
-        let output = self.executor.execute(&["list-keys", "-T", table])?;
-        Ok(output.lines().filter_map(parse_key_line).collect())
-    }
-
-    /// Returns the value of a single option: this driver's session by
-    /// default, or the global scope when `global` is set.
-    fn show_options(&self, name: &str, global: bool) -> Result<String, TmuxError> {
-        let args = if global {
-            vec!["show-options", "-gv", name]
-        } else {
-            vec!["show-options", "-v", "-t", self.session.as_str(), name]
-        };
-        self.executor.execute(&args).map(|s| s.trim().to_string())
-    }
-
-    /// Prompts the user to rename the window via the tmux command prompt.
-    fn prompt_rename_window(&self, id: u32, name: &str) -> Result<(), TmuxError> {
-        let target = format!("{}:{}", self.session, id);
-        let template = format!("rename-window -t \"{target}\" \"%%\"");
-        self.executor
-            .execute(&["command-prompt", "-I", name, &template])
-            .map(|_| ())
-    }
-
-    /// Returns the text of the window's active pane: the visible screen plus up
-    /// to `history` lines of scrollback above it.
-    fn capture_pane(&self, id: u32, history: u32) -> Result<String, TmuxError> {
-        let target = target(&self.session, Some(&id.to_string()), None);
-        let start = format!("-{history}");
-        self.executor
-            .execute(&["capture-pane", "-p", "-J", "-t", &target, "-S", &start])
-    }
-
-    /// Returns the id of the window holding the given pane (`%N`).
-    fn window_for_pane(&self, pane_id: &str) -> Result<u32, TmuxError> {
-        let output =
-            self.executor
-                .execute(&["display-message", "-p", "-t", pane_id, "#{window_index}"])?;
-        output
-            .trim()
-            .parse::<u32>()
-            .map_err(|_| TmuxError::UnexpectedOutput(output))
-    }
-
-    /// Types `text` literally into the window's active pane, then presses
-    /// Enter when `enter` is set.
-    fn send_keys(&self, id: u32, text: &str, enter: bool) -> Result<(), TmuxError> {
-        let target = target(&self.session, Some(&id.to_string()), None);
-        if !text.is_empty() {
-            self.executor
-                .execute(&["send-keys", "-t", &target, "-l", "--", text])?;
-        }
-
-        if enter {
-            self.executor
-                .execute(&["send-keys", "-t", &target, "Enter"])?;
-        }
-
-        Ok(())
-    }
-
-    /// Pastes `text` into the window's active pane, as a bracketed paste when the
-    /// pane's application enables it, so newlines stay part of the text.
-    fn paste_buffer(&self, id: u32, text: &str) -> Result<(), TmuxError> {
-        let target = target(&self.session, Some(&id.to_string()), None);
-        let buffer = format!(
-            "{PASTE_BUFFER_PREFIX}-{}-{}",
-            std::process::id(),
-            PASTE_BUFFER_COUNTER.fetch_add(1, Ordering::Relaxed)
-        );
-        self.executor
-            .execute(&["set-buffer", "-b", &buffer, "--", text])?;
-        self.executor
-            .execute(&["paste-buffer", "-b", &buffer, "-p", "-d", "-t", &target])?;
-        Ok(())
-    }
-
-    /// Sets the window's name directly, without prompting the user.
-    fn rename_window(&self, id: u32, name: &str) -> Result<(), TmuxError> {
-        let target = target(&self.session, Some(&id.to_string()), None);
-        self.executor
-            .execute(&["rename-window", "-t", &target, "--", &escape_formats(name)])
-            .map(|_| ())
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -749,6 +702,15 @@ mod tests {
     }
 
     impl CommandExecutor for MockCommandExecutor {
+        fn command(&self, args: &[&str]) -> Command {
+            self.commands
+                .borrow_mut()
+                .push(args.iter().map(|s| s.to_string()).collect());
+            let mut command = Command::new("sh");
+            command.args(["-c", "printf '%s\\n' '%exit'"]);
+            command
+        }
+
         fn execute(&self, args: &[&str]) -> Result<String, TmuxError> {
             self.commands
                 .borrow_mut()
@@ -832,6 +794,7 @@ mod tests {
                 Some(&"command-prompt") => Ok(String::new()),
                 Some(&"capture-pane") => Ok("$ ls\nsrc\n".to_string()),
                 Some(&"display-message") if args.contains(&"%7") => Ok("4\n".to_string()),
+                Some(&"display-message") if args.contains(&"#S") => Ok("work\n".to_string()),
                 Some(&"display-message") => Ok(String::new()),
                 Some(&"split-window") => Ok(self.pane_id.borrow().clone()),
                 Some(&"list-keys") => Ok(concat!(
@@ -968,21 +931,54 @@ mod tests {
     }
 
     #[test]
-    fn test_driver_session_name() {
-        let driver = TmuxDriver::new("test-session");
-        assert_eq!(driver.session_name(), "test-session");
+    fn test_shell_executor_command_targets_socket() {
+        let command = ShellCommandExecutor::new_with_socket("sock").command(&["ls"]);
+        assert_eq!(command.get_program(), "tmux");
+        assert_eq!(command.get_args().collect::<Vec<_>>(), ["-L", "sock", "ls"]);
     }
 
     #[test]
-    fn test_driver_socket_name_none() {
-        let driver = TmuxDriver::new("test-session");
-        assert_eq!(driver.socket_name(), None);
+    fn test_shell_executor_command_on_default_server() {
+        let command = ShellCommandExecutor::new().command(&["ls"]);
+        assert_eq!(command.get_args().collect::<Vec<_>>(), ["ls"]);
     }
 
     #[test]
-    fn test_driver_socket_name_some() {
-        let driver = TmuxDriver::new_with_socket("test-session", "test-socket");
-        assert_eq!(driver.socket_name(), Some("test-socket"));
+    fn test_for_client_session_reads_session_name() {
+        let driver = TmuxDriver::for_client_session(
+            MockCommandExecutor::new(),
+            Some("/tmp/tmux-1000/default,1,0"),
+        )
+        .unwrap();
+        assert_eq!(driver.session, "work");
+        assert_eq!(driver.socket, None);
+        assert_eq!(
+            driver.executor.commands.borrow().as_slice(),
+            [["display-message", "-p", "#S"]]
+        );
+    }
+
+    #[test]
+    fn test_for_client_session_outside_tmux() {
+        let result = TmuxDriver::for_client_session(MockCommandExecutor::new(), None);
+        assert!(matches!(result, Err(TmuxError::NotInsideTmux)));
+    }
+
+    #[test]
+    fn test_watch_events_streams_control_mode_events() {
+        let driver = TmuxDriver::with_executor(MockCommandExecutor::new());
+        let (tx, rx) = mpsc::channel();
+
+        driver.watch_events(EventProducer::Nested, tx);
+
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+            TmuxEvent::Exit
+        );
+        assert_eq!(
+            driver.executor.commands.borrow().as_slice(),
+            [["-C", "attach-session", "-t", SESSION_NAME]]
+        );
     }
 
     #[test]
@@ -1296,18 +1292,6 @@ mod tests {
         assert!(resize_cmd.contains(&"%5".to_string()));
         assert!(resize_cmd.contains(&"-x".to_string()));
         assert!(resize_cmd.contains(&"35".to_string()));
-    }
-
-    #[test]
-    fn test_check_inside_tmux_set() {
-        assert!(check_inside_tmux(Some("/tmp/tmux-1000/default,1234,0")).is_ok());
-    }
-
-    #[test]
-    fn test_check_inside_tmux_unset() {
-        let result = check_inside_tmux(None);
-        assert!(result.is_err());
-        assert!(matches!(result.unwrap_err(), TmuxError::NotInsideTmux));
     }
 
     #[test]
