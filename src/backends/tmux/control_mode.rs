@@ -249,7 +249,7 @@ fn backoff(attempt: u32) -> Duration {
 /// Spawns the control-mode client and returns a reader over its stdout.
 fn spawn_reader(mut command: Command) -> std::io::Result<ControlModeReader> {
     let mut child = command
-        // Closing stdin detaches the client, so it stays open until drop.
+        // Closing stdin detaches the client.
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

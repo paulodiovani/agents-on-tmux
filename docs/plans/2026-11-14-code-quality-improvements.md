@@ -228,7 +228,9 @@ explicit lifetimes.
 
 Other modules now reach agents and delegate tools only through the `Agent`
 and `Tool` traits. `ui` still takes the concrete `App`; a trait for what
-rendering needs is left for later.
+rendering needs is left for later. `Window.started_at` is still filled in by
+the TUI, which keeps each window's start time while its pane pid is unchanged;
+the lookup itself is the backend's `Processes`.
 
 ### 5. Tests and CI (small to medium)
 

@@ -447,7 +447,7 @@ impl App {
         self.indices_for_tab(self.active_tab)
     }
 
-    pub(crate) fn indices_for_tab(&self, tab: Tab) -> Vec<usize> {
+    fn indices_for_tab(&self, tab: Tab) -> Vec<usize> {
         self.windows
             .iter()
             .enumerate()
